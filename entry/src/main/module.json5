@@ -11,6 +11,14 @@
     "deliveryWithInstall": true,
     "installationFree": false,
     "pages": "$profile:main_pages",
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.kernel.ALLOW_WRITABLE_CODE_MEMORY"
+      },
+      {
+        "name": "ohos.permission.kernel.DISABLE_CODE_MEMORY_PROTECTION"
+      }
+    ],
     "abilities": [
       {
         "name": "EntryAbility",

@@ -11,3 +11,18 @@
 **/.test
 /.appanalyzer
 .temp
+
+# qemu deps build artifacts
+/deps/download
+/deps/buildroot
+/deps/output
+/deps/temp
+/deps/*/temp
+/deps/*/build
+/deps/*/.stamp
+/deps/*/file.lst
+/entry/libs/*/*.so*
+
+# guest images / firmware blobs (produced by deps or downloaded)
+/images
+/entry/src/main/resources/rawfile/vm
