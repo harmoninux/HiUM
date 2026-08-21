@@ -1,0 +1,96 @@
+// 应用级初始化：固件解包 + AppStorage 公共键。进程可能由 EntryAbility
+// 或某个 VmConsoleAbility 冷启动拉起，两边 onCreate 都必须调一次（幂等）。
+import { common, ConfigurationConstant } from '@kit.AbilityKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
+import { resourceManager } from '@kit.LocalizationKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+
+const DOMAIN = 0x0001;
+const TAG = 'QemuEntry';
+
+/* firmware blobs produced by deps/ (packed as rawfile/vm/...) */
+const FIRMWARE_FILES: string[] = [
+  'bios-256k.bin',
+  'bios.bin',
+  'kvmvapic.bin',
+  'linuxboot.bin',
+  'linuxboot_dma.bin',
+  'vgabios-stdvga.bin',
+  'vgabios-virtio.bin',
+  'vgabios-ramfb.bin',
+  'efi-virtio.rom',
+];
+
+function writeRaw(resMgr: resourceManager.ResourceManager, rawPath: string, dst: string): void {
+  try {
+    if (fs.statSync(dst).size > 0) {
+      return; /* already unpacked */
+    }
+  } catch {
+    /* not there yet */
+  }
+  hilog.info(DOMAIN, TAG, 'unpacking %{public}s', rawPath);
+  const data = resMgr.getRawFileContentSync(rawPath);
+  const fd = fs.openSync(dst, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+  fs.writeSync(fd.fd, data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+  fs.closeSync(fd);
+}
+
+function errStr(err: Object): string {
+  const be = err as BusinessError;
+  return `code=${be.code} msg=${be.message}`;
+}
+
+function tryWriteRaw(resMgr: resourceManager.ResourceManager, rawPath: string, dst: string): boolean {
+  try {
+    writeRaw(resMgr, rawPath, dst);
+    return true;
+  } catch (err) {
+    hilog.error(DOMAIN, TAG, 'unpack %{public}s failed: %{public}s', rawPath, errStr(err));
+    return false;
+  }
+}
+
+function unpackFirmware(ctx: common.UIAbilityContext): boolean {
+  const resMgr = ctx.resourceManager;
+  const vmDir = ctx.filesDir + '/vm';
+  let ok = true;
+  try {
+    if (!fs.accessSync(vmDir)) {
+      fs.mkdirSync(vmDir, true);
+    }
+    if (!fs.accessSync(vmDir + '/keymaps')) {
+      fs.mkdirSync(vmDir + '/keymaps', true);
+    }
+  } catch (err) {
+    hilog.error(DOMAIN, TAG, 'mkdir failed: %{public}s', errStr(err));
+    return false;
+  }
+  for (const name of FIRMWARE_FILES) {
+    ok = tryWriteRaw(resMgr, 'vm/firmware/' + name, vmDir + '/' + name) && ok;
+  }
+  ok = tryWriteRaw(resMgr, 'vm/keymaps/en-us', vmDir + '/keymaps/en-us') && ok;
+  ok = tryWriteRaw(resMgr, 'vm/alpine-virt.iso', vmDir + '/alpine-virt.iso') && ok;
+  hilog.info(DOMAIN, TAG, 'firmware unpacked to %{public}s, ok=%{public}s', vmDir, String(ok));
+  return ok;
+}
+
+let bootstrapped = false;
+
+export function ensureAppBootstrap(ctx: common.UIAbilityContext): void {
+  if (bootstrapped) {
+    return;
+  }
+  bootstrapped = true;
+  try {
+    ctx.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+  } catch (err) {
+    hilog.error(DOMAIN, TAG, 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
+  }
+  const ok = unpackFirmware(ctx);
+  AppStorage.setOrCreate('filesDir', ctx.filesDir);
+  AppStorage.setOrCreate('vmDataDir', ctx.filesDir + '/vm');
+  AppStorage.setOrCreate('firmwareReady', ok);
+  hilog.info(DOMAIN, TAG, 'app bootstrap done, firmwareReady=%{public}s', String(ok));
+}

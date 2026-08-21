@@ -1,5 +1,5 @@
 // 虚拟机配置页：普通字段 + 高级折叠区（TCG/自定义参数）。
-// 只编辑 VmProfile JSON，保存后由列表页/Console 消费。
+// 只编辑 VmProfile JSON，保存后由列表页/console 窗口消费。
 import { promptAction } from '@kit.ArkUI';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import napiModule from 'libentry.so';

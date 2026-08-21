@@ -1,7 +1,7 @@
-// 应用导航壳：列表页为根，edit/console 为 NavDestination。
+// 应用导航壳：列表页为根，edit 为 NavDestination。console 已迁出为每台 VM
+// 独立的 VmConsoleAbility 窗口（见 VmList.openConsole）。
 import { VmList } from './VmList';
 import { VmEdit } from './VmEdit';
-import { Console } from './Console';
 import { VmProfile } from '../lib/vmprofile';
 
 @Entry
@@ -14,8 +14,6 @@ struct Index {
     NavDestination() {
       if (name === 'edit') {
         VmEdit({ profile: param as VmProfile })
-      } else if (name === 'console') {
-        Console({ profile: param as VmProfile })
       }
     }
     .hideTitleBar(true)

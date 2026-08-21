@@ -2,6 +2,7 @@
   "module": {
     "name": "entry",
     "type": "entry",
+    "srcEntry": "./ets/myabilitystage/MyAbilityStage.ets",
     "description": "$string:module_desc",
     "mainElement": "EntryAbility",
     "deviceTypes": [
@@ -42,6 +43,20 @@
             ]
           }
         ]
+      },
+      {
+        /* 每台 VM 一个实例、一个独立自由窗口；specified 模式按 vmId
+         * （见 MyAbilityStage.onAcceptWant）归并，重复打开复用并置前 */
+        "name": "VmConsoleAbility",
+        "srcEntry": "./ets/vmconsoleability/VmConsoleAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:layered_image",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:startIcon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": false,
+        "launchType": "specified",
+        "removeMissionAfterTerminate": true
       }
     ],
     "extensionAbilities": [

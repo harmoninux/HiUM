@@ -192,6 +192,95 @@ phone 形态下 OHNativeWindow 不能跨 Binder 传（退化为 shm 渲染），
 实施期踩到的三个新坑（都已修，见「踩坑记录」）：转场期挂窗必崩、
 resize 早于子进程启动会丢失、EGL swap 失败需重建 surface 重试。
 
+### 7. 每 VM 独立窗口：VmConsoleAbility（specified 多实例）
+
+目标：每台 VM 的 console 从 EntryAbility 的 Navigation 栈迁出，改为
+**系统级独立窗口**（独立任务、可同屏并存），Pad 上沉浸式显示。参考
+wineohos 的 PC 模式窗口（VirtualDesktopAbility/DesktopAbility）与
+WineWindowAbility（multiton 多实例）实现。
+
+**机制选型：`launchType: "specified"`**（没用 wineohos 的 multiton）：
+
+- `MyAbilityStage.onAcceptWant`（module.json5 的 `srcEntry` 注册）
+  返回 `vmconsole_<vmId>` 作为实例 key：同一 vmId 重复「进入」复用
+  已有实例并置前（onNewWant），不同 vmId 各自开新窗口——正好是
+  「一台 VM 一个 console」的语义。multiton 每次 startAbility 都新建
+  实例，重复点同一台 VM 会开出重复窗口。
+- 配 `removeMissionAfterTerminate: true`（官方对 specified 的建议，
+  否则任务列表会残留同 key 的死任务、冷启动无法复用）。
+
+**进程模型：所有 UIAbility 同进程**（不配 `process` 字段）。libentry.so
+只加载一次，ncp_client/qmp 的 vmId 注册表天然共享，**native 侧零改动**。
+
+**传参链路**：列表页 `startAbility(want.parameters={vmId, vmName})` →
+VmConsoleAbility.onCreate 读取；ArkUI 页面拿不到 want，用 pending vmId
+FIFO（loadContent 前入队、页面 aboutToAppear 同步出队，同在 UI 线程
+无并发，参考 wineohos 的 setPendingToplevel 模式），页面再按 vmId 从
+VmStore 自载 profile（不再依赖导航参数传对象）。
+
+**公共初始化**：抽到 `lib/bootstrap.ets` 的 `ensureAppBootstrap()`（模块级
+幂等）。进程可能由 VmConsoleAbility 冷启动（如从任务列表恢复 console
+窗口），固件解包 + AppStorage 公共键不能只在 EntryAbility.onCreate 做。
+
+**沉浸式**：console 窗口默认 `setWindowLayoutFullScreen(true)` +
+`setSpecificSystemBarEnabled('status'/'navigationIndicator', false)`，
+画面铺满并隐藏系统栏；工具条「全屏/退出全屏」按钮切系统栏显隐。
+`setWindowTitle(VM 名)` 对 2in1 自由窗口有效（标题栏可拖动/缩放/关闭）。
+
+**关窗 ≠ 关机**：VM 在 NCP 子进程里继续跑；重开窗口时 enterVm 检测到
+running 走 ATTACH 重新挂窗，画面即恢复。
+
+**进展与问题**（2026-08-21，已在 api24 模拟器实物回归）：
+
+- **已验证**：`aa start` 直接拉起独立 console 窗口成功，want 参数
+  vmId 正确到达 Ability/页面（issue① 的 pending FIFO 传参生效，页面
+  按 vmId 自载 profile、正常 startVm 引导 Alpine 到 login——若 vmId
+  传空会停在「配置不存在或已删除」且不会启动，故可作判据）。
+- **问题①（已修复并回归）**：`loadContent(url, LocalStorage{vmId})`
+  的 `@LocalStorageProp('vmId')` 取到空串；已按 wineohos 做法改为
+  pending FIFO（`loadContent` 前 `pushPendingVmId`，页面
+  `aboutToAppear` 同步 `takePendingVmId`），回归通过。
+- **问题②（已定性，忽略）**：`setWindowTitle` 在平板形态全屏窗口报
+  1300002（无标题栏），仅 2in1 自由窗口有效，best-effort 即可。
+- 双 VM 窗口并存：两个不同 vmId → 两个独立 mission（`aa dump -l`
+  可见 VmConsoleAbility ×2）+ 两个独立 NCP 子进程（`Native_libqemu_child0/1`），
+  各自渲染不同画面（一台 Alpine 控制台、一台 SeaBIOS/iPXE）。
+- 同 vmId 重复打开：`aa start` 两次同 vmId → 仍只有一个 mission
+  （实例被 `onNewWant` 复用置前，不重复开窗）。
+- 关窗后 VM 存活（架构保证实测）：VM 跑在独立 NCP 子进程（应用 UI
+  进程之外的 `Native_libqemu_childN`），重开同 vmId 窗口复用 mission
+  且**子进程 pid 不变**（同一 boot 会话未重启，即重新挂窗而非新启 VM）。
+- 沉浸式：窗口默认 `setWindowLayoutFullScreen(true)` + 隐藏状态栏/导航栏；
+  工具条「退出全屏」↔「全屏」切换系统栏显隐，截图/`dumpLayout` 确认
+  系统栏时钟/电量节点随按钮出现/消失。
+- **新增发现①（已修复，2026-08-21）**：VM 的 qemu 在窗口还开着时退出
+  （guest 内 `quit`、ACPI 关机、强制断电、意外崩溃一律如此），列表页再点
+  「进入/启动」不会自动重启——specified 实例被 `onNewWant` 复用、页面不重跑
+  `enterVm→startVm`，窗口停在「已关机」+ 最后一帧且无重启按钮。
+  **解法：统一「销毁窗口」**——窗口语义收敛为「存活 VM 的视图」：
+  `VmConsole.ets` 的 `onQmpEvent` 收到 `SHUTDOWN`/`QMP_DISCONNECT` 即
+  `terminateSelf()`（`removeMissionAfterTerminate:true` 连 mission 一起回收）；
+  下次从列表「进入」必走**全新窗口**→`enterVm`（VM 未运行）→`startVm`
+  自动重启，无需再在页面补自愈逻辑。主动关机（强制断电/ACPI/quit）与
+  意外退出一视同仁。
+  设备回归矩阵（api24 模拟器）：
+  - **销毁窗口**：强制断电（QMP `quit`→`QMP_DISCONNECT`）与 guest
+    `poweroff`（真实 `SHUTDOWN` 事件）都销毁窗口并置「已关机」；ACPI
+    `system_powerdown` 在 Alpine 上无响应（guest 默认忽略 ACPI 电源键），
+    VM 存活所以窗口保留——属 guest 行为而非逻辑缺陷。
+  - **不销毁**：暂停(`stop`)/恢复(`cont`)/重启(`system_reset`)/Ctrl+Alt+Del
+    均不误触 closeWindow（窗口保留、状态正确翻转）。
+  - **重启循环**：死亡后列表点「启动」（或再次 `aa start`）→ 全新窗口 →
+    `enterVm` 未运行 → `startVm` → 子进程更换、重新引导 Alpine。
+  - **多实例隔离**：销毁 VM#2 时 VM#1 的窗口（mission）与子进程均不受影响。
+  注：shell 侧 `kill` 子进程因 uid 差异不可行，测试用 QMP quit / guest poweroff。
+- **新增发现②**：`uitest uiInput keyEvent Back` 的返回键会**进 guest**
+  （走键盘注入），不是窗口管理级返回，不能用来关窗口，且可能误操作
+  guest（曾在 iPXE 下把该 VM 的 qemu 触发退出）。
+- **局限**：平板形态全屏窗口无关闭按钮，hdc 侧无 `aa`/`wm` 级关窗命令，
+  无法脚本化触发「真·点关窗」；「关窗→重开→画面恢复」需真实 2in1
+  自由窗口或用户在设备上手滑（上述子进程存活 + 重开不重启已作为核心依据）。
+
 ## 目录
 
 ```

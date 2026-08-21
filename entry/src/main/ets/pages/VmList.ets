@@ -1,7 +1,10 @@
 // 虚拟机列表页（首页）：卡片 + 新建/编辑/删除/启动。
-// 多实例：每台 VM 独立子进程，可同时运行多台（受内存约束）。
+// 多实例：每台 VM 独立子进程，可同时运行多台（受内存约束）；
+// console 为每台 VM 一个 VmConsoleAbility 独立窗口（specified 模式按 vmId 归并）。
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { promptAction } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import napiModule from 'libentry.so';
 import {
   VmProfile, VmStore,
@@ -70,7 +73,15 @@ export struct VmList {
   }
 
   private openConsole(p: VmProfile): void {
-    this.navStack.pushPath({ name: 'console', param: p });
+    /* 拉起（或复用并置前）该 VM 的独立 console 窗口；VM 未运行则由窗口页自启 */
+    const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    ctx.startAbility({
+      bundleName: ctx.abilityInfo.bundleName,
+      abilityName: 'VmConsoleAbility',
+      parameters: { vmId: p.id, vmName: p.name },
+    }).catch((err: BusinessError) => {
+      promptAction.showToast({ message: '打开窗口失败: ' + err.code });
+    });
   }
 
   private confirmDelete(p: VmProfile): void {
