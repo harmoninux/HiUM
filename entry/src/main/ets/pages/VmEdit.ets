@@ -14,6 +14,9 @@ const napi = napiModule as DiskNapi;
 
 const ARCH_OPTIONS: VmArch[] = ['x86_64', 'i386', 'aarch64'];
 const VGA_OPTIONS: VgaType[] = ['std', 'virtio'];
+/* 系统盘容量档位（GB）：指数翻倍进档，1→256 覆盖三个数量级。
+ * Slider 滑的是索引（线性），显示的是档位值（指数），见磁盘块。 */
+const DISK_SIZES: number[] = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 
 @Component
 export struct VmEdit {
@@ -30,7 +33,7 @@ export struct VmEdit {
   @State diskPath: string = '';
   @State diskGB: number = 8;
   @State diskAlloc: string = 'dynamic'; /* dynamic|fixed → qemu-img preallocation=off|falloc */
-  @State diskNew: boolean = false; /* 在「保存」时才真正 create（取消不留孤儿盘） */
+  @State diskCreate: boolean = false; /* 「启用系统盘」开关：开 = 保存时建盘，关 = 仅光盘/不加盘 */
   @State cdromPath: string = '';
   @State bootFromCdrom: boolean = false;
   @State vga: VgaType = 'std';
@@ -66,7 +69,7 @@ export struct VmEdit {
     return i >= 0 ? path.substring(i + 1) : path;
   }
 
-  /* 用户点「创建」只是标记意图（diskNew）；真正创建在点「保存」时发生，取消不留孤儿盘 */
+  /* 用户打开「启用系统盘」开关；真正创建在点「保存」时发生，取消不留孤儿盘 */
   private createDiskNow(): boolean {
     if (!this.profile) {
       return false;
@@ -111,8 +114,8 @@ export struct VmEdit {
     if (!this.profile) {
       return;
     }
-    /* 用户创建了新的系统盘：保存时才真正建盘（建失败不保存，避免半成品配置） */
-    if (this.diskNew && !this.diskPath) {
+    /* 用户启用系统盘：保存时才真正建盘（建失败不保存，避免半成品配置） */
+    if (this.diskCreate && !this.diskPath) {
       if (!this.createDiskNow()) {
         return;
       }
@@ -219,11 +222,14 @@ export struct VmEdit {
                 Button('移除').focusable(false).fontSize(12)
                   .onClick(() => {
                     this.diskPath = '';
-                    this.diskNew = false;
+                    this.diskCreate = false;
                   })
+              } else {
+                Toggle({ type: ToggleType.Switch, isOn: this.diskCreate })
+                  .onChange((v: boolean) => this.diskCreate = v)
               }
             }
-            if (!this.diskPath) {
+            if (!this.diskPath && this.diskCreate) {
               Row({ space: 8 }) {
                 Text('分配方式').fontSize(13).fontColor('#ff666666')
                 Text('动态分配').fontSize(13)
@@ -234,24 +240,20 @@ export struct VmEdit {
                   .onClick(() => this.diskAlloc = 'fixed')
               }
               Row({ space: 8 }) {
-                Slider({ value: this.diskGB, min: 1, max: 32, step: 1 })
+                Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
+                  min: 0, max: DISK_SIZES.length - 1, step: 1 })
                   .layoutWeight(1)
-                  .onChange((v: number) => this.diskGB = v)
+                  .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
                 Text(`${Math.round(this.diskGB)}GB`).fontSize(13)
-                if (this.diskNew) {
-                  Button('取消').focusable(false).fontSize(12)
-                    .fontColor('#ff666666')
-                    .onClick(() => this.diskNew = false)
-                } else {
-                  Button('创建').focusable(false).fontSize(12)
-                    .onClick(() => this.diskNew = true)
-                }
               }
-              if (this.diskNew) {
-                Text('保存时将创建 ' + Math.round(this.diskGB) + 'GB ' +
-                  (this.diskAlloc === 'fixed' ? '固定大小' : '动态分配') + ' 系统盘')
+              Text('保存时创建 ' + Math.round(this.diskGB) + 'GB ' +
+                (this.diskAlloc === 'fixed' ? '固定大小' : '动态分配') + ' 系统盘')
+                .fontSize(12)
+                .fontColor('#ff2e7d32')
+              if (this.diskAlloc === 'fixed') {
+                Text('固定大小：保存时立即预留整块空间，大容量请优先动态分配')
                   .fontSize(12)
-                  .fontColor('#ff2e7d32')
+                  .fontColor('#ff9900')
               }
             }
           }.alignItems(HorizontalAlign.Start).padding(12)

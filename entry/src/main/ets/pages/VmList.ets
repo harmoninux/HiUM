@@ -172,7 +172,6 @@ export struct VmList {
     .padding(10)
     .backgroundColor(Color.White)
     .borderRadius(8)
-    .onClick(() => this.openConsole(p))
     .bindContextMenu(this.cardMenu(p), ResponseType.LongPress)
   }
 
