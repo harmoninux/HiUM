@@ -89,6 +89,18 @@ export struct VmList {
     return this.runningIds[p.id] === true;
   }
 
+  /* 该 VM 引用的媒体（系统盘/光盘）文件是否失效；空串 = 正常 */
+  private mediaIssue(p: VmProfile): string {
+    const bad: string[] = [];
+    if (p.media.diskPath.length > 0 && !fs.accessSync(p.media.diskPath)) {
+      bad.push('系统盘');
+    }
+    if (p.media.cdromPath.length > 0 && !fs.accessSync(p.media.cdromPath)) {
+      bad.push('光盘');
+    }
+    return bad.join('、');
+  }
+
   private openConsole(p: VmProfile): void {
     /* 拉起（或复用并置前）该 VM 的独立 console 窗口；VM 未运行则由窗口页自启 */
     const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -171,6 +183,9 @@ export struct VmList {
           if (this.isRunning(p)) {
             Text('运行中').fontSize(11).fontColor('#ff2e7d32')
           }
+          if (this.mediaIssue(p).length > 0) {
+            Text('⚠ 媒体失效').fontSize(11).fontColor(Color.Red)
+          }
         }
         Text(`${p.machine.arch} · ${p.runtime.memoryMB}MB · ${p.runtime.cpus}核` +
           (p.media.cdromPath ? ' · 光盘' : '') + (p.media.diskPath ? ' · 磁盘' : ''))
@@ -198,6 +213,12 @@ export struct VmList {
       Row() {
         Text('虚拟机').fontSize(24).fontWeight(FontWeight.Bold)
         Blank()
+        Button('存储')
+          .focusable(false)
+          .fontSize(14)
+          .fontColor('#ff007dff')
+          .margin({ right: 12 })
+          .onClick(() => this.navStack.pushPath({ name: 'storage' }))
         Button('+ 新建')
           .focusable(false)
           .fontSize(14)

@@ -3,6 +3,7 @@
 import { VmList } from './VmList';
 import { VmEdit } from './VmEdit';
 import { VmManage } from './VmManage';
+import { StorageOverview } from './StorageOverview';
 import { VmProfile } from '../lib/vmprofile';
 
 @Entry
@@ -17,6 +18,8 @@ struct Index {
         VmEdit({ profile: param as VmProfile })
       } else if (name === 'manage') {
         VmManage({ profile: param as VmProfile })
+      } else if (name === 'storage') {
+        StorageOverview()
       }
     }
     .hideTitleBar(true)
