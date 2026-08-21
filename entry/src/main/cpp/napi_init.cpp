@@ -1,8 +1,8 @@
+/* napi 入口（父进程/ArkUI 侧）。VM 实际运行在 NCP 子进程（libqemu_child.so），
+ * 本文件的 VM/渲染/输入绑定全部经 ncp_client 走 IPC；QMP 保留 loopback TCP
+ * （qemu 在子进程里监听 127.0.0.1，父进程直连，无需转发）。 */
 #include "napi/native_api.h"
-#include "vm.h"
-#include "renderer.h"
-#include "input.h"
-#include "fb.h"
+#include "ncp_client.h"
 #include "qmp.h"
 
 #include <fcntl.h>
@@ -11,7 +11,6 @@
 
 #include <cerrno>
 #include <cstring>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -20,11 +19,12 @@
 #define LOG_DOMAIN 0x0007
 #define LOG_TAG "QemuNapi"
 
-/* startVm(arch: string, args: string[]): number */
+/* startVm(arch: string, args: string[], surfaceId: bigint): number
+ * 拉起 NCP 子进程跑 VM（异步；结果经 vmRunning()/日志体现） */
 static napi_value StartVm(napi_env env, napi_callback_info info)
 {
-    size_t argc = 2;
-    napi_value args[2] = {nullptr};
+    size_t argc = 3;
+    napi_value args[3] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
 
     char archBuf[32] = {0};
@@ -44,7 +44,11 @@ static napi_value StartVm(napi_env env, napi_callback_info info)
         argList.push_back(std::move(s));
     }
 
-    int ret = vm_start(archBuf, argList);
+    int64_t surfaceId = 0;
+    bool lossless = false;
+    napi_get_value_bigint_int64(env, args[2], &surfaceId, &lossless);
+
+    int ret = ncp_client_start(archBuf, argList, surfaceId);
     napi_value result;
     napi_create_int32(env, ret, &result);
     return result;
@@ -54,19 +58,11 @@ static napi_value StartVm(napi_env env, napi_callback_info info)
 static napi_value VmRunning(napi_env env, napi_callback_info info)
 {
     napi_value result;
-    napi_get_boolean(env, vm_running(), &result);
+    napi_get_boolean(env, ncp_client_running(), &result);
     return result;
 }
 
-/* vmSpent(): boolean — true 后必须重启进程才能再跑 VM */
-static napi_value VmSpent(napi_env env, napi_callback_info info)
-{
-    napi_value result;
-    napi_get_boolean(env, vm_spent(), &result);
-    return result;
-}
-
-/* createSurface(surfaceId: bigint): number */
+/* createSurface(surfaceId: bigint): number —— 给活动子进程挂窗（或仅记录） */
 static napi_value CreateSurface(napi_env env, napi_callback_info info)
 {
     size_t argc = 1;
@@ -77,46 +73,35 @@ static napi_value CreateSurface(napi_env env, napi_callback_info info)
     bool lossless = false;
     napi_get_value_bigint_int64(env, args[0], &surfaceId, &lossless);
 
-    int ret = renderer_create_surface(surfaceId);
+    int ret = ncp_client_attach(surfaceId);
     napi_value result;
     napi_create_int32(env, ret, &result);
     return result;
 }
 
-/* resizeSurface(surfaceId: bigint, w: number, h: number): number */
+/* resizeSurface(w: number, h: number): number */
 static napi_value ResizeSurface(napi_env env, napi_callback_info info)
 {
-    size_t argc = 3;
-    napi_value args[3] = {nullptr};
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
 
-    int64_t surfaceId = 0;
-    bool lossless = false;
-    napi_get_value_bigint_int64(env, args[0], &surfaceId, &lossless);
     int32_t w = 0, h = 0;
-    napi_get_value_int32(env, args[1], &w);
-    napi_get_value_int32(env, args[2], &h);
+    napi_get_value_int32(env, args[0], &w);
+    napi_get_value_int32(env, args[1], &h);
 
-    int ret = renderer_resize_surface(surfaceId, w, h);
+    ncp_client_resize(w, h);
     napi_value result;
-    napi_create_int32(env, ret, &result);
+    napi_create_int32(env, 0, &result);
     return result;
 }
 
-/* destroySurface(surfaceId: bigint): number */
+/* destroySurface(): number —— Console 离开，子进程摘窗（VM 继续后台跑） */
 static napi_value DestroySurface(napi_env env, napi_callback_info info)
 {
-    size_t argc = 1;
-    napi_value args[1] = {nullptr};
-    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-
-    int64_t surfaceId = 0;
-    bool lossless = false;
-    napi_get_value_bigint_int64(env, args[0], &surfaceId, &lossless);
-
-    int ret = renderer_destroy_surface(surfaceId);
+    ncp_client_detach();
     napi_value result;
-    napi_create_int32(env, ret, &result);
+    napi_create_int32(env, 0, &result);
     return result;
 }
 
@@ -131,7 +116,7 @@ static napi_value SendPointer(napi_env env, napi_callback_info info)
     napi_get_value_int32(env, args[0], &x);
     napi_get_value_int32(env, args[1], &y);
     napi_get_value_int32(env, args[2], &buttons);
-    input_send_pointer(x, y, buttons);
+    ncp_client_pointer(x, y, buttons);
     return nullptr;
 }
 
@@ -146,7 +131,7 @@ static napi_value SendKey(napi_env env, napi_callback_info info)
     bool down = false;
     napi_get_value_int32(env, args[0], &qcode);
     napi_get_value_bool(env, args[1], &down);
-    input_send_key(qcode, down);
+    ncp_client_key(qcode, down);
     return nullptr;
 }
 
@@ -209,34 +194,29 @@ static napi_value SetQmpEventCallback(napi_env env, napi_callback_info info)
     return nullptr;
 }
 
-/* captureScreen(): { width, height, pixels: ArrayBuffer(RGBA_8888) } | null */
+/* captureScreen(): { width, height, pixels: ArrayBuffer(RGBA_8888) } | null
+ * 子进程缩放到 ≤512 宽后回传（缩略图足够，且受 binder 事务大小限制） */
 static napi_value CaptureScreen(napi_env env, napi_callback_info info)
 {
-    std::lock_guard<std::mutex> lk(g_fb.mu);
-    if (g_fb.w <= 0 || g_fb.h <= 0 || g_fb.back.empty()) {
+    int w = 0, h = 0;
+    std::vector<uint8_t> pixels;
+    if (ncp_client_screenshot(512, &w, &h, pixels) != 0) {
         napi_value result;
         napi_get_null(env, &result);
         return result;
     }
-    size_t npix = g_fb.back.size();
     void *data = nullptr;
     napi_value buffer;
-    napi_create_arraybuffer(env, npix * sizeof(uint32_t), &data, &buffer);
-    /* back is X8R8G8B8; ArkTS PixelMap wants RGBA_8888: swap R/B, force A=0xff */
-    const uint32_t *src = g_fb.back.data();
-    uint32_t *dst = static_cast<uint32_t *>(data);
-    for (size_t i = 0; i < npix; i++) {
-        uint32_t p = src[i];
-        dst[i] = 0xff000000u | (p & 0x0000ff00u) | ((p >> 16) & 0xffu) | ((p & 0xffu) << 16);
-    }
+    napi_create_arraybuffer(env, pixels.size(), &data, &buffer);
+    memcpy(data, pixels.data(), pixels.size());
 
     napi_value result;
     napi_create_object(env, &result);
-    napi_value w, h;
-    napi_create_int32(env, g_fb.w, &w);
-    napi_create_int32(env, g_fb.h, &h);
-    napi_set_named_property(env, result, "width", w);
-    napi_set_named_property(env, result, "height", h);
+    napi_value wv, hv;
+    napi_create_int32(env, w, &wv);
+    napi_create_int32(env, h, &hv);
+    napi_set_named_property(env, result, "width", wv);
+    napi_set_named_property(env, result, "height", hv);
     napi_set_named_property(env, result, "pixels", buffer);
     return result;
 }
@@ -274,7 +254,6 @@ static napi_value Init(napi_env env, napi_value exports)
     napi_property_descriptor desc[] = {
         { "startVm", nullptr, StartVm, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "vmRunning", nullptr, VmRunning, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "vmSpent", nullptr, VmSpent, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "createSurface", nullptr, CreateSurface, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "resizeSurface", nullptr, ResizeSurface, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "destroySurface", nullptr, DestroySurface, nullptr, nullptr, nullptr, napi_default, nullptr },

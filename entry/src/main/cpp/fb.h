@@ -35,4 +35,8 @@ void fb_update_rect(int x, int y, int w, int h);
  * stale ds trips qemu's assert(!dcl->ds). safe to call anytime. */
 void fb_reset();
 
+/* 当前帧转 RGBA_8888（含最近邻缩放到 ≤maxW 宽，maxW<=0 不缩放）。
+ * 无帧时返回空 vector。 */
+std::vector<uint32_t> fb_capture_rgba(int maxW, int *outW, int *outH);
+
 #endif /* FB_H */

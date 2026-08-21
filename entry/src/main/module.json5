@@ -31,7 +31,6 @@
         "label": "$string:EntryAbility_label",
         "startWindowIcon": "$media:startIcon",
         "startWindowBackground": "$color:start_window_background",
-        "recoverable": true,
         "exported": true,
         "skills": [
           {

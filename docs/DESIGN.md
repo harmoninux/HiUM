@@ -6,21 +6,30 @@
 ## 总体架构
 
 ```
-┌────────────────────────────── 应用进程 ──────────────────────────────┐
-│ ArkTS (Index.ets)                                                    │
-│   └─ XComponent(SURFACE) ── surfaceId ──┐                            │
-│                                          ▼                           │
-│ libentry.so (napi)                       renderer.cpp                │
-│   ├─ vm.cpp      VM 线程: dlopen(libqemu-system-<arch>.so)           │
-│   │              调用 qemu_system_entry(argc, argv)                   │
-│   ├─ fb.cpp      DCL 回调: gfx_switch/gfx_update/refresh              │
-│   │              qemu 显存 → X8R8G8B8 back buffer（脏带合并）          │
-│   ├─ renderer.cpp 渲染线程: back buffer → GL 纹理 → EGL 上屏          │
-│   │              （letterbox 保持纵横比，vsync 限帧，无脏帧不 swap）    │
-│   └─ input.cpp   触摸/键盘 → qemu_input_queue_abs/btn /               │
-│                             qemu_input_event_send_key_qcode           │
+┌──────────────────── 应用进程（ArkUI，libentry.so）────────────────────┐
+│ ArkTS (VmList/VmEdit/Console)                                        │
+│   └─ XComponent(SURFACE) ── surfaceId ─┐                             │
+│ napi_init.cpp                          │                             │
+│   ├─ ncp_client.cpp ── IPC (IPCKit/Binder, qemu_ipc.h 协议) ─┐       │
+│   └─ qmp.cpp ── QMP loopback TCP ──────────────────────┐     │       │
+└────────────────────────────────────────────────────────┼─────┼───────┘
+                                                          │     │
+┌──────────── qemu 子进程（NCP，libqemu_child.so）────────┼─────┼───────┐
+│ qemu_child.cpp  IPC 分发 + 生命周期（一进程一轮 VM）     │     │       │
+│   ├─ vm.cpp      VM 线程: dlopen(libqemu-system-*.so) ◄─┘     │       │
+│   │              调用 qemu_system_entry(argc, argv)           │       │
+│   ├─ fb.cpp      DCL 回调: qemu 显存 → X8R8G8B8 back buffer   │       │
+│   ├─ renderer.cpp 渲染线程: back buffer → GL 纹理 → EGL 上屏  │       │
+│   │              （窗口经 parcel 传来；letterbox，脏带合并）   │       │
+│   └─ input.cpp   触摸/键盘 → qemu_input_*（IPC 转发）         │       │
+│        ▲ OHNativeWindow 由父进程创建、WriteToParcel 传入 ◄────┘       │
+│        QMP server 在子进程监听 127.0.0.1，父进程直连 ◄────────────────┘
 └───────────────────────────────────────────────────────────────────────┘
 ```
+
+VM 退出（QMP quit / guest 关机）→ qemu_system_entry 返回 → 子进程
+MainProc 退出 → 进程结束。再次启动 = 父进程另起一个**全新的 NCP 子进程**，
+因此不再有「一进程一轮 VM」的进程重启问题。
 
 ## 关键技术决策
 
@@ -110,34 +119,82 @@ napi；native 用 `OH_NativeWindow_CreateNativeWindowFromSurfaceId()`
   截图、状态文本）。返回列表时 VM 继续在后台跑。
 
 **QMP 通道**：VM 启动参数带 `-qmp tcp:127.0.0.1:<port>,server=on,
-wait=off`；native `qmp.cpp` 是极简 QMP TCP 客户端（每端口一条
-连接、命令串行、events 经 tsfn 推给 ArkTS）。UI 包装的电源功能：
+wait=off`；父进程 `qmp.cpp` 是极简 QMP TCP 客户端（每端口一条
+连接、命令串行、events 经 tsfn 推给 ArkTS），直连子进程里 qemu 的
+loopback 监听（NCP NORMAL 隔离共享网络）。UI 包装的电源功能：
 暂停/恢复（`stop`/`cont`）、复位（`system_reset`）、强制断电
 （`quit`）、Ctrl+Alt+Del（`send-key ctrl-alt-delete`）。SHUTDOWN /
 STOP / RESUME 等事件驱动 UI 状态。**必须声明
 `ohos.permission.INTERNET`**，否则 qemu 建 socket 即 EPERM 退出。
 
-**截图**：napi `captureScreen()` 从 fb.cpp 的 back buffer 取出
-当前帧转 RGBA_8888，ArkTS 侧包成 PixelMap `packToFile` 存为
-列表页缩略图。
+**截图**：napi `captureScreen()` 经 IPC 让子进程把 back buffer 当前帧
+缩放到 ≤512 宽转 RGBA_8888 回传（binder 事务大小限制），ArkTS 侧包成
+PixelMap `packToFile` 存为列表页缩略图。
 
-**一进程一轮 VM 的限制**：qemu 的 `qemu_add_opts`/
-`qemu_add_drive_opts` 向静态数组重复注册会 `abort()`，且 dlclose
-后 TLS 析构会跳到已卸载代码——因此同一进程无法安全地第二次进入
-`qemu_system_entry`。折衷方案：VM 退出后 native 置 `vm_spent`，
-Console 再点启动时写入 `vms/.autostart` 标记并调
-`appRecovery.restartApp()`（module.json5 需 `"recoverable": true`），
-新进程由列表页 `takeAutostart()` 接管自动进 Console 启动 VM。
-注意 `restartApp` 受平台限频（约 1 分钟一次），被限频时是静默
-no-op——此时用户手动重开应用即可，autostart 标记同样生效。
-彻底解法是把 qemu 放进独立子进程（fork + 共享帧缓冲），留待后续。
+**一进程一轮 VM 的限制（已由 NCP 子进程架构解决）**：qemu 的
+`qemu_add_opts`/`qemu_add_drive_opts` 向静态数组重复注册会 `abort()`，
+且 dlclose 后 TLS 析构会跳到已卸载代码——同一进程无法安全地第二次
+进入 `qemu_system_entry`。因此每次启动 VM 都拉起一个**新的 NCP 子进程**
+（见下节），VM 退出子进程随之退出，再启动无需任何重启。
+
+### 6. 子进程架构（NCP）：选型与实施
+
+目标：qemu 放进独立子进程（每次启动 VM 都是干净进程，绕开「一进程
+一轮 VM」），且子进程**直接渲染**到应用 XComponent，不走共享内存
+帧缓冲。选型做过三轮 spike（spike 代码已删，结论保留）：
+
+1. **裸 fork + surfaceId**：排除。fork 本身可用，子进程里
+   `CreateNativeWindowFromSurfaceId` 也能成功（命中的是 fork 继承的
+   进程内 surface 注册表），但首次 `RequestBuffer` 时 SIGSEGV——
+   Binder 应答 parcel 带 fd（`Parcel::InjectOffsets`），继承自父进程
+   的 libipc_single 状态在子进程里是残缺的（崩溃栈：
+   `BinderInvoker::HandleReply → BufferClientProducer::RequestBufferCommon`）。
+2. **NCP + 裸 surfaceId**：排除。`OH_Ability_StartNativeChildProcess`
+   拉起的干净子进程里 `CreateNativeWindowFromSurfaceId` 返回
+   `NATIVE_ERROR_INVALID_ARGUMENTS`（40001000）——surfaceId 的查找
+   依赖进程内注册表，对三方应用跨进程不成立（相机/AVPlayer 的跨进程
+   渲染是框架在应用进程内建 window 再 parcel 给系统服务，不是裸 id）。
+3. **NCP + IPC parcel 传窗口对象**：**可行，即现行架构**（spike 截图
+   docs/screenshot-ncp-render.jpeg）。
+
+wineohos 的 virgl_child 走的也是第 3 条（其 C6 协议）；注意他们记录
+phone 形态下 OHNativeWindow 不能跨 Binder 传（退化为 shm 渲染），
+2in1/Pad/模拟器形态可用。
+
+**实施**（已落地）：
+
+- 父进程（`libentry.so`）：`ncp_client.cpp` 封装
+  `OH_Ability_CreateNativeChildProcess("libqemu_child.so")` 与全部
+  IPC 请求；`qmp.cpp` 不变（QMP 走 loopback TCP 直连子进程里的 qemu，
+  `NCP_ISOLATION_MODE_NORMAL` 共享网络与沙箱）。
+- 子进程（`libqemu_child.so`）：`qemu_child.cpp` 导出
+  `NativeChildProcess_OnConnect`/`MainProc`，跑 vm/fb/renderer/input
+  全套；`MainProc` 阻塞到「VM 一轮结束」或收到 kShutdown 或父进程
+  消失（stub destroy 回调），返回后进程退出。
+- IPC 协议（`qemu_ipc.h`，每请求带版本号）：START（arch+argv+窗口
+  parcel）/ATTACH/DETACH/RESIZE/POINTER/KEY/QUERY/SCREENSHOT（子进程
+  缩放到 ≤512 宽 RGBA 回传，受 binder 事务大小限制）/SHUTDOWN。
+- 窗口传递：父进程用 surfaceId `CreateNativeWindowFromSurfaceId` 建
+  OHNativeWindow → `OH_NativeWindow_WriteToParcel` 发给子进程 → 子进程
+  `ReadFromParcel` 取出后建 EGL 渲染（GL letterbox，与原先同一代码）。
+- TCG JIT 的可执行内存 ACL 在子进程正常生效（module.json5 的
+  `kernel.ALLOW_WRITABLE_CODE_MEMORY` 等按 uid 继承）。
+- `vmRunning()` 自愈：NCP 的 exit 回调实测不可靠（有不触发的情况），
+  改为每次调用都向子进程发 QUERY，子进程死了（发送失败）或 VM 已退出
+  （running=0）就就地清理状态——关机后再启动因此总能拉起新子进程。
+
+实施期踩到的三个新坑（都已修，见「踩坑记录」）：转场期挂窗必崩、
+resize 早于子进程启动会丢失、EGL swap 失败需重建 surface 重试。
 
 ## 目录
 
 ```
 deps/            QEMU 及依赖的交叉编译（HiSH 体系）
 entry/libs/      deps 产物：libqemu-system-{x86_64,i386,aarch64}.so 等
-entry/src/main/cpp/    napi / vm / fb / renderer / input / qmp
+entry/src/main/cpp/    父进程 libentry.so：napi_init / qmp / ncp_client
+                       （+ qemu_ipc.h 协议）；
+                       子进程 libqemu_child.so：qemu_child / vm / fb /
+                       renderer / input（+ qemu_abi.h 等）
 entry/src/main/ets/    EntryAbility（固件解压）+ pages/{VmList,VmEdit,Console}
                        + lib/{vmprofile,keymap}
 images/          guest 镜像（本地缓存，不进 HAP）
@@ -168,9 +225,11 @@ Alpine Linux 验证完整引导。
   （TCG 下约 50s），键盘输入可进 shell。
 - QMP 电源控制：暂停/恢复（STOP/RESUME 事件驱动状态）、强制断电
   （quit → SHUTDOWN → 状态变"已关机"）。
-- 截图缩略图：Console 点"截图"或返回列表时自动更新卡片缩略图。
-- 关机后再启动：autostart 标记 + 进程重启接管，新进程内 VM 自动
-  引导到 login（restartApp 被平台限频时手动重开应用等效）。
+- 截图缩略图：Console 点"截图"或返回列表时自动更新卡片缩略图
+  （子进程缩放到 ≤512 宽经 IPC 回传）。
+- **关机后再启动：无任何重启**——QMP quit → 子进程退出 → 再点启动
+  拉起全新 NCP 子进程，引导到 login（对比旧架构：需重启应用进程）。
+- 离开 Console 再进入：VM 后台继续跑，重进时重新挂窗画面即恢复。
 - 显示模式切换正常：SeaBIOS 640x480 → VGA 文本 720x400 →
   bochs-drm 1280x800（gfx_switch 回调驱动纹理重建）。
 - 键盘：HarmonyOS KeyCode → QKeyCode 映射表由脚本从 SDK d.ts 与
@@ -197,14 +256,22 @@ Alpine Linux 验证完整引导。
 - qemu 同进程不能二次进入 `qemu_system_entry`：`qemu_add_opts`/
   `qemu_add_drive_opts`（util/qemu-config.c）对静态数组重复注册会
   `abort()`；dlclose 也不可行（本线程退出时执行 qemu 注册的 TLS
-  析构会跳到已卸载代码）。当前用"一进程一轮 VM + autostart 标记 +
-  appRecovery.restartApp"折衷。
-- `appRecovery.restartApp()` 受平台限频（约 1 分钟一次），被限频时
-  静默 no-op（不抛异常、不退出）；EntryAbility 需配
-  `"recoverable": true` 否则不拉起。
+  析构会跳到已卸载代码）。解法：NCP 子进程一进程一轮（见第 6 节）。
+- 裸 fork 的子进程不能做 NativeWindow 渲染：继承的 Binder 状态在
+  带 fd 的 parcel 应答（`Parcel::InjectOffsets`）上 SIGSEGV；
+  干净进程里裸 surfaceId 查找返回 40001000（进程内注册表）。
+  跨进程传窗口必须父进程建 OHNativeWindow 再 WriteToParcel。
+- 页面转场期间立刻给子进程挂窗，EGLSurface 首次 swap 必报
+  EGL_BAD_SURFACE(0x300d) 且不可自愈（重建 EGLSurface 也救不回来）；
+  修复：onSurfaceCreated 后延迟 ~500ms 再挂窗（Console.ets）。
+- 父进程发给子进程的 resize 若早于子进程启动会丢失：渲染线程启动时
+  用 `eglQuerySurface(EGL_WIDTH/HEIGHT)` 兜底拿窗口实际尺寸。
+- NCP 的 `OH_Ability_RegisterNativeChildProcessExitCallback` 实测
+  不可靠（有子进程退出但不触发的情况）；`vmRunning()` 改为向子进程
+  发 QUERY 自愈（发送失败或 running=0 即清理状态）。
 - 二次注册 DCL 前必须 `fb_reset()` 清掉 g_dcl.ds/con，否则触发
   qemu `assert(!dcl->ds)`。
 - 重新进入 Console（surface 销毁重建）后黑屏：渲染线程只在脏帧时上传
   纹理，而新建的 GL 纹理是空的、旧纹理尺寸缓存又使全量分支不命中，
-  guest 无输出时就永远不上传。修复：`renderer_create_surface()` 重置
-  `texW/texH` 为 0，强制首轮从 back buffer 全量回传。
+  guest 无输出时就永远不上传。修复：attach 时重置 `texW/texH` 为 0，
+  强制首轮从 back buffer 全量回传。

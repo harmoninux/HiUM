@@ -164,3 +164,31 @@ void fb_reset()
     g_fb.dirty = false;
     g_fb.resized = false;
 }
+
+std::vector<uint32_t> fb_capture_rgba(int maxW, int *outW, int *outH)
+{
+    std::lock_guard<std::mutex> lock(g_fb.mu);
+    if (g_fb.w <= 0 || g_fb.h <= 0 || g_fb.back.empty()) {
+        return {};
+    }
+    int sw = g_fb.w, sh = g_fb.h;
+    int dw = sw, dh = sh;
+    if (maxW > 0 && sw > maxW) {
+        dw = maxW;
+        dh = (int)((int64_t)sh * maxW / sw);
+    }
+    std::vector<uint32_t> out((size_t)dw * (size_t)dh);
+    for (int y = 0; y < dh; y++) {
+        int sy = (int)((int64_t)y * sh / dh);
+        for (int x = 0; x < dw; x++) {
+            int sx = (int)((int64_t)x * sw / dw);
+            uint32_t p = g_fb.back[(size_t)sy * (size_t)sw + (size_t)sx];
+            /* back 是 X8R8G8B8；调用方（PixelMap/parcel）要 RGBA_8888：换 R/B、A=0xff */
+            out[(size_t)y * (size_t)dw + (size_t)x] =
+                0xff000000u | (p & 0x0000ff00u) | ((p >> 16) & 0xffu) | ((p & 0xffu) << 16);
+        }
+    }
+    *outW = dw;
+    *outH = dh;
+    return out;
+}

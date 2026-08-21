@@ -28,6 +28,7 @@ struct RenderState {
     EGLDisplay display = EGL_NO_DISPLAY;
     EGLSurface surface = EGL_NO_SURFACE;
     EGLContext context = EGL_NO_CONTEXT;
+    EGLConfig config = nullptr;
     int winW = 0, winH = 0;
     GLuint tex = 0;
     GLuint prog = 0;
@@ -149,6 +150,18 @@ void renderLoop()
         return;
     }
 
+    /* 父进程的 resize 可能早于子进程启动（丢失）：先从 EGL 拿窗口实际尺寸兜底 */
+    if (g_rs.winW <= 0 || g_rs.winH <= 0) {
+        EGLint w = 0, h = 0;
+        eglQuerySurface(g_rs.display, g_rs.surface, EGL_WIDTH, &w);
+        eglQuerySurface(g_rs.display, g_rs.surface, EGL_HEIGHT, &h);
+        if (w > 0 && h > 0) {
+            g_rs.winW = w;
+            g_rs.winH = h;
+        }
+        OH_LOG_INFO(LOG_APP, "window size from EGL: %{public}dx%{public}d", w, h);
+    }
+
     const char *exts = (const char *)glGetString(GL_EXTENSIONS);
     if (exts && strstr(exts, "GL_EXT_texture_format_BGRA8888")) {
         g_rs.texFormat = GL_BGRA_EXT;
@@ -158,10 +171,14 @@ void renderLoop()
     }
     setupGl();
 
+    int swapRetries = 0;
     while (g_rs.running.load()) {
         bool didWork = false;
+        int curFbW = 0, curFbH = 0;
         {
             std::lock_guard<std::mutex> lock(g_fb.mu);
+            curFbW = g_fb.w;
+            curFbH = g_fb.h;
             if (g_fb.w > 0 && g_fb.h > 0) {
                 if (g_fb.resized || g_rs.texW != g_fb.w || g_rs.texH != g_fb.h) {
                     glBindTexture(GL_TEXTURE_2D, g_rs.tex);
@@ -186,7 +203,34 @@ void renderLoop()
         }
         if (didWork) {
             drawFrame();
-            eglSwapBuffers(g_rs.display, g_rs.surface);
+            if (!eglSwapBuffers(g_rs.display, g_rs.surface)) {
+                EGLint err = eglGetError();
+                OH_LOG_ERROR(LOG_APP, "eglSwapBuffers failed: 0x%{public}x (retry %{public}d)",
+                             err, swapRetries);
+                if (err == EGL_BAD_SURFACE && swapRetries < 20) {
+                    /* 重挂窗后底层 queue 可能尚未就绪：重建 EGLSurface 自愈 */
+                    swapRetries++;
+                    eglMakeCurrent(g_rs.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+                    eglDestroySurface(g_rs.display, g_rs.surface);
+                    usleep(100 * 1000);
+                    g_rs.surface = eglCreateWindowSurface(g_rs.display, g_rs.config,
+                                                          (EGLNativeWindowType)g_rs.nativeWin, nullptr);
+                    if (g_rs.surface == EGL_NO_SURFACE ||
+                        !eglMakeCurrent(g_rs.display, g_rs.surface, g_rs.surface, g_rs.context)) {
+                        OH_LOG_ERROR(LOG_APP, "recreate surface failed: 0x%{public}x", eglGetError());
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+            swapRetries = 0;
+            static bool loggedFirstFrame = false;
+            if (!loggedFirstFrame) {
+                OH_LOG_INFO(LOG_APP, "first frame presented, fb=%{public}dx%{public}d win=%{public}dx%{public}d",
+                            curFbW, curFbH, g_rs.winW, g_rs.winH);
+                loggedFirstFrame = true;
+            }
         } else {
             usleep(8000); /* nothing new: ~120Hz poll */
         }
@@ -220,17 +264,15 @@ void renderer_get_viewport(int *x, int *y, int *w, int *h)
     *y = (g_rs.winH - *h) / 2;
 }
 
-int renderer_create_surface(int64_t surfaceId)
+int renderer_attach_window(OHNativeWindow *win)
 {
-    if (g_rs.running.load()) {
-        return 0;
-    }
-
-    int ret = OH_NativeWindow_CreateNativeWindowFromSurfaceId(surfaceId, &g_rs.nativeWin);
-    if (ret != 0 || !g_rs.nativeWin) {
-        OH_LOG_ERROR(LOG_APP, "CreateNativeWindowFromSurfaceId failed: %{public}d", ret);
+    if (win == nullptr) {
         return -1;
     }
+    if (g_rs.running.load()) {
+        renderer_detach_window();
+    }
+    g_rs.nativeWin = win; /* 接管所有权（来自 IPC parcel） */
 
     g_rs.display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (g_rs.display == EGL_NO_DISPLAY || !eglInitialize(g_rs.display, nullptr, nullptr)) {
@@ -266,6 +308,7 @@ int renderer_create_surface(int64_t surfaceId)
         OH_LOG_ERROR(LOG_APP, "eglCreateWindowSurface failed: 0x%{public}x", eglGetError());
         return -1;
     }
+    g_rs.config = config;
 
     const EGLint ctxAttribs[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
     g_rs.context = eglCreateContext(g_rs.display, config, EGL_NO_CONTEXT, ctxAttribs);
@@ -285,11 +328,11 @@ int renderer_create_surface(int64_t surfaceId)
 
     g_rs.running.store(true);
     g_rs.thread = std::thread(renderLoop);
-    OH_LOG_INFO(LOG_APP, "renderer started, surfaceId=%{public}lld", (long long)surfaceId);
+    OH_LOG_INFO(LOG_APP, "renderer started on attached window");
     return 0;
 }
 
-int renderer_resize_surface(int64_t surfaceId, int32_t w, int32_t h)
+int renderer_resize_surface(int32_t w, int32_t h)
 {
     g_rs.winW = w;
     g_rs.winH = h;
@@ -297,7 +340,7 @@ int renderer_resize_surface(int64_t surfaceId, int32_t w, int32_t h)
     return 0;
 }
 
-int renderer_destroy_surface(int64_t surfaceId)
+int renderer_detach_window()
 {
     g_rs.running.store(false);
     if (g_rs.thread.joinable()) {

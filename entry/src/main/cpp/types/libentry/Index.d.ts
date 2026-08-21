@@ -1,9 +1,8 @@
-export const startVm: (arch: string, args: string[]) => number;
+export const startVm: (arch: string, args: string[], surfaceId: bigint) => number;
 export const vmRunning: () => boolean;
-export const vmSpent: () => boolean;
 export const createSurface: (surfaceId: bigint) => number;
-export const resizeSurface: (surfaceId: bigint, w: number, h: number) => number;
-export const destroySurface: (surfaceId: bigint) => number;
+export const resizeSurface: (w: number, h: number) => number;
+export const destroySurface: () => number;
 export const sendPointer: (x: number, y: number, buttons: number) => void;
 export const sendKey: (qcode: number, down: boolean) => void;
 export const qmpConnect: (port: number) => number;

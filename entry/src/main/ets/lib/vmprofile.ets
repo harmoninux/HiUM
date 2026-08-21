@@ -201,31 +201,4 @@ export class VmStore {
       }
     }
   }
-
-  /* qemu .so 一进程只能用一轮：二次启动前记录待启动 VM，由上层重启进程后
-   * 自动接管（见 VmList/Console） */
-  setAutostart(id: string): void {
-    const fd = fs.openSync(`${this.dir}/.autostart`,
-      fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
-    fs.writeSync(fd.fd, id);
-    fs.closeSync(fd);
-  }
-
-  /* 读取并清除 autostart 标记；无标记返回 '' */
-  takeAutostart(): string {
-    const path = `${this.dir}/.autostart`;
-    try {
-      if (!fs.accessSync(path)) {
-        return '';
-      }
-      const fd = fs.openSync(path, fs.OpenMode.READ_ONLY);
-      const buf = new ArrayBuffer(128);
-      const n = fs.readSync(fd.fd, buf);
-      fs.closeSync(fd);
-      fs.unlinkSync(path);
-      return util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n)).trim();
-    } catch {
-      return '';
-    }
-  }
 }

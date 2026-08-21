@@ -50,10 +50,9 @@ VmState g_vm;
 /* qemu 把 run-once 状态放在自身 .so 的静态区（vm_config_groups、DCL 链表
  * ……），同一份映射无法二次进入（qemu_add_opts 重复注册会 abort）；
  * dlclose 重载也不行：本线程持有 qemu 注册的 TLS 析构，卸载后线程退出会
- * 跳到已卸载代码（实测必崩）；把 .so 复制到 filesDir 再 dlopen 又被代码
- * 完整性策略拒绝（EINVAL）。因此一个进程只跑一轮 VM，跑完置 g_spent，
- * 二次启动由上层（ArkTS）走进程级重启。 */
-bool g_spent = false;
+ * 跳到已卸载代码（实测必崩）。因此本文件只支持一进程一轮 VM——本工程里
+ * 本代码运行在 NCP 子进程（libqemu_child.so）中，一轮 VM 一个子进程，
+ * 退出后由父进程另起新子进程。 */
 
 template <typename T>
 bool resolveSym(void *so, const char *name, T *out)
@@ -91,14 +90,14 @@ void vmMain(VmState *vm)
     vm->running.store(false);
 
     /* cleanup: drop our pointers into the qemu .so, then stop the bind
-     * thread (it polls qemu symbols). no dlclose — see g_sourcePath note. */
+     * thread (it polls qemu symbols). no dlclose — TLS 析构会跳到已卸载
+     * 代码；子进程随后整体退出，由父进程另起新子进程跑下一轮。 */
     fb_reset();
     g_qemu_con = nullptr;
     if (vm->bindThread.joinable()) {
         vm->bindThread.join();
     }
     vm->so = nullptr;
-    g_spent = true; /* 本进程不可再跑 VM，上层应重启进程 */
 }
 
 void bindDisplay(VmState *vm)
@@ -125,17 +124,8 @@ bool vm_running()
     return g_vm.running.load();
 }
 
-bool vm_spent()
-{
-    return g_spent;
-}
-
 int vm_start(const std::string &arch, const std::vector<std::string> &args)
 {
-    if (g_spent) {
-        OH_LOG_WARN(LOG_APP, "qemu lib already spent in this process, restart required");
-        return -2;
-    }
     /* so != nullptr means the previous run is still cleaning up */
     if (g_vm.running.load() || g_vm.so != nullptr) {
         OH_LOG_WARN(LOG_APP, "vm already running or cleaning up");

@@ -44,15 +44,6 @@ export struct VmList {
     }
     this.profiles = list;
     this.thumbTick++;
-
-    /* 进程刚为重启 VM 而重建：直接接管进入 console */
-    const pending = store.takeAutostart();
-    if (pending.length > 0) {
-      const target = list.find((p: VmProfile) => p.id === pending);
-      if (target) {
-        this.navStack.pushPath({ name: 'console', param: target });
-      }
-    }
   }
 
   private isRunning(p: VmProfile): boolean {

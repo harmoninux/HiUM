@@ -1,10 +1,9 @@
 // 虚拟机 Console 页：XComponent 渲染 + 顶部工具条（电源/QMP 控制/截图）。
-// VM 生命周期跨页面存活：离开本页 VM 继续跑，重进时复用已有实例。
+// VM 跑在 NCP 子进程，生命周期跨页面存活：离开本页只是摘窗，重进时重新挂窗。
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { image } from '@kit.ImageKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { promptAction } from '@kit.ArkUI';
-import { appRecovery } from '@kit.AbilityKit';
 import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
 import { VmProfile, VmStore, buildArgs } from '../lib/vmprofile';
@@ -16,12 +15,11 @@ interface ScreenShotBuf {
 }
 
 interface QemuNapi {
-  startVm: (arch: string, args: string[]) => number;
+  startVm: (arch: string, args: string[], surfaceId: bigint) => number;
   vmRunning: () => boolean;
-  vmSpent: () => boolean;
   createSurface: (surfaceId: bigint) => number;
-  resizeSurface: (surfaceId: bigint, w: number, h: number) => number;
-  destroySurface: (surfaceId: bigint) => number;
+  resizeSurface: (w: number, h: number) => number;
+  destroySurface: () => number;
   sendPointer: (x: number, y: number, buttons: number) => void;
   sendKey: (qcode: number, down: boolean) => void;
   qmpConnect: (port: number) => number;
@@ -41,25 +39,33 @@ interface QmpEvent {
 }
 
 class VmXComponentController extends XComponentController {
+  surfaceId: bigint = 0n;
   surfaceWidth: number = 0;
   surfaceHeight: number = 0;
   onReady: (() => void) | null = null;
 
   onSurfaceCreated(surfaceId: string): void {
-    napi.createSurface(BigInt(surfaceId));
-    if (this.onReady) {
-      this.onReady();
-    }
+    this.surfaceId = BigInt(surfaceId);
+    /* 页面转场期间立刻挂窗会得到坏 queue（swap 必报 EGL_BAD_SURFACE）：
+     * 等转场稳定后再挂（实测 500ms 足够；首启的 START 自带窗口不受影响） */
+    const id = this.surfaceId;
+    setTimeout(() => {
+      napi.createSurface(id);
+      if (this.onReady) {
+        this.onReady();
+      }
+    }, 500);
   }
 
   onSurfaceChanged(surfaceId: string, rect: SurfaceRect): void {
     this.surfaceWidth = rect.surfaceWidth;
     this.surfaceHeight = rect.surfaceHeight;
-    napi.resizeSurface(BigInt(surfaceId), rect.surfaceWidth, rect.surfaceHeight);
+    napi.resizeSurface(rect.surfaceWidth, rect.surfaceHeight);
   }
 
   onSurfaceDestroyed(surfaceId: string): void {
-    napi.destroySurface(BigInt(surfaceId));
+    napi.destroySurface();
+    this.surfaceId = 0n;
   }
 }
 
@@ -123,23 +129,13 @@ export struct Console {
     if (!this.profile || napi.vmRunning()) {
       return;
     }
-    if (napi.vmSpent()) {
-      /* qemu .so 只能跑一轮：记录目标 VM，重启进程后由列表页接管。
-       * restartApp 可能因平台限频只退出不拉起，此时用户重开应用即可，autostart 同样接管。 */
-      hilog.info(DOMAIN, TAG, 'vm spent, restarting app for VM %{public}s', this.profile.id);
-      new VmStore(this.filesDir).setAutostart(this.profile.id);
-      promptAction.showToast({ message: '重启应用以重新加载模拟器…' });
-      setTimeout(() => {
-        try {
-          appRecovery.restartApp();
-        } catch (err) {
-          promptAction.showToast({ message: '自动重启失败，请手动重启应用' });
-          hilog.error(DOMAIN, TAG, 'restartApp failed: %{public}s', JSON.stringify(err));
-        }
-      }, 800);
+    if (this.xcController.surfaceId === 0n) {
+      this.startPending = true;
       return;
     }
-    const ret = napi.startVm(this.profile.arch, buildArgs(this.profile, this.vmDataDir));
+    /* 每次启动都是一个新的 NCP 子进程，不再有「一进程一轮 VM」的重启流程 */
+    const ret = napi.startVm(this.profile.arch, buildArgs(this.profile, this.vmDataDir),
+      this.xcController.surfaceId);
     if (ret !== 0) {
       this.status = '启动失败: ' + ret;
       return;
