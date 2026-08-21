@@ -150,7 +150,7 @@ struct VmConsole {
       return;
     }
     /* 每次启动都是一个新的 NCP 子进程；多实例按 vmId 各起各的 */
-    const ret = napi.startVm(this.vmId, this.profile.arch,
+    const ret = napi.startVm(this.vmId, this.profile.machine.arch,
       buildArgs(this.profile, this.vmDataDir), this.xcController.surfaceId);
     if (ret !== 0) {
       this.status = '启动失败: ' + ret;

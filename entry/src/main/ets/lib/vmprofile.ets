@@ -1,25 +1,50 @@
-// VM 配置数据模型：一份 JSON 存 filesDir/vms/<id>.json，buildArgs 把它翻成
-// qemu 命令行。UI 只面对这个模型，不直接拼 qemu 参数。
+// VM 配置数据模型（schema v2）：一份 JSON 存 filesDir/vms/<id>.json。
+// v2 把扁平字段拆成 machine / runtime / media / net 四层，UI 只面对这套领域对象，
+// buildArgs 是纯函数把它翻成 qemu 命令行。所有读取经 migrateProfile 统一做
+// 版本判定 + 缺字段回填，不再在 load() 里逐字段塞 if。
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
+
+export const SCHEMA_VERSION = 2;
 
 export type VmArch = 'x86_64' | 'i386' | 'aarch64';
 export type VgaType = 'std' | 'virtio';
 
-export interface VmProfile {
-  id: string;
-  name: string;
+/* 机器层：目前只有架构/显卡有 UI；Phase 1 机器工坊再扩 machine/firmware/cpu/设备图 */
+export interface VmMachine {
   arch: VmArch;
+  vga: VgaType;
+}
+
+/* 运行时层：可被 JIT 性能预设覆盖（memory/cpus/accel） */
+export interface VmRuntime {
   memoryMB: number;
   cpus: number;
-  diskPath: string;   /* '' = 无系统盘；当前只支持 raw 稀疏镜像 */
+  mttcg: boolean;   /* TCG 多线程 */
+  tbSize: number;
+}
+
+/* 介质层 */
+export interface VmMedia {
+  diskPath: string;   /* '' = 无系统盘；当前新建为 qcow2，导入 raw 按扩展名回退 */
   cdromPath: string;  /* '' = 无光盘 */
   bootFromCdrom: boolean;
-  vga: VgaType;
-  netEnabled: boolean;
+}
+
+/* 网络层 */
+export interface VmNet {
+  enabled: boolean;
   portForwards: string; /* "8080:80,2222:22"，空串 = 不转发 */
-  mttcg: boolean;
-  tbSize: number;
+}
+
+export interface VmProfile {
+  schemaVersion: number;  /* = SCHEMA_VERSION */
+  id: string;
+  name: string;
+  machine: VmMachine;
+  runtime: VmRuntime;
+  media: VmMedia;
+  net: VmNet;
   extraArgs: string;  /* escape hatch：原样追加到 qemu 命令行 */
 }
 
@@ -29,19 +54,13 @@ export function newProfileId(): string {
 
 export function blankProfile(id: string): VmProfile {
   return {
+    schemaVersion: SCHEMA_VERSION,
     id: id,
     name: '新虚拟机',
-    arch: 'x86_64',
-    memoryMB: 1024,
-    cpus: 2,
-    diskPath: '',
-    cdromPath: '',
-    bootFromCdrom: false,
-    vga: 'std',
-    netEnabled: true,
-    portForwards: '',
-    mttcg: true,
-    tbSize: 1024,
+    machine: { arch: 'x86_64', vga: 'std' },
+    runtime: { memoryMB: 1024, cpus: 2, mttcg: true, tbSize: 1024 },
+    media: { diskPath: '', cdromPath: '', bootFromCdrom: false },
+    net: { enabled: true, portForwards: '' },
     extraArgs: '',
   };
 }
@@ -50,10 +69,111 @@ export function blankProfile(id: string): VmProfile {
 export function alpineProfile(id: string, vmDataDir: string): VmProfile {
   const p = blankProfile(id);
   p.name = 'Alpine Linux (x86_64)';
-  p.cdromPath = vmDataDir + '/alpine-virt.iso';
-  p.bootFromCdrom = true;
+  p.media.cdromPath = vmDataDir + '/alpine-virt.iso';
+  p.media.bootFromCdrom = true;
   return p;
 }
+
+/* ========================= 迁移框架（所有读取的唯一入口） ========================= */
+/* migrateProfile 是 VmProfile 只进不出的唯一入口：按 schemaVersion 分支，返回
+ * 一份「净菜」v2 结构（层必在、字段齐全）。以后每升一版，往 switch 加一个 case
+ * 写 vN→vN+1 迁移器即可，不改调用方。ArkTS 禁 any/unknown，动态 JSON 统一用
+ * Record<string, Object> + 显式窄化助手读取。 */
+export function migrateProfile(raw: Object): VmProfile {
+  const o = raw as Record<string, Object>;
+  const v = typeof o['schemaVersion'] === 'number' ? o['schemaVersion'] as number : 1;
+  switch (v) {
+    case 1:
+      return migrateV1(o);
+    case SCHEMA_VERSION:
+      return normalizeV2(o);
+    default:
+      return blankProfile(''); /* 更高版本：本版本不认识，兜底新开 */
+  }
+}
+
+/* 动态 JSON 读取助手（ArkTS 禁 any/unknown，禁对字段下标访问，用 Record + 窄化） */
+function jStr(o: Record<string, Object>, k: string): string {
+  const v = o[k];
+  return typeof v === 'string' ? v as string : '';
+}
+function jNum(o: Record<string, Object>, k: string, d: number): number {
+  const v = o[k];
+  return typeof v === 'number' ? v as number : d;
+}
+function jBool(o: Record<string, Object>, k: string, d: boolean): boolean {
+  const v = o[k];
+  return typeof v === 'boolean' ? v as boolean : d;
+}
+function jObj(o: Record<string, Object>, k: string): Record<string, Object> | undefined {
+  const v = o[k];
+  return typeof v === 'object' ? v as Record<string, Object> : undefined;
+}
+
+/* v1（开发期废弃）：旧扁平字段尽力映射进 v2 层，读不到的下默认。
+ * 不承诺完整迁移（无线上历史数据），仅是「尽量捞、丢了不补」。 */
+function migrateV1(o: Record<string, Object>): VmProfile {
+  const p = blankProfile('');
+  p.id = jStr(o, 'id') || newProfileId();
+  p.name = jStr(o, 'name') || '未命名';
+  const arch = jStr(o, 'arch');
+  if (arch === 'i386' || arch === 'aarch64') {
+    p.machine.arch = arch as VmArch;
+  }
+  p.machine.vga = jStr(o, 'vga') === 'virtio' ? 'virtio' : 'std';
+  p.runtime.memoryMB = jNum(o, 'memoryMB', 1024);
+  p.runtime.cpus = jNum(o, 'cpus', 2);
+  p.runtime.mttcg = jBool(o, 'mttcg', true);
+  p.runtime.tbSize = jNum(o, 'tbSize', 1024);
+  p.media.diskPath = jStr(o, 'diskPath');
+  p.media.cdromPath = jStr(o, 'cdromPath');
+  p.media.bootFromCdrom = jBool(o, 'bootFromCdrom', false);
+  p.net.enabled = jBool(o, 'netEnabled', true);
+  p.net.portForwards = jStr(o, 'portForwards');
+  p.extraArgs = jStr(o, 'extraArgs');
+  return p;
+}
+
+/* v2 归一化：深校验 + 逐字段回填默认（承接原 load() 兜底职责，净菜输出） */
+function normalizeV2(o: Record<string, Object>): VmProfile {
+  const p = blankProfile('');
+  p.id = jStr(o, 'id') || newProfileId();
+  const nm = jStr(o, 'name');
+  p.name = nm.length > 0 ? nm : '未命名';
+  const m = jObj(o, 'machine');
+  const r = jObj(o, 'runtime');
+  const md = jObj(o, 'media');
+  const n = jObj(o, 'net');
+
+  if (m) {
+    const arch = jStr(m, 'arch');
+    if (arch === 'i386' || arch === 'aarch64') {
+      p.machine.arch = arch as VmArch;
+    }
+    if (jStr(m, 'vga') === 'virtio') {
+      p.machine.vga = 'virtio';
+    }
+  }
+  if (r) {
+    p.runtime.memoryMB = jNum(r, 'memoryMB', p.runtime.memoryMB);
+    p.runtime.cpus = jNum(r, 'cpus', p.runtime.cpus);
+    p.runtime.mttcg = jBool(r, 'mttcg', p.runtime.mttcg);
+    p.runtime.tbSize = jNum(r, 'tbSize', p.runtime.tbSize);
+  }
+  if (md) {
+    p.media.diskPath = jStr(md, 'diskPath');
+    p.media.cdromPath = jStr(md, 'cdromPath');
+    p.media.bootFromCdrom = jBool(md, 'bootFromCdrom', p.media.bootFromCdrom);
+  }
+  if (n) {
+    p.net.enabled = jBool(n, 'enabled', p.net.enabled);
+    p.net.portForwards = jStr(n, 'portForwards');
+  }
+  p.extraArgs = jStr(o, 'extraArgs');
+  return p;
+}
+
+/* =============================== 命令行生成 =============================== */
 
 /* 解析 "8080:80,2222:22" 形式的端口转发；非法条目直接跳过 */
 function parseForwards(text: string): string[] {
@@ -80,31 +200,31 @@ export function qmpSockPath(p: VmProfile, vmDataDir: string): string {
 export function buildArgs(p: VmProfile, vmDataDir: string): string[] {
   let args: string[] = [
     '-L', vmDataDir,
-    '-m', String(p.memoryMB),
-    '-smp', String(p.cpus),
-    '-accel', `tcg,thread=${p.mttcg ? 'multi' : 'single'},tb-size=${p.tbSize}`,
+    '-m', String(p.runtime.memoryMB),
+    '-smp', String(p.runtime.cpus),
+    '-accel', `tcg,thread=${p.runtime.mttcg ? 'multi' : 'single'},tb-size=${p.runtime.tbSize}`,
     '-display', 'none',
     '-device', 'virtio-tablet-pci',
     '-qmp', `unix:${qmpSockPath(p, vmDataDir)},server=on,wait=off`,
   ];
-  if (p.arch === 'aarch64') {
+  if (p.machine.arch === 'aarch64') {
     args = args.concat(['-machine', 'virt', '-cpu', 'max', '-device', 'virtio-gpu-pci']);
   } else {
-    args.push('-vga', p.vga);
+    args.push('-vga', p.machine.vga);
     args.push('-serial', `file:${vmDataDir}/serial-${p.id}.log`);
   }
-  if (p.diskPath.length > 0) {
+  if (p.media.diskPath.length > 0) {
     /* 默认新建的是 qcow2；导入的 raw 镜像仍按扩展名回退到 raw */
-    const fmt = p.diskPath.toLowerCase().endsWith('.qcow2') ? 'qcow2' : 'raw';
-    args.push('-drive', `file=${p.diskPath},if=virtio,format=${fmt}`);
+    const fmt = p.media.diskPath.toLowerCase().endsWith('.qcow2') ? 'qcow2' : 'raw';
+    args.push('-drive', `file=${p.media.diskPath},if=virtio,format=${fmt}`);
   }
-  if (p.cdromPath.length > 0) {
-    args.push('-cdrom', p.cdromPath);
+  if (p.media.cdromPath.length > 0) {
+    args.push('-cdrom', p.media.cdromPath);
   }
-  args.push('-boot', p.bootFromCdrom ? 'd' : 'c');
-  if (p.netEnabled) {
+  args.push('-boot', p.media.bootFromCdrom ? 'd' : 'c');
+  if (p.net.enabled) {
     let netdev = 'user,id=n0';
-    for (const fwd of parseForwards(p.portForwards)) {
+    for (const fwd of parseForwards(p.net.portForwards)) {
       netdev += ',' + fwd;
     }
     args.push('-netdev', netdev, '-device', 'virtio-net-pci,netdev=n0');
@@ -163,30 +283,15 @@ export class VmStore {
       const buf = new ArrayBuffer(64 * 1024);
       const n = fs.readSync(fd.fd, buf);
       fs.closeSync(fd);
-      const obj = JSON.parse(util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n))) as VmProfile;
-      if (!obj.name || !obj.arch || typeof obj.memoryMB !== 'number') {
-        return null;
-      }
-      /* 旧版本缺字段时回填默认（arkts 不允许对象 spread，逐字段来） */
-      const d = blankProfile(id);
-      if (obj.cpus === undefined) obj.cpus = d.cpus;
-      if (obj.diskPath === undefined) obj.diskPath = d.diskPath;
-      if (obj.cdromPath === undefined) obj.cdromPath = d.cdromPath;
-      if (obj.bootFromCdrom === undefined) obj.bootFromCdrom = d.bootFromCdrom;
-      if (obj.vga === undefined) obj.vga = d.vga;
-      if (obj.netEnabled === undefined) obj.netEnabled = d.netEnabled;
-      if (obj.portForwards === undefined) obj.portForwards = d.portForwards;
-      if (obj.mttcg === undefined) obj.mttcg = d.mttcg;
-      if (obj.tbSize === undefined) obj.tbSize = d.tbSize;
-      if (obj.extraArgs === undefined) obj.extraArgs = d.extraArgs;
-      obj.id = id;
-      return obj;
+      const obj = JSON.parse(util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n))) as Object;
+      return migrateProfile(obj);
     } catch {
       return null;
     }
   }
 
   save(p: VmProfile): void {
+    p.schemaVersion = SCHEMA_VERSION;
     const fd = fs.openSync(this.profilePath(p.id),
       fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
     fs.writeSync(fd.fd, JSON.stringify(p, null, 2));
@@ -195,7 +300,7 @@ export class VmStore {
 
   /* 删配置、缩略图以及位于 vms 目录内的磁盘镜像 */
   remove(p: VmProfile): void {
-    for (const path of [this.profilePath(p.id), this.thumbPath(p.id), p.diskPath]) {
+    for (const path of [this.profilePath(p.id), this.thumbPath(p.id), p.media.diskPath]) {
       try {
         if (path.length > 0 && path.startsWith(this.dir) && fs.accessSync(path)) {
           fs.unlinkSync(path);

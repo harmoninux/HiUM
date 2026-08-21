@@ -3,7 +3,7 @@
 import { promptAction } from '@kit.ArkUI';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import napiModule from 'libentry.so';
-import { VmProfile, VmStore, VmArch, VgaType } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmArch, VgaType, SCHEMA_VERSION } from '../lib/vmprofile';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -47,17 +47,17 @@ export struct VmEdit {
       return;
     }
     this.name = p.name;
-    this.arch = p.arch;
-    this.memoryMB = p.memoryMB;
-    this.cpus = p.cpus;
-    this.diskPath = p.diskPath;
-    this.cdromPath = p.cdromPath;
-    this.bootFromCdrom = p.bootFromCdrom;
-    this.vga = p.vga;
-    this.netEnabled = p.netEnabled;
-    this.portForwards = p.portForwards;
-    this.mttcg = p.mttcg;
-    this.tbSizeText = String(p.tbSize);
+    this.arch = p.machine.arch;
+    this.memoryMB = p.runtime.memoryMB;
+    this.cpus = p.runtime.cpus;
+    this.diskPath = p.media.diskPath;
+    this.cdromPath = p.media.cdromPath;
+    this.bootFromCdrom = p.media.bootFromCdrom;
+    this.vga = p.machine.vga;
+    this.netEnabled = p.net.enabled;
+    this.portForwards = p.net.portForwards;
+    this.mttcg = p.runtime.mttcg;
+    this.tbSizeText = String(p.runtime.tbSize);
     this.extraArgs = p.extraArgs;
   }
 
@@ -119,19 +119,28 @@ export struct VmEdit {
     }
     const tbSize = Number(this.tbSizeText);
     const p: VmProfile = {
+      schemaVersion: SCHEMA_VERSION,
       id: this.profile.id,
       name: this.name.trim().length > 0 ? this.name.trim() : '未命名',
-      arch: this.arch,
-      memoryMB: Math.round(this.memoryMB),
-      cpus: Math.round(this.cpus),
-      diskPath: this.diskPath,
-      cdromPath: this.cdromPath.trim(),
-      bootFromCdrom: this.bootFromCdrom,
-      vga: this.vga,
-      netEnabled: this.netEnabled,
-      portForwards: this.portForwards.trim(),
-      mttcg: this.mttcg,
-      tbSize: Number.isInteger(tbSize) && tbSize > 0 ? tbSize : 1024,
+      machine: {
+        arch: this.arch,
+        vga: this.vga,
+      },
+      runtime: {
+        memoryMB: Math.round(this.memoryMB),
+        cpus: Math.round(this.cpus),
+        mttcg: this.mttcg,
+        tbSize: Number.isInteger(tbSize) && tbSize > 0 ? tbSize : 1024,
+      },
+      media: {
+        diskPath: this.diskPath,
+        cdromPath: this.cdromPath.trim(),
+        bootFromCdrom: this.bootFromCdrom,
+      },
+      net: {
+        enabled: this.netEnabled,
+        portForwards: this.portForwards.trim(),
+      },
       extraArgs: this.extraArgs.trim(),
     };
     new VmStore(this.filesDir).save(p);

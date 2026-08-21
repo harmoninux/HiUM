@@ -117,7 +117,7 @@ export struct VmList {
         .borderRadius(4)
     } else {
       Column() {
-        Text(p.arch)
+        Text(p.machine.arch)
           .fontSize(11)
           .fontColor(Color.White)
       }
@@ -155,8 +155,8 @@ export struct VmList {
             Text('运行中').fontSize(11).fontColor('#ff2e7d32')
           }
         }
-        Text(`${p.arch} · ${p.memoryMB}MB · ${p.cpus}核` +
-          (p.cdromPath ? ' · 光盘' : '') + (p.diskPath ? ' · 磁盘' : ''))
+        Text(`${p.machine.arch} · ${p.runtime.memoryMB}MB · ${p.runtime.cpus}核` +
+          (p.media.cdromPath ? ' · 光盘' : '') + (p.media.diskPath ? ' · 磁盘' : ''))
           .fontSize(12)
           .fontColor('#ff666666')
       }
