@@ -10,6 +10,7 @@
 #include <hilog/log.h>
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 #include <unistd.h>
 #include <cstring>
@@ -176,7 +177,7 @@ void renderLoop()
         bool didWork = false;
         int curFbW = 0, curFbH = 0;
         {
-            std::lock_guard<std::mutex> lock(g_fb.mu);
+            std::unique_lock<std::mutex> lock(g_fb.mu);
             curFbW = g_fb.w;
             curFbH = g_fb.h;
             if (g_fb.w > 0 && g_fb.h > 0) {
@@ -199,6 +200,13 @@ void renderLoop()
                     g_fb.dirty = false;
                     didWork = true;
                 }
+            }
+            if (!didWork && g_rs.running.load()) {
+                /* 无新帧：等下一次 gfx_update/gfx_switch 的通知，替代 8ms 空转轮询。
+                 * 100ms 定时兜底仍会醒来：覆盖「texW/texH 与 fb 尺寸不匹配需全量重传」
+                 * 这种不置 dirty/resized 的情形（如挂窗后待重传），也让 shutdown 及时退出。 */
+                g_fb.cv.wait_for(lock, std::chrono::milliseconds(100),
+                                 [] { return g_fb.dirty || g_fb.resized || !g_rs.running.load(); });
             }
         }
         if (didWork) {
@@ -231,8 +239,6 @@ void renderLoop()
                             curFbW, curFbH, g_rs.winW, g_rs.winH);
                 loggedFirstFrame = true;
             }
-        } else {
-            usleep(8000); /* nothing new: ~120Hz poll */
         }
     }
 

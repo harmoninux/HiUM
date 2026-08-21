@@ -83,6 +83,7 @@ static void ohos_gfx_update(DisplayChangeListener *dcl, int x, int y, int w, int
 {
     std::lock_guard<std::mutex> lock(g_fb.mu);
     fb_update_rect(x, y, w, h);
+    g_fb.cv.notify_one(); /* 唤醒渲染线程立即上传新帧 */
 }
 
 static void ohos_gfx_switch(DisplayChangeListener *dcl, DisplaySurface *new_surface)
@@ -103,6 +104,7 @@ static void ohos_gfx_switch(DisplayChangeListener *dcl, DisplaySurface *new_surf
     g_fb.dirty = true;
     g_fb.dirtyY0 = 0;
     g_fb.dirtyY1 = h;
+    g_fb.cv.notify_one(); /* 分辨率切换醒渲染线程做全量重传 */
 }
 
 static bool ohos_gfx_check_format(DisplayChangeListener *dcl, pixman_format_code_t format)
@@ -163,6 +165,7 @@ void fb_reset()
     g_fb.back.clear();
     g_fb.dirty = false;
     g_fb.resized = false;
+    g_fb.cv.notify_one(); /* 唤醒渲染线程以观察清空后的状态（VM 结束） */
 }
 
 std::vector<uint32_t> fb_capture_rgba(int maxW, int *outW, int *outH)

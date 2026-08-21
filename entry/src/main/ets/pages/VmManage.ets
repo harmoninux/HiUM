@@ -5,6 +5,7 @@ import { promptAction } from '@kit.ArkUI';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore } from '../lib/vmprofile';
+import { vmIsRunning } from '../lib/vmregistry';
 
 interface DiskNapi {
   diskInfo: (path: string) => string;
@@ -66,9 +67,13 @@ export struct VmManage {
     }
   }
 
-  /* qcow2 只能扩大：目标须大于当前 virtual-size */
+  /* qcow2 只能扩大：目标须大于当前 virtual-size；运行中不能动 backing 盘 */
   private doExpand(): void {
     if (!this.diskPath) {
+      return;
+    }
+    if (this.profile && vmIsRunning(this.profile.id)) {
+      promptAction.showToast({ message: '运行中不能扩容系统盘' });
       return;
     }
     const gbNum = Number(this.newGBText);
@@ -93,6 +98,10 @@ export struct VmManage {
 
   private confirmRemove(): void {
     if (!this.profile) {
+      return;
+    }
+    if (vmIsRunning(this.profile.id)) {
+      promptAction.showToast({ message: '运行中不能移除系统盘' });
       return;
     }
     AlertDialog.show({

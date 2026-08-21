@@ -5,17 +5,14 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import napiModule from 'libentry.so';
 import {
   VmProfile, VmStore,
   newProfileId, blankProfile, alpineProfile,
 } from '../lib/vmprofile';
-
-interface VmRunningNapi {
-  vmRunning: (vmId: string) => boolean;
-}
-
-const napi = napiModule as VmRunningNapi;
+import {
+  initVmRegistry, refreshRunningMap, vmIsRunning,
+  subscribeVmLifecycle, unsubscribeVmLifecycle, VmLifecycleEvent,
+} from '../lib/vmregistry';
 
 @Component
 export struct VmList {
@@ -28,24 +25,44 @@ export struct VmList {
   @State thumbTick: number = 0;
   @State runningIds: Record<string, boolean> = {};
   private pollTimer: number = -1;
+  private lifecycleCb: ((e: VmLifecycleEvent) => void) | null = null;
 
   aboutToAppear(): void {
+    initVmRegistry();
     this.reload();
-    /* 运行徽标靠 native 查询，不在 ArkUI 响应式链路里；页面可见期间轮询刷新，
-     * 顺便覆盖「后台 VM 自行退出」的徽标更新 */
+    /* 运行徽标经 VMRegistry 反应式快照（一次 IPC 聚合 N 台），页面可见期间
+     * 轮询刷新；生命周事件（VM 跑/停）一到达就即时补刷，不再有 ≤2s 延迟 */
     this.pollTick();
     this.pollTimer = setInterval(() => this.pollTick(), 2000);
+    this.lifecycleCb = (e: VmLifecycleEvent) => {
+      for (const p of this.profiles) {
+        if (p.id === e.vmId) {
+          this.pollTick();
+          break;
+        }
+      }
+    };
+    subscribeVmLifecycle(this.lifecycleCb);
   }
 
   aboutToDisappear(): void {
     clearInterval(this.pollTimer);
     this.pollTimer = -1;
+    if (this.lifecycleCb) {
+      unsubscribeVmLifecycle(this.lifecycleCb);
+      this.lifecycleCb = null;
+    }
   }
 
   private pollTick(): void {
+    const ids: string[] = [];
+    for (const p of this.profiles) {
+      ids.push(p.id);
+    }
+    refreshRunningMap(ids);
     const next: Record<string, boolean> = {};
     for (const p of this.profiles) {
-      next[p.id] = napi.vmRunning(p.id);
+      next[p.id] = vmIsRunning(p.id);
     }
     this.runningIds = next;
   }

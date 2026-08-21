@@ -5,11 +5,15 @@
 #define FB_H
 
 #include "qemu_abi.h"
+#include <condition_variable>
 #include <mutex>
 #include <vector>
 
 struct Framebuffer {
     std::mutex mu;
+    /* 事件驱动渲染：gfx_update/gfx_switch 在持有 mu 时 notify，渲染线程
+     * 在 cv 上等新帧，替代「无帧仍 usleep 空转轮询」。 */
+    std::condition_variable cv;
     DisplaySurface *surface = nullptr; // owned by qemu, deref only under mu
     int w = 0;
     int h = 0;

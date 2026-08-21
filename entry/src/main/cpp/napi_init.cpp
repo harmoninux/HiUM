@@ -78,6 +78,45 @@ static napi_value VmRunning(napi_env env, napi_callback_info info)
     return result;
 }
 
+/* vmSnapshot(vmIds: string[]): { [vmId]: { running: boolean, w: number, h: number } }
+ * VMRegistry 批量取运行态：一次聚合一组 vmId，供 ArkTS 反应式 runningMap 刷新，
+ * 避免各页面各自轮询 napi.vmRunning。 */
+static napi_value VmSnapshot(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    napi_value result;
+    napi_create_object(env, &result);
+
+    uint32_t n = 0;
+    napi_get_array_length(env, args[0], &n);
+    for (uint32_t i = 0; i < n; i++) {
+        napi_value el = nullptr;
+        napi_get_element(env, args[0], i, &el);
+        if (el == nullptr) {
+            continue;
+        }
+        std::string vmId = stringArg(env, el);
+        int w = 0, h = 0;
+        bool running = ncp_client_running(vmId); /* 含自愈（子进程死则清理） */
+        ncp_client_query_display(vmId, &w, &h);
+
+        napi_value st;
+        napi_create_object(env, &st);
+        napi_value r, wv, hv;
+        napi_get_boolean(env, running, &r);
+        napi_create_int32(env, w, &wv);
+        napi_create_int32(env, h, &hv);
+        napi_set_named_property(env, st, "running", r);
+        napi_set_named_property(env, st, "w", wv);
+        napi_set_named_property(env, st, "h", hv);
+        napi_set_named_property(env, result, vmId.c_str(), st);
+    }
+    return result;
+}
+
 /* createSurface(vmId: string, surfaceId: bigint): number —— 给活动子进程挂窗（或仅记录） */
 static napi_value CreateSurface(napi_env env, napi_callback_info info)
 {
@@ -342,6 +381,7 @@ static napi_value Init(napi_env env, napi_value exports)
     napi_property_descriptor desc[] = {
         { "startVm", nullptr, StartVm, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "vmRunning", nullptr, VmRunning, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "vmSnapshot", nullptr, VmSnapshot, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "createSurface", nullptr, CreateSurface, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "resizeSurface", nullptr, ResizeSurface, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "destroySurface", nullptr, DestroySurface, nullptr, nullptr, nullptr, napi_default, nullptr },
