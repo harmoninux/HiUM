@@ -6,6 +6,9 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
+import {
+  VmSnapshotEntry, snapshotCreate, snapshotApply, snapshotDelete, parseSnapshots,
+} from '../lib/vmsnapshot';
 
 interface DiskNapi {
   diskInfo: (path: string) => string;
@@ -30,6 +33,9 @@ export struct VmManage {
   @State diskActualGB: number = 0;
   @State expandMode: boolean = false;
   @State newGBText: string = '';
+  @State snapshots: VmSnapshotEntry[] = [];
+  @State snapNameText: string = '';
+  @State snapCreateMode: boolean = false;
 
   aboutToAppear(): void {
     const p = this.profile;
@@ -40,6 +46,7 @@ export struct VmManage {
     this.arch = p.machine.arch;
     this.diskPath = p.media.diskPath;
     this.refreshDisk();
+    this.refreshSnapshot();
   }
 
   private refreshDisk(): void {
@@ -65,6 +72,124 @@ export struct VmManage {
     } catch {
       /* 解析失败保持默认 */
     }
+  }
+
+  /* ================= 快照 / 时光机（Phase 1，离线 qcow2 内部快照） ================= */
+
+  /* 磁盘是不是 qcow2（raw 不支持内部快照） */
+  private hasQcow(): boolean {
+    return this.diskPath.length > 0 && this.diskFmt === 'qcow2';
+  }
+
+  /* 是否可以操作快照：须 qcow2 且 VM 已下岗（运行中盘被 qemu 锁死，改了会丢） */
+  private canSnapshot(): boolean {
+    return this.hasQcow() && !(this.profile !== null && vmIsRunning(this.profile.id));
+  }
+
+  private snapStatus(): string {
+    if (this.diskPath.length === 0) {
+      return '未配置系统盘';
+    }
+    if (this.diskFmt !== 'qcow2') {
+      return '仅 qcow2 支持';
+    }
+    if (this.profile !== null && vmIsRunning(this.profile.id)) {
+      return '需关机';
+    }
+    return '离线可用';
+  }
+
+  private refreshSnapshot(): void {
+    if (!this.canSnapshot()) {
+      this.snapshots = [];
+      return;
+    }
+    /* 列表来自 qemu-img info --output=json 的 snapshots 数组（同 diskInfo 的原始 JSON） */
+    this.snapshots = parseSnapshots(napi.diskInfo(this.diskPath));
+    if (this.snapshots.length > 0) {
+      this.snapshots.sort((a, b) => b.dateSec - a.dateSec);
+    }
+  }
+
+  private doSnapshotCreate(): void {
+    if (!this.canSnapshot()) {
+      promptAction.showToast({ message: this.snapStatus() });
+      return;
+    }
+    const name = this.snapNameText.trim();
+    if (name.length === 0) {
+      promptAction.showToast({ message: '请输入快照名' });
+      return;
+    }
+    const ret = snapshotCreate(this.diskPath, name);
+    if (ret !== 0) {
+      promptAction.showToast({ message: '创建快照失败' });
+      return;
+    }
+    this.snapCreateMode = false;
+    this.snapNameText = '';
+    this.refreshSnapshot();
+    promptAction.showToast({ message: `已创建快照「${name}」` });
+  }
+
+  private doSnapshotApply(s: VmSnapshotEntry): void {
+    if (!this.canSnapshot()) {
+      promptAction.showToast({ message: this.snapStatus() });
+      return;
+    }
+    AlertDialog.show({
+      title: '恢复到快照',
+      message: `将系统盘回滚到「${s.name}」时的状态，之后写入的数据会丢失。确认？`,
+      primaryButton: { value: '取消', action: () => {} },
+      secondaryButton: {
+        value: '恢复',
+        action: () => {
+          const ret = snapshotApply(this.diskPath, s.name);
+          if (ret !== 0) {
+            promptAction.showToast({ message: '恢复失败' });
+            return;
+          }
+          this.refreshDisk();
+          this.refreshSnapshot();
+          promptAction.showToast({ message: `已恢复到「${s.name}」` });
+        },
+      },
+    });
+  }
+
+  private doSnapshotDelete(s: VmSnapshotEntry): void {
+    if (!this.canSnapshot()) {
+      promptAction.showToast({ message: this.snapStatus() });
+      return;
+    }
+    AlertDialog.show({
+      title: '删除快照',
+      message: `删除快照「${s.name}」？当前数据不受影响，不可撤销。`,
+      primaryButton: { value: '取消', action: () => {} },
+      secondaryButton: {
+        value: '删除',
+        fontColor: Color.Red,
+        action: () => {
+          const ret = snapshotDelete(this.diskPath, s.name);
+          if (ret !== 0) {
+            promptAction.showToast({ message: '删除快照失败' });
+            return;
+          }
+          this.refreshSnapshot();
+          promptAction.showToast({ message: '已删除快照' });
+        },
+      },
+    });
+  }
+
+  private dateStr(sec: number): string {
+    if (sec <= 0) {
+      return '';
+    }
+    const d = new Date(sec * 1000);
+    const p = (n: number): string => n < 10 ? '0' + String(n) : String(n);
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+      `${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
   /* qcow2 只能扩大：目标须大于当前 virtual-size；运行中不能动 backing 盘 */
@@ -204,11 +329,54 @@ export struct VmManage {
         }
 
         ListItem() {
-          Row() {
-            Text('快照 / 时光机').fontSize(15).fontColor('#ff007dff')
-            Blank()
-            Text('后续版本').fontSize(12).fontColor('#ff999999')
-          }.padding(12)
+          Column({ space: 8 }) {
+            Row() {
+              Text('快照 / 时光机').fontSize(16).fontWeight(FontWeight.Medium)
+              Blank()
+              Text(this.snapStatus()).fontSize(12).fontColor(
+                this.canSnapshot() ? '#ff2e7d32' : '#ff999999')
+            }
+            if (this.hasQcow()) {
+              if (this.canSnapshot()) {
+                Row({ space: 8 }) {
+                  Button('新建快照').focusable(false).fontSize(13)
+                    .onClick(() => this.snapCreateMode = !this.snapCreateMode)
+                  Button('刷新').focusable(false).fontSize(13).fontColor('#ff666666')
+                    .onClick(() => this.refreshSnapshot())
+                }
+                if (this.snapCreateMode) {
+                  Row({ space: 8 }) {
+                    TextInput({ text: this.snapNameText, placeholder: '快照名' })
+                      .layoutWeight(1)
+                      .fontSize(13)
+                      .onChange((v: string) => this.snapNameText = v)
+                    Button('创建').focusable(false).fontSize(13)
+                      .onClick(() => this.doSnapshotCreate())
+                    Button('取消').focusable(false).fontSize(13).fontColor('#ff666666')
+                      .onClick(() => this.snapCreateMode = false)
+                  }
+                }
+                if (this.snapshots.length === 0) {
+                  Text('暂无快照').fontSize(12).fontColor('#ff999999')
+                } else {
+                  ForEach(this.snapshots, (s: VmSnapshotEntry) => {
+                    Row({ space: 8 }) {
+                      Column({ space: 2 }) {
+                        Text(s.name).fontSize(14)
+                        Text(this.dateStr(s.dateSec)).fontSize(11).fontColor('#ff999999')
+                      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+                      Button('恢复').focusable(false).fontSize(12)
+                        .onClick(() => this.doSnapshotApply(s))
+                      Button('删除').focusable(false).fontSize(12).fontColor(Color.Red)
+                        .onClick(() => this.doSnapshotDelete(s))
+                    }.padding({ top: 4, bottom: 4 })
+                  }, (s: VmSnapshotEntry) => s.id + ':' + s.name)
+                }
+              } else {
+                Text('停机后可创建快照').fontSize(12).fontColor('#ff999999')
+              }
+            }
+          }.alignItems(HorizontalAlign.Start).padding(12)
         }
       }
       .layoutWeight(1)

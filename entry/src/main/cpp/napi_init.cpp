@@ -375,6 +375,87 @@ static napi_value DiskResize(napi_env env, napi_callback_info info)
     return intResult(env, rc);
 }
 
+/* snapshotCreate(path: string, name: string): number — 给系统盘打一个内部快照。
+ * qemu-img snapshot -c <name> <path>。快照是磁盘自身状态（qcow2 内部快照），
+ * 必须离线：VM 停止后才能改盘，运行中调用会因盘被 qemu 锁定而失败。 */
+static napi_value SnapshotCreate(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string path = stringArg(env, args[0]);
+    std::string name = stringArg(env, args[1]);
+    if (path.empty() || name.empty()) {
+        return intResult(env, -1);
+    }
+    std::vector<std::string> argv;
+    argv.push_back("snapshot");
+    argv.push_back("-c");
+    argv.push_back(name);
+    argv.push_back(path);
+
+    std::string out;
+    int rc = imgtool_run(argv, out);
+    if (rc != 0) {
+        OH_LOG_ERROR(LOG_APP, "snapshotCreate %{public}s name=%{public}s rc=%{public}d: %{public}s",
+                     path.c_str(), name.c_str(), rc, out.c_str());
+    }
+    return intResult(env, rc);
+}
+
+/* snapshotApply(path: string, name: string): number — 回滚到某快照（覆盖当前内容，之后写入丢失）。
+ * qemu-img snapshot -a <name> <path>；同样须离线。 */
+static napi_value SnapshotApply(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string path = stringArg(env, args[0]);
+    std::string name = stringArg(env, args[1]);
+    if (path.empty() || name.empty()) {
+        return intResult(env, -1);
+    }
+    std::vector<std::string> argv;
+    argv.push_back("snapshot");
+    argv.push_back("-a");
+    argv.push_back(name);
+    argv.push_back(path);
+
+    std::string out;
+    int rc = imgtool_run(argv, out);
+    if (rc != 0) {
+        OH_LOG_ERROR(LOG_APP, "snapshotApply %{public}s name=%{public}s rc=%{public}d: %{public}s",
+                     path.c_str(), name.c_str(), rc, out.c_str());
+    }
+    return intResult(env, rc);
+}
+
+/* snapshotDelete(path: string, name: string): number — 删除某快照（不触碰其他快照/当前数据）。 */
+static napi_value SnapshotDelete(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string path = stringArg(env, args[0]);
+    std::string name = stringArg(env, args[1]);
+    if (path.empty() || name.empty()) {
+        return intResult(env, -1);
+    }
+    std::vector<std::string> argv;
+    argv.push_back("snapshot");
+    argv.push_back("-d");
+    argv.push_back(name);
+    argv.push_back(path);
+
+    std::string out;
+    int rc = imgtool_run(argv, out);
+    if (rc != 0) {
+        OH_LOG_ERROR(LOG_APP, "snapshotDelete %{public}s name=%{public}s rc=%{public}d: %{public}s",
+                     path.c_str(), name.c_str(), rc, out.c_str());
+    }
+    return intResult(env, rc);
+}
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports)
 {
@@ -396,6 +477,9 @@ static napi_value Init(napi_env env, napi_value exports)
         { "createDisk", nullptr, CreateDisk, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "diskInfo", nullptr, DiskInfo, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "diskResize", nullptr, DiskResize, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "snapshotCreate", nullptr, SnapshotCreate, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "snapshotApply", nullptr, SnapshotApply, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "snapshotDelete", nullptr, SnapshotDelete, nullptr, nullptr, nullptr, napi_default, nullptr },
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;
