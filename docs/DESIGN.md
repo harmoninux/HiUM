@@ -98,6 +98,12 @@ vmId 路由注册表天然共享。
   `removeMissionAfterTerminate: true`。窗口语义收敛为「存活 VM 的视图」：
   VM 死亡（`SHUTDOWN`/`QMP_DISCONNECT`）→ `terminateSelf()` 销毁窗口，下次
   从列表「进入」走全新窗口自动重启。
+- **qemu-img 工具链**：`qemu_img_entry`（从 `libqemu-img.so` 导出）不可再入，
+  本质是一次性 CLI ⇒ 每条命令（create/info/…）都在 `fork` 出的**一次性子进程**里
+  `dlopen` + 跑入口、`_exit`，经 pipe 回收输出、`waitpid` 吃退出码。不用 native
+  child process / IPC，直接在 fork 前把参数准备好当 argv 传入即可。默认 qcow2：
+  `create -f qcow2 [-o preallocation=off|falloc] <path> <sizeM>`，
+  `info --output=json <path>`（virtual-size/actual-size/format）。
 - **性能基线**：Alpine 3.21 (kernel 6.12) 从 ISO 引导到 `localhost login` 约 50s
   （TCG），键盘可进 shell，显示模式切换（640x480 → 720x400 → 1280x800）正常。
 
@@ -158,6 +164,10 @@ MediaStore 集中管理：基础镜像（base）+ 差分快照（backing_file）
 **Phase 0 · 地基（无它寸步难行）**
 qcow2 + qemu-img 接线 · MediaStore · 配置 schema v2 + 迁移 · per-VM 锁 +
 VMRegistry · 事件驱动渲染 · 真备份/恢复（启用 EntryBackupAbility）。
+
+> **系统盘延迟创建**：配置页「创建」只是标记意图（diskNew），真正
+> `qemu-img create` 在「保存」那一刻执行；取消/返回不留孤儿磁盘文件。已确认：默认
+> 动态分配（稀疏，实占≈0）、可切固定大小（falloc 预留整块，免中途 ENOSPC）。
 
 > 标注：**开发阶段 host 固定 x86_64**（走 api24 模拟器）；arm64-v8a 宿主库
 > 后置到真机发布前再做，暂不阻塞开发。
