@@ -3,6 +3,7 @@
 #include "fb.h"
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <hilog/log.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -46,6 +47,14 @@ struct VmState {
 };
 VmState g_vm;
 
+/* qemu 把 run-once 状态放在自身 .so 的静态区（vm_config_groups、DCL 链表
+ * ……），同一份映射无法二次进入（qemu_add_opts 重复注册会 abort）；
+ * dlclose 重载也不行：本线程持有 qemu 注册的 TLS 析构，卸载后线程退出会
+ * 跳到已卸载代码（实测必崩）；把 .so 复制到 filesDir 再 dlopen 又被代码
+ * 完整性策略拒绝（EINVAL）。因此一个进程只跑一轮 VM，跑完置 g_spent，
+ * 二次启动由上层（ArkTS）走进程级重启。 */
+bool g_spent = false;
+
 template <typename T>
 bool resolveSym(void *so, const char *name, T *out)
 {
@@ -60,11 +69,36 @@ bool resolveSym(void *so, const char *name, T *out)
 void vmMain(VmState *vm)
 {
     pthread_setname_np(pthread_self(), "qemu-main");
+    /* qemu 自己的错误走 stdout/stderr：重定向到 <vmDataDir>/qemu.log 以便诊断 */
+    for (size_t i = 0; i + 1 < vm->argStrings.size(); i++) {
+        if (vm->argStrings[i] == "-L") {
+            std::string log = vm->argStrings[i + 1] + "/qemu.log";
+            int fd = open(log.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd >= 0) {
+                dup2(fd, STDOUT_FILENO);
+                dup2(fd, STDERR_FILENO);
+                if (fd > STDERR_FILENO) {
+                    close(fd);
+                }
+            }
+            break;
+        }
+    }
     int argc = (int)vm->argPtrs.size();
     OH_LOG_INFO(LOG_APP, "qemu_system_entry start, argc=%{public}d", argc);
     int ret = qe_system_entry(argc, vm->argPtrs.data());
     OH_LOG_INFO(LOG_APP, "qemu_system_entry exited, ret=%{public}d", ret);
     vm->running.store(false);
+
+    /* cleanup: drop our pointers into the qemu .so, then stop the bind
+     * thread (it polls qemu symbols). no dlclose — see g_sourcePath note. */
+    fb_reset();
+    g_qemu_con = nullptr;
+    if (vm->bindThread.joinable()) {
+        vm->bindThread.join();
+    }
+    vm->so = nullptr;
+    g_spent = true; /* 本进程不可再跑 VM，上层应重启进程 */
 }
 
 void bindDisplay(VmState *vm)
@@ -91,10 +125,20 @@ bool vm_running()
     return g_vm.running.load();
 }
 
+bool vm_spent()
+{
+    return g_spent;
+}
+
 int vm_start(const std::string &arch, const std::vector<std::string> &args)
 {
-    if (g_vm.running.load()) {
-        OH_LOG_WARN(LOG_APP, "vm already running");
+    if (g_spent) {
+        OH_LOG_WARN(LOG_APP, "qemu lib already spent in this process, restart required");
+        return -2;
+    }
+    /* so != nullptr means the previous run is still cleaning up */
+    if (g_vm.running.load() || g_vm.so != nullptr) {
+        OH_LOG_WARN(LOG_APP, "vm already running or cleaning up");
         return -1;
     }
 
@@ -152,7 +196,7 @@ int vm_start(const std::string &arch, const std::vector<std::string> &args)
     g_vm.running.store(true);
     g_vm.vmThread = std::thread(vmMain, &g_vm);
     g_vm.vmThread.detach();
+    /* not detached: vmMain joins it during cleanup */
     g_vm.bindThread = std::thread(bindDisplay, &g_vm);
-    g_vm.bindThread.detach();
     return 0;
 }

@@ -17,6 +17,9 @@
       },
       {
         "name": "ohos.permission.kernel.DISABLE_CODE_MEMORY_PROTECTION"
+      },
+      {
+        "name": "ohos.permission.INTERNET"
       }
     ],
     "abilities": [
@@ -28,6 +31,7 @@
         "label": "$string:EntryAbility_label",
         "startWindowIcon": "$media:startIcon",
         "startWindowBackground": "$color:start_window_background",
+        "recoverable": true,
         "exported": true,
         "skills": [
           {

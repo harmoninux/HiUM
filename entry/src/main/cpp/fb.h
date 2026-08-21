@@ -30,4 +30,9 @@ extern DisplayChangeListener g_dcl;
  * must be called with g_fb.mu held. */
 void fb_update_rect(int x, int y, int w, int h);
 
+/* clear all qemu-bound state after a VM run ends: g_dcl keeps dangling
+ * pointers (ds/con) into the qemu .so otherwise, and re-registering with a
+ * stale ds trips qemu's assert(!dcl->ds). safe to call anytime. */
+void fb_reset();
+
 #endif /* FB_H */

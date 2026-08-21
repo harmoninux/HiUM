@@ -16,7 +16,8 @@ add_library(entry SHARED
     vm.cpp
     fb.cpp
     renderer.cpp
-    input.cpp)
+    input.cpp
+    qmp.cpp)
 
 target_link_libraries(entry PUBLIC
     libace_napi.z.so

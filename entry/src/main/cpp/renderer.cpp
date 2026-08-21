@@ -278,6 +278,11 @@ int renderer_create_surface(int64_t surfaceId)
         return -1;
     }
 
+    /* 新 surface（重建的 EGL 纹理是空的）：强制首轮全量回传 back buffer，
+     * 否则 guest 无脏帧时（如停在 login）重新进入 Console 会一直黑屏 */
+    g_rs.texW = 0;
+    g_rs.texH = 0;
+
     g_rs.running.store(true);
     g_rs.thread = std::thread(renderLoop);
     OH_LOG_INFO(LOG_APP, "renderer started, surfaceId=%{public}lld", (long long)surfaceId);

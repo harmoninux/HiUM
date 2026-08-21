@@ -83,6 +83,7 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, TAG, 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
     const ok = unpackFirmware(this.context);
+    AppStorage.setOrCreate('filesDir', this.context.filesDir);
     AppStorage.setOrCreate('vmDataDir', this.context.filesDir + '/vm');
     AppStorage.setOrCreate('firmwareReady', ok);
     hilog.info(DOMAIN, TAG, 'Ability onCreate, firmwareReady=%{public}s', String(ok));

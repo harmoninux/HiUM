@@ -149,3 +149,18 @@ DisplayChangeListener g_dcl = {
     /* con */ nullptr,
     /* next, prev */ nullptr, nullptr,
 };
+
+void fb_reset()
+{
+    std::lock_guard<std::mutex> lock(g_fb.mu);
+    g_dcl.ds = nullptr;
+    g_dcl.con = nullptr;
+    g_dcl.next = nullptr;
+    g_dcl.prev = nullptr;
+    g_fb.surface = nullptr;
+    g_fb.w = 0;
+    g_fb.h = 0;
+    g_fb.back.clear();
+    g_fb.dirty = false;
+    g_fb.resized = false;
+}

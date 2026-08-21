@@ -2,8 +2,16 @@
 #include "vm.h"
 #include "renderer.h"
 #include "input.h"
+#include "fb.h"
+#include "qmp.h"
 
+#include <fcntl.h>
 #include <hilog/log.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -47,6 +55,14 @@ static napi_value VmRunning(napi_env env, napi_callback_info info)
 {
     napi_value result;
     napi_get_boolean(env, vm_running(), &result);
+    return result;
+}
+
+/* vmSpent(): boolean — true 后必须重启进程才能再跑 VM */
+static napi_value VmSpent(napi_env env, napi_callback_info info)
+{
+    napi_value result;
+    napi_get_boolean(env, vm_spent(), &result);
     return result;
 }
 
@@ -134,17 +150,143 @@ static napi_value SendKey(napi_env env, napi_callback_info info)
     return nullptr;
 }
 
+/* qmpConnect(port: number): number */
+static napi_value QmpConnect(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t port = 0;
+    napi_get_value_int32(env, args[0], &port);
+
+    int ret = qmp_connect(port);
+    napi_value result;
+    napi_create_int32(env, ret, &result);
+    return result;
+}
+
+/* qmpCommand(cmd: string): string — raw JSON response, "" on failure */
+static napi_value QmpCommand(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    size_t len = 0;
+    napi_get_value_string_utf8(env, args[0], nullptr, 0, &len);
+    std::string cmd(len, '\0');
+    napi_get_value_string_utf8(env, args[0], &cmd[0], len + 1, &len);
+
+    std::string resp = qmp_command(cmd);
+    napi_value result;
+    napi_create_string_utf8(env, resp.c_str(), resp.size(), &result);
+    return result;
+}
+
+/* qmpDisconnect() */
+static napi_value QmpDisconnect(napi_env env, napi_callback_info info)
+{
+    qmp_disconnect();
+    return nullptr;
+}
+
+/* qmpConnected(): boolean */
+static napi_value QmpConnected(napi_env env, napi_callback_info info)
+{
+    napi_value result;
+    napi_get_boolean(env, qmp_connected(), &result);
+    return result;
+}
+
+/* setQmpEventCallback(cb: ((evt: string) => void) | null) */
+static napi_value SetQmpEventCallback(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    napi_valuetype type = napi_undefined;
+    napi_typeof(env, args[0], &type);
+    qmp_set_event_callback(env, type == napi_function ? args[0] : nullptr);
+    return nullptr;
+}
+
+/* captureScreen(): { width, height, pixels: ArrayBuffer(RGBA_8888) } | null */
+static napi_value CaptureScreen(napi_env env, napi_callback_info info)
+{
+    std::lock_guard<std::mutex> lk(g_fb.mu);
+    if (g_fb.w <= 0 || g_fb.h <= 0 || g_fb.back.empty()) {
+        napi_value result;
+        napi_get_null(env, &result);
+        return result;
+    }
+    size_t npix = g_fb.back.size();
+    void *data = nullptr;
+    napi_value buffer;
+    napi_create_arraybuffer(env, npix * sizeof(uint32_t), &data, &buffer);
+    /* back is X8R8G8B8; ArkTS PixelMap wants RGBA_8888: swap R/B, force A=0xff */
+    const uint32_t *src = g_fb.back.data();
+    uint32_t *dst = static_cast<uint32_t *>(data);
+    for (size_t i = 0; i < npix; i++) {
+        uint32_t p = src[i];
+        dst[i] = 0xff000000u | (p & 0x0000ff00u) | ((p >> 16) & 0xffu) | ((p & 0xffu) << 16);
+    }
+
+    napi_value result;
+    napi_create_object(env, &result);
+    napi_value w, h;
+    napi_create_int32(env, g_fb.w, &w);
+    napi_create_int32(env, g_fb.h, &h);
+    napi_set_named_property(env, result, "width", w);
+    napi_set_named_property(env, result, "height", h);
+    napi_set_named_property(env, result, "pixels", buffer);
+    return result;
+}
+
+/* createDisk(path: string, sizeMB: number): number — sparse raw image */
+static napi_value CreateDisk(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    size_t len = 0;
+    napi_get_value_string_utf8(env, args[0], nullptr, 0, &len);
+    std::string path(len, '\0');
+    napi_get_value_string_utf8(env, args[0], &path[0], len + 1, &len);
+    int32_t sizeMB = 0;
+    napi_get_value_int32(env, args[1], &sizeMB);
+
+    int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int ret = 0;
+    if (fd < 0 || ftruncate(fd, (off_t)sizeMB * 1024 * 1024) != 0) {
+        OH_LOG_ERROR(LOG_APP, "createDisk %{public}s failed: %{public}s", path.c_str(), strerror(errno));
+        ret = -1;
+    }
+    if (fd >= 0) {
+        close(fd);
+    }
+    napi_value result;
+    napi_create_int32(env, ret, &result);
+    return result;
+}
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports)
 {
     napi_property_descriptor desc[] = {
         { "startVm", nullptr, StartVm, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "vmRunning", nullptr, VmRunning, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "vmSpent", nullptr, VmSpent, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "createSurface", nullptr, CreateSurface, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "resizeSurface", nullptr, ResizeSurface, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "destroySurface", nullptr, DestroySurface, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendPointer", nullptr, SendPointer, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendKey", nullptr, SendKey, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "qmpConnect", nullptr, QmpConnect, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "qmpCommand", nullptr, QmpCommand, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "qmpDisconnect", nullptr, QmpDisconnect, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "qmpConnected", nullptr, QmpConnected, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "setQmpEventCallback", nullptr, SetQmpEventCallback, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "captureScreen", nullptr, CaptureScreen, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "createDisk", nullptr, CreateDisk, nullptr, nullptr, nullptr, napi_default, nullptr },
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;
