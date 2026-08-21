@@ -362,6 +362,23 @@ void ncp_client_key(const std::string &vmId, int32_t qcode, bool down)
     OH_IPCParcel_Destroy(req);
 }
 
+void ncp_client_scroll(const std::string &vmId, int32_t dx, int32_t dy)
+{
+    ChildState *chp = getChild(vmId);
+    if (chp == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> chLock(chp->mu);
+    if (chp->proxy == nullptr || !chp->vmRunning) {
+        return;
+    }
+    OHIPCParcel *req = newRequest();
+    OH_IPCParcel_WriteInt32(req, dx);
+    OH_IPCParcel_WriteInt32(req, dy);
+    replyCode(sendTo(*chp, kScroll, req));
+    OH_IPCParcel_Destroy(req);
+}
+
 bool ncp_client_running(const std::string &vmId)
 {
     ChildState *chp = getChild(vmId);

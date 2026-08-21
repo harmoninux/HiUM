@@ -124,6 +124,13 @@ int onRequest(uint32_t code, const OHIPCParcel *data, OHIPCParcel *reply, void *
             input_send_key(qcode, down != 0);
             return replyInt(reply, 0);
         }
+        case kScroll: {
+            int32_t dx = 0, dy = 0;
+            OH_IPCParcel_ReadInt32(data, &dx);
+            OH_IPCParcel_ReadInt32(data, &dy);
+            input_send_scroll(dx, dy);
+            return replyInt(reply, 0);
+        }
         case kQuery: {
             int fbW = 0, fbH = 0;
             {

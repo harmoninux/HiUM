@@ -35,6 +35,7 @@ export interface VmMedia {
 export interface VmNet {
   enabled: boolean;
   portForwards: string; /* "8080:80,2222:22"，空串 = 不转发 */
+  sharedFolder: boolean; /* 9p 共享宿主目录 filesDir/shared → guest /shared（默认关） */
 }
 
 export interface VmProfile {
@@ -60,7 +61,7 @@ export function blankProfile(id: string): VmProfile {
     machine: { arch: 'x86_64', vga: 'std' },
     runtime: { memoryMB: 1024, cpus: 2, mttcg: true, tbSize: 1024 },
     media: { diskPath: '', cdromPath: '', bootFromCdrom: false },
-    net: { enabled: true, portForwards: '' },
+    net: { enabled: true, portForwards: '', sharedFolder: false },
     extraArgs: '',
   };
 }
@@ -168,6 +169,7 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
   if (n) {
     p.net.enabled = jBool(n, 'enabled', p.net.enabled);
     p.net.portForwards = jStr(n, 'portForwards');
+    p.net.sharedFolder = jBool(n, 'sharedFolder', p.net.sharedFolder);
   }
   p.extraArgs = jStr(o, 'extraArgs');
   return p;
@@ -197,7 +199,12 @@ export function qmpSockPath(p: VmProfile, vmDataDir: string): string {
   return `${vmDataDir}/qmp-${p.id}.sock`;
 }
 
-export function buildArgs(p: VmProfile, vmDataDir: string): string[] {
+/* 9p 共享宿主目录（app 数据目录下，guest 挂载为 /shared；须先 mkdir 再跑 VM） */
+export function sharedDir(filesDir: string): string {
+  return filesDir + '/shared';
+}
+
+export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = ''): string[] {
   let args: string[] = [
     '-L', vmDataDir,
     '-m', String(p.runtime.memoryMB),
@@ -230,6 +237,10 @@ export function buildArgs(p: VmProfile, vmDataDir: string): string[] {
     args.push('-netdev', netdev, '-device', 'virtio-net-pci,netdev=n0');
   } else {
     args.push('-nic', 'none');
+  }
+  if (p.net.sharedFolder && sharedDir.length > 0) {
+    /* 9p 共享宿主目录到 guest /shared（宿主目录须已存在，由调用方 mkdir） */
+    args.push('-virtfs', `local,path=${sharedDir},mount_tag=shared,security_model=none,multidevs=remap`);
   }
   const extra = p.extraArgs.trim();
   if (extra.length > 0) {

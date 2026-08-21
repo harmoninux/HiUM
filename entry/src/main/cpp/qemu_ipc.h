@@ -24,5 +24,6 @@ constexpr uint32_t kKey = 6;           /* [ver][qcode][down] → int32 */
 constexpr uint32_t kQuery = 7;         /* [ver] → [ver][fbW][fbH][running] */
 constexpr uint32_t kScreenshot = 8;    /* [ver][maxW] → [ver][w][h][rgba bytes] */
 constexpr uint32_t kShutdown = 9;      /* [ver] → int32，随后子进程退出 */
+constexpr uint32_t kScroll = 10;       /* [ver][dx][dy] → int32 滚轮步进（dy>0 下滚，dy<0 上滚） */
 
 } // namespace qemu_ipc

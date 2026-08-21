@@ -18,6 +18,7 @@ int ncp_client_attach(const std::string &vmId, int64_t surfaceId);
 void ncp_client_detach(const std::string &vmId);
 void ncp_client_resize(const std::string &vmId, int32_t w, int32_t h);
 void ncp_client_pointer(const std::string &vmId, int32_t x, int32_t y, int32_t buttons);
+void ncp_client_scroll(const std::string &vmId, int32_t dx, int32_t dy); /* 滚轮步进 */
 void ncp_client_key(const std::string &vmId, int32_t qcode, bool down);
 bool ncp_client_running(const std::string &vmId);
 /* 子进程侧当前 guest 分辨率；无子进程返回 -1 */

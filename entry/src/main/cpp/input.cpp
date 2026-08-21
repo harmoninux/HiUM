@@ -69,3 +69,21 @@ void input_send_key(int qcode, bool down)
     }
     qe_input_send_key(nullptr, qcode, down);
 }
+
+/* 滚轮：每步按一次「WHEEL 按下→sync→抬起→sync」产生一格。
+ * dy>0 下滚、dy<0 上滚；横向（dx）本 ABI 无对应按钮，忽略。 */
+void input_send_scroll(int dx, int dy)
+{
+    if (!g_qemu_con || !qe_input_queue_btn || !qe_input_event_sync || dy == 0) {
+        return;
+    }
+    int btn = dy < 0 ? INPUT_BUTTON_WHEEL_UP : INPUT_BUTTON_WHEEL_DOWN;
+    int steps = dy < 0 ? -dy : dy;
+    for (int i = 0; i < steps; i++) {
+        qe_input_queue_btn(g_qemu_con, btn, true);
+        qe_input_event_sync();
+        qe_input_queue_btn(g_qemu_con, btn, false);
+        qe_input_event_sync();
+    }
+    (void)dx;
+}

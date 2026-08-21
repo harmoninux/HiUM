@@ -190,6 +190,21 @@ static napi_value SendKey(napi_env env, napi_callback_info info)
     return nullptr;
 }
 
+/* scroll(vmId: string, dx: number, dy: number) —— 滚轮步进（dy>0 下滚，dy<0 上滚） */
+static napi_value Scroll(napi_env env, napi_callback_info info)
+{
+    size_t argc = 3;
+    napi_value args[3] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    std::string vmId = stringArg(env, args[0]);
+    int32_t dx = 0, dy = 0;
+    napi_get_value_int32(env, args[1], &dx);
+    napi_get_value_int32(env, args[2], &dy);
+    ncp_client_scroll(vmId, dx, dy);
+    return nullptr;
+}
+
 /* qmpConnect(vmId: string, sockPath: string): number */
 static napi_value QmpConnect(napi_env env, napi_callback_info info)
 {
@@ -468,6 +483,7 @@ static napi_value Init(napi_env env, napi_value exports)
         { "destroySurface", nullptr, DestroySurface, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendPointer", nullptr, SendPointer, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendKey", nullptr, SendKey, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "scroll", nullptr, Scroll, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "qmpConnect", nullptr, QmpConnect, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "qmpCommand", nullptr, QmpCommand, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "qmpDisconnect", nullptr, QmpDisconnect, nullptr, nullptr, nullptr, napi_default, nullptr },

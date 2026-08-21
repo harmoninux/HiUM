@@ -39,6 +39,7 @@ export struct VmEdit {
   @State vga: VgaType = 'std';
   @State netEnabled: boolean = true;
   @State portForwards: string = '';
+  @State sharedFolder: boolean = false;
   @State mttcg: boolean = true;
   @State tbSizeText: string = '1024';
   @State extraArgs: string = '';
@@ -59,6 +60,7 @@ export struct VmEdit {
     this.vga = p.machine.vga;
     this.netEnabled = p.net.enabled;
     this.portForwards = p.net.portForwards;
+    this.sharedFolder = p.net.sharedFolder;
     this.mttcg = p.runtime.mttcg;
     this.tbSizeText = String(p.runtime.tbSize);
     this.extraArgs = p.extraArgs;
@@ -143,6 +145,7 @@ export struct VmEdit {
       net: {
         enabled: this.netEnabled,
         portForwards: this.portForwards.trim(),
+        sharedFolder: this.sharedFolder,
       },
       extraArgs: this.extraArgs.trim(),
     };
@@ -328,6 +331,16 @@ export struct VmEdit {
               TextInput({ placeholder: '如 2222:22,8080:80', text: this.portForwards })
                 .onChange((v: string) => this.portForwards = v)
             }.alignItems(HorizontalAlign.Start).padding(12)
+          }
+          ListItem() {
+            Column({ space: 4 }) {
+              Row() {
+                Text('9p 共享目录').fontSize(14).layoutWeight(1)
+                Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
+                  .onChange((v: boolean) => this.sharedFolder = v)
+              }.padding({ left: 0, right: 0 })
+              Text('挂载宿主应用数据下 shared/ 到客机 /shared（9p）').fontSize(12).fontColor('#ff999999')
+            }.alignItems(HorizontalAlign.Start).padding({ left: 12, right: 12, bottom: 12 })
           }
         }
 

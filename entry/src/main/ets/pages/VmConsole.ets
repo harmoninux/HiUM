@@ -5,10 +5,11 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { image } from '@kit.ImageKit';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
-import { VmProfile, VmStore, buildArgs, qmpSockPath } from '../lib/vmprofile';
+import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir } from '../lib/vmprofile';
 import { getConsoleWindow, takePendingVmId } from '../lib/vmwindows';
 
 interface ScreenShotBuf {
@@ -25,6 +26,7 @@ interface QemuNapi {
   destroySurface: (vmId: string) => number;
   sendPointer: (vmId: string, x: number, y: number, buttons: number) => void;
   sendKey: (vmId: string, qcode: number, down: boolean) => void;
+  scroll: (vmId: string, dx: number, dy: number) => void;
   qmpConnect: (vmId: string, sockPath: string) => number;
   qmpCommand: (vmId: string, cmd: string) => string;
   qmpConnected: (vmId: string) => boolean;
@@ -83,15 +85,34 @@ struct VmConsole {
   @State status: string = '';
   @State paused: boolean = false;
   @State fullscreen: boolean = true; /* 窗口默认沉浸式 */
+  /* 串口尾随面板 */
+  @State showSerial: boolean = false;
+  @State serialText: string = '';
+  /* QMP 工具面板 */
+  @State showQmp: boolean = false;
+  @State qmpCmd: string = '';
+  @State qmpResp: string = '';
+  @State qmpEvents: string[] = [];
   private vmId: string = '';
   private profile: VmProfile | null = null;
   private xcController: VmXComponentController = new VmXComponentController();
-  private touchButtons: number = 0;
   private areaW: number = 0;
   private areaH: number = 0;
   private surfaceReady: boolean = false;
   private startPending: boolean = false;
   private closed: boolean = false; /* VM 已死导致本窗口即将销毁，防重复 terminate */
+  /* 触摸手势状态机（单指=移动/左键/长按右键；双指=滚轮） */
+  private touchButtons: number = 0;
+  private singleDown: boolean = false;
+  private singleStartX: number = 0;
+  private singleStartY: number = 0;
+  private longPressTimer: number = -1;
+  private longPressed: boolean = false;
+  private twoFinger: boolean = false;
+  private scrollCenterY: number = 0;
+  private scrollAcc: number = 0;
+  private lastX: number = 0;
+  private lastY: number = 0;
 
   private toSurfacePx(vp: number, vpSize: number, surfaceSize: number): number {
     if (vpSize <= 0 || surfaceSize <= 0) {
@@ -149,9 +170,21 @@ struct VmConsole {
       this.startPending = true;
       return;
     }
+    let share = '';
+    if (this.profile.net.sharedFolder) {
+      share = sharedDir(this.filesDir);
+      try {
+        if (!fs.accessSync(share)) {
+          fs.mkdirSync(share, true);
+        }
+      } catch {
+        /* 目录建不出来就不挂 9p，让 qemu 自行忽略 */
+        share = '';
+      }
+    }
     /* 每次启动都是一个新的 NCP 子进程；多实例按 vmId 各起各的 */
     const ret = napi.startVm(this.vmId, this.profile.machine.arch,
-      buildArgs(this.profile, this.vmDataDir), this.xcController.surfaceId);
+      buildArgs(this.profile, this.vmDataDir, share), this.xcController.surfaceId);
     if (ret !== 0) {
       this.status = '启动失败: ' + ret;
       return;
@@ -180,6 +213,10 @@ struct VmConsole {
       return;
     }
     hilog.info(DOMAIN, TAG, 'qmp event: %{public}s', name);
+    this.qmpEvents.push(name);
+    if (this.qmpEvents.length > 50) {
+      this.qmpEvents = this.qmpEvents.slice(-50);
+    }
     switch (name) {
       case 'STOP':
         this.paused = true;
@@ -232,6 +269,165 @@ struct VmConsole {
     if (resp.indexOf('"error"') >= 0) {
       promptAction.showToast({ message: cmd + ' 失败: ' + resp.substring(0, 120) });
     }
+  }
+
+  /* ================= 触摸手势（单指移动/点击/长按右键，双指滚轮） ================= */
+
+  private sendPtrMedia(vx: number, vy: number, buttons: number): void {
+    const px = this.toSurfacePx(vx, this.areaW, this.xcController.surfaceWidth);
+    const py = this.toSurfacePx(vy, this.areaH, this.xcController.surfaceHeight);
+    this.lastX = vx;
+    this.lastY = vy;
+    napi.sendPointer(this.vmId, px, py, buttons);
+  }
+
+  private cancelLongPress(): void {
+    if (this.longPressTimer >= 0) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = -1;
+    }
+  }
+
+  /* 长按 600ms 且手指几乎没动 → 右键（按下右键，抬起时释放）*/
+  private fireLongPress(): void {
+    this.longPressTimer = -1;
+    this.longPressed = true;
+    this.touchButtons = 0x02; /* bit1 = 右键 */
+    this.sendPtrMedia(this.lastX, this.lastY, 0x02);
+  }
+
+  private handleTouch(event: TouchEvent): void {
+    /* 抬起：无论 touches 是否还带着这支手指，一律释放按住的键回空闲 */
+    if (event.type === TouchType.Up) {
+      this.cancelLongPress();
+      const releaseBtns = this.touchButtons;
+      this.touchButtons = 0;
+      this.singleDown = false;
+      this.twoFinger = false;
+      this.longPressed = false;
+      this.scrollAcc = 0;
+      if (releaseBtns !== 0) {
+        this.sendPtrMedia(this.lastX, this.lastY, 0);
+      }
+      return;
+    }
+    const n = event.touches.length;
+    if (n >= 2) {
+      /* 双指：垂直滑动 → 滚轮（以两指质心 Y 的累积位移折算步数） */
+      const cY = (event.touches[0].y + event.touches[1].y) / 2;
+      if (!this.twoFinger) {
+        this.twoFinger = true;
+        this.scrollCenterY = cY;
+        this.scrollAcc = 0;
+        this.cancelLongPress();
+        this.touchButtons = 0;
+        this.singleDown = false;
+      } else {
+        const delta = cY - this.scrollCenterY;
+        this.scrollCenterY = cY;
+        this.scrollAcc += delta;
+        const step = 28; /* 触摸视图 px → 1 格滚动 */
+        while (this.scrollAcc >= step) {
+          napi.scroll(this.vmId, 0, 1);
+          this.scrollAcc -= step;
+        }
+        while (this.scrollAcc <= -step) {
+          napi.scroll(this.vmId, 0, -1);
+          this.scrollAcc += step;
+        }
+      }
+      return;
+    }
+
+    if (n === 1) {
+      const t = event.touches[0];
+      if (this.twoFinger) {
+        /* 从双指回到单指：这是滚动结束后残留的手指，不是新点击 */
+        this.twoFinger = false;
+        this.singleDown = true;
+        this.touchButtons = 0;
+        this.singleStartX = t.x;
+        this.singleStartY = t.y;
+        return;
+      }
+      if (!this.singleDown) {
+        this.singleDown = true;
+        this.singleStartX = t.x;
+        this.singleStartY = t.y;
+        this.longPressed = false;
+        this.touchButtons = 0x01; /* bit0 = 左键 */
+        this.sendPtrMedia(t.x, t.y, 0x01);
+        this.cancelLongPress();
+        this.longPressTimer = setTimeout(() => this.fireLongPress(), 600);
+      } else {
+        /* 移动：超过阈值即取消长按（当作拖动） */
+        const dx = t.x - this.singleStartX;
+        const dy = t.y - this.singleStartY;
+        if ((dx > 8 || dx < -8 || dy > 8 || dy < -8) && this.longPressTimer >= 0) {
+          this.cancelLongPress();
+        }
+        this.sendPtrMedia(t.x, t.y, this.touchButtons);
+      }
+      return;
+    }
+
+    /* n === 0：全部抬起 → 释放按住的键 */
+    this.cancelLongPress();
+    const releaseBtns = this.longPressed ? 0 : this.touchButtons;
+    this.touchButtons = 0;
+    this.singleDown = false;
+    this.twoFinger = false;
+    this.longPressed = false;
+    if (releaseBtns !== 0) {
+      this.sendPtrMedia(this.lastX, this.lastY, 0);
+    }
+  }
+
+  /* ================= 串口尾随 ================= */
+
+  private refreshSerial(): void {
+    if (!this.profile) {
+      return;
+    }
+    const path = `${this.vmDataDir}/serial-${this.profile.id}.log`;
+    let text = '';
+    try {
+      if (fs.accessSync(path)) {
+        const fd = fs.openSync(path, fs.OpenMode.READ_ONLY);
+        const buf = new ArrayBuffer(256 * 1024);
+        const n = fs.readSync(fd.fd, buf);
+        fs.closeSync(fd);
+        text = util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n));
+      }
+    } catch {
+      text = '';
+    }
+    this.serialText = text.length > 0 ? text : '（串口为空）';
+  }
+
+  private toggleSerial(): void {
+    this.showSerial = !this.showSerial;
+    this.showQmp = false;
+    if (this.showSerial) {
+      this.refreshSerial();
+    }
+  }
+
+  /* ================= QMP 工具页 ================= */
+
+  private sendQmpCmd(): void {
+    const cmd = this.qmpCmd.trim();
+    if (cmd.length === 0) {
+      promptAction.showToast({ message: '请输入 QMP 命令' });
+      return;
+    }
+    this.qmpResp = napi.qmpCommand(this.vmId, cmd);
+    this.qmpEvents = []; /* 发送即清空事件流，聚焦当前往返 */
+  }
+
+  private toggleQmp(): void {
+    this.showQmp = !this.showQmp;
+    this.showSerial = false;
   }
 
   private saveThumb(): void {
@@ -305,25 +501,7 @@ struct VmConsole {
             this.areaW = newArea.width as number;
             this.areaH = newArea.height as number;
           })
-          .onTouch((event: TouchEvent) => {
-            const touch = event.touches.length > 0 ? event.touches[0] : undefined;
-            if (!touch) {
-              return;
-            }
-            switch (event.type) {
-              case TouchType.Down:
-                this.touchButtons = 0x01;
-                break;
-              case TouchType.Up:
-                this.touchButtons = 0;
-                break;
-              default:
-                break;
-            }
-            const px = this.toSurfacePx(touch.x, this.areaW, this.xcController.surfaceWidth);
-            const py = this.toSurfacePx(touch.y, this.areaH, this.xcController.surfaceHeight);
-            napi.sendPointer(this.vmId, px, py, this.touchButtons);
-          })
+          .onTouch((event: TouchEvent) => this.handleTouch(event))
       }
       .width('100%')
       .height('100%')
@@ -343,11 +521,72 @@ struct VmConsole {
           })
         Button(this.fullscreen ? '退出全屏' : '全屏').focusable(false).fontSize(13)
           .onClick(() => this.toggleFullscreen())
+        Button('串口').focusable(false).fontSize(13)
+          .onClick(() => this.toggleSerial())
+        Button('QMP').focusable(false).fontSize(13)
+          .onClick(() => this.toggleQmp())
         Text(this.status).fontSize(12).fontColor(Color.White).layoutWeight(1)
       }
       .width('100%')
       .padding(6)
       .backgroundColor('#99000000')
+
+      /* 串口尾随抽屉 */
+      if (this.showSerial) {
+        Column({ space: 6 }) {
+          Row() {
+            Text('串口输出').fontSize(13).fontColor(Color.White)
+            Blank()
+            Button('刷新').focusable(false).fontSize(12)
+              .onClick(() => this.refreshSerial())
+          }.width('100%')
+          Scroll() {
+            Text(this.serialText).fontSize(11).fontColor('#ffdddddd')
+              .width('100%')
+          }
+          .layoutWeight(1)
+          .align(Alignment.TopStart)
+        }
+        .width('100%')
+        .height(220)
+        .padding(8)
+        .backgroundColor('#cc000000')
+        .align(Alignment.Bottom)
+      }
+
+      /* QMP 工具抽屉 */
+      if (this.showQmp) {
+        Column({ space: 6 }) {
+          Row() {
+            Text('QMP 命令').fontSize(13).fontColor(Color.White)
+            Blank()
+            Text(`已连: ${napi.qmpConnected(this.vmId)}`).fontSize(11).fontColor('#ff99ccff')
+          }.width('100%')
+          TextInput({ text: this.qmpCmd, placeholder: '如 {"execute":"query-status"}' })
+            .fontColor(Color.White)
+            .backgroundColor('#88333333')
+            .onChange((v: string) => this.qmpCmd = v)
+          Button('发送').focusable(false).fontSize(13)
+            .onClick(() => this.sendQmpCmd())
+          Scroll() {
+            Text(this.qmpResp.length > 0 ? this.qmpResp : '（暂无响应，发送一条命令试试）')
+              .fontSize(11)
+              .fontColor('#ffdddddd')
+              .width('100%')
+          }
+          .layoutWeight(1)
+          .align(Alignment.TopStart)
+          Text('事件流: ' + (this.qmpEvents.length > 0 ? this.qmpEvents.join(' · ') : '（无）'))
+            .fontSize(10)
+            .fontColor('#ffbbbbbb')
+            .width('100%')
+        }
+        .width('100%')
+        .height(260)
+        .padding(8)
+        .backgroundColor('#cc000000')
+        .align(Alignment.Bottom)
+      }
     }
     .width('100%')
     .height('100%')
