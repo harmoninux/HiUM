@@ -2,6 +2,7 @@
 // 独立的 VmConsoleAbility 窗口（见 VmList.openConsole）。
 import { VmList } from './VmList';
 import { VmEdit } from './VmEdit';
+import { VmManage } from './VmManage';
 import { VmProfile } from '../lib/vmprofile';
 
 @Entry
@@ -14,6 +15,8 @@ struct Index {
     NavDestination() {
       if (name === 'edit') {
         VmEdit({ profile: param as VmProfile })
+      } else if (name === 'manage') {
+        VmManage({ profile: param as VmProfile })
       }
     }
     .hideTitleBar(true)

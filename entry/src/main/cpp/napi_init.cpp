@@ -308,6 +308,34 @@ static napi_value DiskInfo(napi_env env, napi_callback_info info)
     return result;
 }
 
+/* diskResize(path: string, sizeMB: number): number — qemu-img resize 到绝对大小。
+ * qcow2 只支持扩大：目标须大于当前 virtual-size，交给调用方校验。 */
+static napi_value DiskResize(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string path = stringArg(env, args[0]);
+    int32_t sizeMB = 0;
+    napi_get_value_int32(env, args[1], &sizeMB);
+    if (sizeMB <= 0) {
+        return intResult(env, -1);
+    }
+
+    std::vector<std::string> argv;
+    argv.push_back("resize");
+    argv.push_back(path);
+    argv.push_back(std::to_string(sizeMB) + "M");
+
+    std::string out;
+    int rc = imgtool_run(argv, out);
+    if (rc != 0) {
+        OH_LOG_ERROR(LOG_APP, "diskResize %{public}s -> %{public}dMB failed rc=%{public}d: %{public}s",
+                     path.c_str(), sizeMB, rc, out.c_str());
+    }
+    return intResult(env, rc);
+}
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports)
 {
@@ -327,6 +355,7 @@ static napi_value Init(napi_env env, napi_value exports)
         { "captureScreen", nullptr, CaptureScreen, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "createDisk", nullptr, CreateDisk, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "diskInfo", nullptr, DiskInfo, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "diskResize", nullptr, DiskResize, nullptr, nullptr, nullptr, napi_default, nullptr },
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

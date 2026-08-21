@@ -172,6 +172,7 @@ export struct VmList {
     .padding(10)
     .backgroundColor(Color.White)
     .borderRadius(8)
+    .onClick(() => this.navStack.pushPath({ name: 'manage', param: p }))
     .bindContextMenu(this.cardMenu(p), ResponseType.LongPress)
   }
 
