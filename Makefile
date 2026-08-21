@@ -14,7 +14,7 @@ OHOS_ARCH ?= x86_64
 OHOS_ABI ?= x86_64
 
 HDC := /apps/harmony/sdk/default/openharmony/toolchains/hdc -s 192.168.1.3:8710 -t 127.0.0.1:5555
-BUNDLE := app.hackeris.harmiu
+BUNDLE := app.hackeris.hium
 HAP := entry/build/default/outputs/default/entry-default-unsigned.hap
 
 all: deps hap
@@ -27,8 +27,8 @@ hap:
 
 install: $(HAP)
 	$(HDC) shell "aa force-stop $(BUNDLE)" || true
-	$(HDC) file send $(HAP) /data/local/tmp/harmiu.hap
-	$(HDC) shell "bm install -p /data/local/tmp/harmiu.hap"
+	$(HDC) file send $(HAP) /data/local/tmp/hium.hap
+	$(HDC) shell "bm install -p /data/local/tmp/hium.hap"
 	$(HDC) shell "aa start -a EntryAbility -b $(BUNDLE)"
 
 deploy: hap install
