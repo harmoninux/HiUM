@@ -94,7 +94,9 @@ export function buildArgs(p: VmProfile, vmDataDir: string): string[] {
     args.push('-serial', `file:${vmDataDir}/serial-${p.id}.log`);
   }
   if (p.diskPath.length > 0) {
-    args.push('-drive', `file=${p.diskPath},if=virtio,format=raw`);
+    /* 默认新建的是 qcow2；导入的 raw 镜像仍按扩展名回退到 raw */
+    const fmt = p.diskPath.toLowerCase().endsWith('.qcow2') ? 'qcow2' : 'raw';
+    args.push('-drive', `file=${p.diskPath},if=virtio,format=${fmt}`);
   }
   if (p.cdromPath.length > 0) {
     args.push('-cdrom', p.cdromPath);

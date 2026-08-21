@@ -2,12 +2,11 @@
  * 本文件的 VM/渲染/输入绑定全部经 ncp_client 走 IPC；QMP 走 qemu 在子进程里
  * 监听的 unix socket（父进程直连，无需转发）。所有接口按 vmId 路由到对应实例。 */
 #include "napi/native_api.h"
+#include "imgtool.h"
 #include "ncp_client.h"
 #include "qmp.h"
 
-#include <fcntl.h>
 #include <hilog/log.h>
-#include <unistd.h>
 
 #include <cerrno>
 #include <cstring>
@@ -242,26 +241,71 @@ static napi_value CaptureScreen(napi_env env, napi_callback_info info)
     return result;
 }
 
-/* createDisk(path: string, sizeMB: number): number — sparse raw image */
+/* createDisk(path: string, sizeMB: number, alloc?: 'dynamic' | 'fixed'): number
+ * qemu-img create -f qcow2 [-o preallocation=off|falloc] <path> <sizeM>.
+ * 默认动态分配（稀疏，省空间）；固定大小预留全部（falloc，快，免中途 ENOSPC）。
+ * qemu_img_entry 不可再入 → 经 imgtool_run 在一次性 fork 子进程里执行。 */
 static napi_value CreateDisk(napi_env env, napi_callback_info info)
 {
-    size_t argc = 2;
-    napi_value args[2] = {nullptr};
+    size_t argc = 3;
+    napi_value args[3] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
     std::string path = stringArg(env, args[0]);
     int32_t sizeMB = 0;
     napi_get_value_int32(env, args[1], &sizeMB);
+    std::string alloc = "dynamic";
+    if (argc >= 3) {
+        napi_valuetype t = napi_undefined;
+        napi_typeof(env, args[2], &t);
+        if (t == napi_string) {
+            alloc = stringArg(env, args[2]);
+        }
+    }
 
-    int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    int ret = 0;
-    if (fd < 0 || ftruncate(fd, (off_t)sizeMB * 1024 * 1024) != 0) {
-        OH_LOG_ERROR(LOG_APP, "createDisk %{public}s failed: %{public}s", path.c_str(), strerror(errno));
-        ret = -1;
+    std::vector<std::string> argv;
+    argv.push_back("create");
+    argv.push_back("-f");
+    argv.push_back("qcow2");
+    if (alloc == "fixed") {
+        argv.push_back("-o");
+        argv.push_back("preallocation=falloc");
     }
-    if (fd >= 0) {
-        close(fd);
+    argv.push_back(path);
+    argv.push_back(std::to_string(sizeMB) + "M");
+
+    std::string out;
+    int rc = imgtool_run(argv, out);
+    if (rc != 0) {
+        OH_LOG_ERROR(LOG_APP, "createDisk %{public}s failed rc=%{public}d: %{public}s",
+                     path.c_str(), rc, out.c_str());
     }
-    return intResult(env, ret);
+    return intResult(env, rc);
+}
+
+/* diskInfo(path: string): string — qemu-img info --output=json 原始文本；失败返回空串 */
+static napi_value DiskInfo(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string path = stringArg(env, args[0]);
+
+    std::vector<std::string> argv;
+    argv.push_back("info");
+    argv.push_back("--output=json");
+    argv.push_back(path);
+
+    std::string out;
+    int rc = imgtool_run(argv, out);
+    if (rc != 0) {
+        OH_LOG_ERROR(LOG_APP, "diskInfo %{public}s failed rc=%{public}d", path.c_str(), rc);
+        napi_value result;
+        napi_create_string_utf8(env, "", 0, &result);
+        return result;
+    }
+    napi_value result;
+    napi_create_string_utf8(env, out.c_str(), out.size(), &result);
+    return result;
 }
 
 EXTERN_C_START
@@ -282,6 +326,7 @@ static napi_value Init(napi_env env, napi_value exports)
         { "setQmpEventCallback", nullptr, SetQmpEventCallback, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "captureScreen", nullptr, CaptureScreen, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "createDisk", nullptr, CreateDisk, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "diskInfo", nullptr, DiskInfo, nullptr, nullptr, nullptr, napi_default, nullptr },
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

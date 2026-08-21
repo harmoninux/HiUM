@@ -11,11 +11,12 @@ endif()
 include_directories(${NATIVERENDER_ROOT_PATH}
                     ${NATIVERENDER_ROOT_PATH}/include)
 
-# 父进程（ArkUI）：napi + QMP(loopback TCP) + NCP IPC 客户端
+# 父进程（ArkUI）：napi + QMP(loopback TCP) + NCP IPC 客户端 + qemu-img 工具
 add_library(entry SHARED
     napi_init.cpp
     qmp.cpp
-    ncp_client.cpp)
+    ncp_client.cpp
+    imgtool.cpp)
 
 target_link_libraries(entry PUBLIC
     libace_napi.z.so

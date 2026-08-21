@@ -5,11 +5,12 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore, VmArch, VgaType } from '../lib/vmprofile';
 
-interface CreateDiskNapi {
-  createDisk: (path: string, sizeMB: number) => number;
+interface DiskNapi {
+  createDisk: (path: string, sizeMB: number, alloc: string) => number;
+  diskInfo: (path: string) => string;
 }
 
-const napi = napiModule as CreateDiskNapi;
+const napi = napiModule as DiskNapi;
 
 const ARCH_OPTIONS: VmArch[] = ['x86_64', 'i386', 'aarch64'];
 const VGA_OPTIONS: VgaType[] = ['std', 'virtio'];
@@ -28,6 +29,8 @@ export struct VmEdit {
   @State cpus: number = 2;
   @State diskPath: string = '';
   @State diskGB: number = 8;
+  @State diskAlloc: string = 'dynamic'; /* dynamic|fixed → qemu-img preallocation=off|falloc */
+  @State diskNew: boolean = false; /* 在「保存」时才真正 create（取消不留孤儿盘） */
   @State cdromPath: string = '';
   @State bootFromCdrom: boolean = false;
   @State vga: VgaType = 'std';
@@ -63,24 +66,56 @@ export struct VmEdit {
     return i >= 0 ? path.substring(i + 1) : path;
   }
 
-  private createDisk(): void {
+  /* 用户点「创建」只是标记意图（diskNew）；真正创建在点「保存」时发生，取消不留孤儿盘 */
+  private createDiskNow(): boolean {
     if (!this.profile) {
-      return;
+      return false;
     }
     const store = new VmStore(this.filesDir);
-    const path = `${store.dir}/${this.profile.id}.img`;
-    const ret = napi.createDisk(path, Math.round(this.diskGB * 1024));
+    const path = `${store.dir}/${this.profile.id}.qcow2`;
+    const ret = napi.createDisk(path, Math.round(this.diskGB * 1024), this.diskAlloc);
     if (ret !== 0) {
       promptAction.showToast({ message: '创建磁盘失败' });
-      return;
+      return false;
     }
     this.diskPath = path;
-    promptAction.showToast({ message: `已创建 ${this.diskGB}GB 稀疏磁盘（raw）` });
+    return true;
+  }
+
+  /* 显示已建磁盘的格式/虚拟大小/实占大小（qemu-img info） */
+  private showDiskInfo(): void {
+    if (!this.diskPath) {
+      return;
+    }
+    const s = napi.diskInfo(this.diskPath);
+    if (s.length === 0) {
+      promptAction.showToast({ message: '无法读取磁盘信息' });
+      return;
+    }
+    try {
+      /* ArkTS 禁对接口字段下标访问（arkts-no-props-by-index），用 Record 字典式解析 */
+      const j = JSON.parse(s) as Record<string, number | string>;
+      const gb = (n: number): string => (n / 1024 / 1024 / 1024).toFixed(1);
+      const vsize = typeof j['virtual-size'] === 'number' ? j['virtual-size'] : 0;
+      const actual = typeof j['actual-size'] === 'number' ? j['actual-size'] : 0;
+      const fmt = typeof j['format'] === 'string' ? j['format'] : '?';
+      promptAction.showToast({
+        message: `${fmt} · 虚拟${gb(vsize)}G · 实占${gb(actual)}G`,
+      });
+    } catch (err) {
+      promptAction.showToast({ message: s.substring(0, 120) });
+    }
   }
 
   private save(): void {
     if (!this.profile) {
       return;
+    }
+    /* 用户创建了新的系统盘：保存时才真正建盘（建失败不保存，避免半成品配置） */
+    if (this.diskNew && !this.diskPath) {
+      if (!this.createDiskNow()) {
+        return;
+      }
     }
     const tbSize = Number(this.tbSizeText);
     const p: VmProfile = {
@@ -170,18 +205,44 @@ export struct VmEdit {
                 .fontColor('#ff666666')
                 .layoutWeight(1)
               if (this.diskPath) {
+                Button('信息').focusable(false).fontSize(12)
+                  .onClick(() => this.showDiskInfo())
                 Button('移除').focusable(false).fontSize(12)
-                  .onClick(() => this.diskPath = '')
+                  .onClick(() => {
+                    this.diskPath = '';
+                    this.diskNew = false;
+                  })
               }
             }
             if (!this.diskPath) {
+              Row({ space: 8 }) {
+                Text('分配方式').fontSize(13).fontColor('#ff666666')
+                Text('动态分配').fontSize(13)
+                  .fontColor(this.diskAlloc === 'dynamic' ? '#ff007dff' : Color.Black)
+                  .onClick(() => this.diskAlloc = 'dynamic')
+                Text('固定大小').fontSize(13)
+                  .fontColor(this.diskAlloc === 'fixed' ? '#ff007dff' : Color.Black)
+                  .onClick(() => this.diskAlloc = 'fixed')
+              }
               Row({ space: 8 }) {
                 Slider({ value: this.diskGB, min: 1, max: 32, step: 1 })
                   .layoutWeight(1)
                   .onChange((v: number) => this.diskGB = v)
                 Text(`${Math.round(this.diskGB)}GB`).fontSize(13)
-                Button('创建').focusable(false).fontSize(12)
-                  .onClick(() => this.createDisk())
+                if (this.diskNew) {
+                  Button('取消').focusable(false).fontSize(12)
+                    .fontColor('#ff666666')
+                    .onClick(() => this.diskNew = false)
+                } else {
+                  Button('创建').focusable(false).fontSize(12)
+                    .onClick(() => this.diskNew = true)
+                }
+              }
+              if (this.diskNew) {
+                Text('保存时将创建 ' + Math.round(this.diskGB) + 'GB ' +
+                  (this.diskAlloc === 'fixed' ? '固定大小' : '动态分配') + ' 系统盘')
+                  .fontSize(12)
+                  .fontColor('#ff2e7d32')
               }
             }
           }.alignItems(HorizontalAlign.Start).padding(12)
