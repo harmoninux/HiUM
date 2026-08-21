@@ -8,6 +8,8 @@
 #include <IPCKit/ipc_error_code.h>
 #include <hilog/log.h>
 
+#include <deque>
+#include <map>
 #include <mutex>
 
 #undef LOG_DOMAIN
@@ -19,28 +21,35 @@ namespace {
 
 using namespace qemu_ipc;
 
+/* 一台 VM 的子进程状态。条目创建后常驻 map（数量=VM 数，很小），
+ * 避免「子进程回调线程还在用、条目已释放」的竞态。 */
 struct ChildState {
-    std::mutex mu;
-    OHIPCRemoteProxy *proxy = nullptr; /* 单实例：任何时刻最多一个子进程 */
+    OHIPCRemoteProxy *proxy = nullptr;
     bool vmRunning = false;
     bool attached = false;
+    int64_t surfaceId = 0;
+};
+
+/* NCP 拉起请求。CreateNativeChildProcess 的回调不带任何可关联信息，
+ * 多实例下无法区分并发拉起，因此串行化：任何时刻最多一个在途。 */
+struct StartReq {
+    std::string vmId;
     std::string arch;
     std::vector<std::string> args;
     int64_t surfaceId = 0;
 };
-ChildState g_ch;
 
-/* NCP 不给 pid↔proxy 对应关系；单实例设计下，任何子进程退出都视为当前 child */
+std::mutex g_mu;                       /* 护住下面全部状态；IPC 发送也持这把锁（与旧单实例一致） */
+std::map<std::string, ChildState> g_children;
+std::deque<StartReq> g_pending;
+bool g_spawnInFlight = false;
+
+/* NCP 不给 pid↔proxy 对应关系，多实例下无法把 exit 事件归到具体 vmId；
+ * 且该回调实测不可靠（有不触发的情况）。这里只记日志，清理由各 vmId 的
+ * QUERY 自愈完成（见 ncp_client_running）。 */
 void onChildExit(int32_t pid, int32_t signal)
 {
     OH_LOG_INFO(LOG_APP, "child exit callback pid=%{public}d signal=%{public}d", pid, signal);
-    std::lock_guard<std::mutex> lock(g_ch.mu);
-    if (g_ch.proxy != nullptr) {
-        OH_IPCRemoteProxy_Destroy(g_ch.proxy);
-        g_ch.proxy = nullptr;
-        g_ch.vmRunning = false;
-        g_ch.attached = false;
-    }
 }
 
 void ensureExitCallback()
@@ -61,10 +70,10 @@ OHIPCParcel *newRequest()
     return req;
 }
 
-/* 调用方须持有 g_ch.mu。返回 reply parcel（调用方负责 Destroy），失败返回 nullptr。 */
-OHIPCParcel *sendLocked(uint32_t code, OHIPCParcel *req)
+/* 调用方须持有 g_mu。返回 reply parcel（调用方负责 Destroy），失败返回 nullptr。 */
+OHIPCParcel *sendTo(ChildState &ch, uint32_t code, OHIPCParcel *req)
 {
-    if (g_ch.proxy == nullptr || req == nullptr) {
+    if (ch.proxy == nullptr || req == nullptr) {
         return nullptr;
     }
     OHIPCParcel *reply = OH_IPCParcel_Create();
@@ -72,7 +81,7 @@ OHIPCParcel *sendLocked(uint32_t code, OHIPCParcel *req)
         return nullptr;
     }
     OH_IPC_MessageOption option = {OH_IPC_REQUEST_MODE_SYNC, 0, nullptr};
-    int32_t ret = OH_IPCRemoteProxy_SendRequest(g_ch.proxy, code, req, reply, &option);
+    int32_t ret = OH_IPCRemoteProxy_SendRequest(ch.proxy, code, req, reply, &option);
     if (ret != OH_IPC_SUCCESS) {
         OH_LOG_ERROR(LOG_APP, "ipc send code=%{public}u failed ret=%{public}d", code, ret);
         OH_IPCParcel_Destroy(reply);
@@ -104,85 +113,130 @@ OHNativeWindow *windowFromSurfaceId(int64_t surfaceId)
     return win;
 }
 
-/* NCP 启动回调（独立线程）：发送 START（参数 + 窗口） */
+void spawnNextLocked(); /* 前向声明 */
+
+/* NCP 启动回调（独立线程）：给队首请求建子进程条目并发送 START（参数 + 窗口） */
 void onChildStarted(int errCode, OHIPCRemoteProxy *proxy)
 {
-    std::lock_guard<std::mutex> lock(g_ch.mu);
-    if (errCode != NCP_NO_ERROR || proxy == nullptr) {
-        OH_LOG_ERROR(LOG_APP, "child start failed errCode=%{public}d", errCode);
-        g_ch.proxy = nullptr;
-        g_ch.vmRunning = false;
+    std::lock_guard<std::mutex> lock(g_mu);
+    if (g_pending.empty()) {
+        OH_LOG_ERROR(LOG_APP, "child started but no pending request, dropping proxy");
+        if (proxy) {
+            OH_IPCRemoteProxy_Destroy(proxy);
+        }
+        g_spawnInFlight = false;
         return;
     }
-    g_ch.proxy = proxy;
+    StartReq req = std::move(g_pending.front());
+    g_pending.pop_front();
 
-    OHIPCParcel *req = newRequest();
-    OH_IPCParcel_WriteString(req, g_ch.arch.c_str());
-    OH_IPCParcel_WriteInt32(req, (int32_t)g_ch.args.size());
-    for (const auto &a : g_ch.args) {
-        OH_IPCParcel_WriteString(req, a.c_str());
+    if (errCode != NCP_NO_ERROR || proxy == nullptr) {
+        OH_LOG_ERROR(LOG_APP, "child start failed errCode=%{public}d vm=%{public}s",
+                     errCode, req.vmId.c_str());
+        spawnNextLocked();
+        return;
     }
-    OHNativeWindow *win = windowFromSurfaceId(g_ch.surfaceId);
+
+    ChildState &ch = g_children[req.vmId];
+    ch.proxy = proxy;
+    ch.vmRunning = false;
+    ch.attached = false;
+    ch.surfaceId = req.surfaceId;
+
+    OHIPCParcel *parcel = newRequest();
+    OH_IPCParcel_WriteString(parcel, req.arch.c_str());
+    OH_IPCParcel_WriteInt32(parcel, (int32_t)req.args.size());
+    for (const auto &a : req.args) {
+        OH_IPCParcel_WriteString(parcel, a.c_str());
+    }
+    OHNativeWindow *win = windowFromSurfaceId(req.surfaceId);
     int32_t childRet = -1;
     if (win != nullptr) {
-        OH_NativeWindow_WriteToParcel(win, req);
-        childRet = replyCode(sendLocked(kStart, req));
+        OH_NativeWindow_WriteToParcel(win, parcel);
+        childRet = replyCode(sendTo(ch, kStart, parcel));
         OH_NativeWindow_DestroyNativeWindow(win);
     }
-    OH_LOG_INFO(LOG_APP, "START %{public}s → child ret=%{public}d", g_ch.arch.c_str(), childRet);
+    OH_LOG_INFO(LOG_APP, "START %{public}s vm=%{public}s → child ret=%{public}d",
+                req.arch.c_str(), req.vmId.c_str(), childRet);
     if (childRet == 0) {
-        g_ch.vmRunning = true;
-        g_ch.attached = true;
+        ch.vmRunning = true;
+        ch.attached = true;
     } else {
         /* VM 没起来：让子进程退出，别留着空转 */
         OHIPCParcel *sd = newRequest();
-        replyCode(sendLocked(kShutdown, sd));
+        replyCode(sendTo(ch, kShutdown, sd));
         if (sd) {
             OH_IPCParcel_Destroy(sd);
         }
-        OH_IPCRemoteProxy_Destroy(g_ch.proxy);
-        g_ch.proxy = nullptr;
-        g_ch.vmRunning = false;
-        g_ch.attached = false;
+        OH_IPCRemoteProxy_Destroy(ch.proxy);
+        ch.proxy = nullptr;
+        ch.attached = false;
     }
-    OH_IPCParcel_Destroy(req);
+    OH_IPCParcel_Destroy(parcel);
+    spawnNextLocked();
+}
+
+/* 调用方须持有 g_mu。 */
+void spawnNextLocked()
+{
+    if (g_pending.empty()) {
+        g_spawnInFlight = false;
+        return;
+    }
+    g_spawnInFlight = true;
+    int ret = OH_Ability_CreateNativeChildProcess(kChildLib, onChildStarted);
+    OH_LOG_INFO(LOG_APP, "CreateNativeChildProcess vm=%{public}s ret=%{public}d",
+                g_pending.front().vmId.c_str(), ret);
+    if (ret != NCP_NO_ERROR) {
+        /* 拉起即失败：丢掉这条，继续后面的 */
+        OH_LOG_ERROR(LOG_APP, "spawn %{public}s rejected ret=%{public}d",
+                     g_pending.front().vmId.c_str(), ret);
+        g_pending.pop_front();
+        spawnNextLocked();
+    }
 }
 
 /* 状态清理（proxy 已空或 VM 已结束）；调用方持锁 */
-void cleanupLocked()
+void cleanupLocked(ChildState &ch)
 {
-    if (g_ch.proxy != nullptr) {
-        OH_IPCRemoteProxy_Destroy(g_ch.proxy);
-        g_ch.proxy = nullptr;
+    if (ch.proxy != nullptr) {
+        OH_IPCRemoteProxy_Destroy(ch.proxy);
+        ch.proxy = nullptr;
     }
-    g_ch.vmRunning = false;
-    g_ch.attached = false;
+    ch.vmRunning = false;
+    ch.attached = false;
 }
 
 } // namespace
 
-int ncp_client_start(const std::string &arch, const std::vector<std::string> &args,
-                     int64_t surfaceId)
+int ncp_client_start(const std::string &vmId, const std::string &arch,
+                     const std::vector<std::string> &args, int64_t surfaceId)
 {
     ensureExitCallback();
-    std::lock_guard<std::mutex> lock(g_ch.mu);
-    if (g_ch.proxy != nullptr || g_ch.vmRunning) {
-        OH_LOG_WARN(LOG_APP, "qemu child already active");
+    std::lock_guard<std::mutex> lock(g_mu);
+    auto it = g_children.find(vmId);
+    if (it != g_children.end() && (it->second.proxy != nullptr || it->second.vmRunning)) {
+        OH_LOG_WARN(LOG_APP, "qemu child already active vm=%{public}s", vmId.c_str());
         return -1;
     }
-    g_ch.arch = arch;
-    g_ch.args = args;
-    g_ch.surfaceId = surfaceId;
-    int ret = OH_Ability_CreateNativeChildProcess(kChildLib, onChildStarted);
-    OH_LOG_INFO(LOG_APP, "CreateNativeChildProcess ret=%{public}d", ret);
-    return ret;
+    for (const auto &p : g_pending) {
+        if (p.vmId == vmId) {
+            return -1; /* 已在拉起队列里 */
+        }
+    }
+    g_pending.push_back({vmId, arch, args, surfaceId});
+    if (!g_spawnInFlight) {
+        spawnNextLocked();
+    }
+    return 0;
 }
 
-int ncp_client_attach(int64_t surfaceId)
+int ncp_client_attach(const std::string &vmId, int64_t surfaceId)
 {
-    std::lock_guard<std::mutex> lock(g_ch.mu);
-    g_ch.surfaceId = surfaceId;
-    if (g_ch.proxy == nullptr || !g_ch.vmRunning || g_ch.attached) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    ChildState &ch = g_children[vmId];
+    ch.surfaceId = surfaceId;
+    if (ch.proxy == nullptr || !ch.vmRunning || ch.attached) {
         return 0; /* 无子进程（VM 未启动）或已挂窗：START 会带上窗口 */
     }
     OHNativeWindow *win = windowFromSurfaceId(surfaceId);
@@ -191,78 +245,84 @@ int ncp_client_attach(int64_t surfaceId)
     }
     OHIPCParcel *req = newRequest();
     OH_NativeWindow_WriteToParcel(win, req);
-    int32_t childRet = replyCode(sendLocked(kAttachSurface, req));
+    int32_t childRet = replyCode(sendTo(ch, kAttachSurface, req));
     OH_IPCParcel_Destroy(req);
     OH_NativeWindow_DestroyNativeWindow(win);
-    OH_LOG_INFO(LOG_APP, "attach surface → child ret=%{public}d", childRet);
+    OH_LOG_INFO(LOG_APP, "attach vm=%{public}s → child ret=%{public}d", vmId.c_str(), childRet);
     if (childRet == 0) {
-        g_ch.attached = true;
+        ch.attached = true;
     }
     return childRet;
 }
 
-void ncp_client_detach()
+void ncp_client_detach(const std::string &vmId)
 {
-    std::lock_guard<std::mutex> lock(g_ch.mu);
-    if (g_ch.proxy == nullptr || !g_ch.attached) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    auto it = g_children.find(vmId);
+    if (it == g_children.end() || it->second.proxy == nullptr || !it->second.attached) {
         return;
     }
     OHIPCParcel *req = newRequest();
-    replyCode(sendLocked(kDetachSurface, req));
+    replyCode(sendTo(it->second, kDetachSurface, req));
     OH_IPCParcel_Destroy(req);
-    g_ch.attached = false;
+    it->second.attached = false;
 }
 
-void ncp_client_resize(int32_t w, int32_t h)
+void ncp_client_resize(const std::string &vmId, int32_t w, int32_t h)
 {
-    std::lock_guard<std::mutex> lock(g_ch.mu);
-    if (g_ch.proxy == nullptr || !g_ch.attached) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    auto it = g_children.find(vmId);
+    if (it == g_children.end() || it->second.proxy == nullptr || !it->second.attached) {
         return;
     }
     OHIPCParcel *req = newRequest();
     OH_IPCParcel_WriteInt32(req, w);
     OH_IPCParcel_WriteInt32(req, h);
-    replyCode(sendLocked(kResizeSurface, req));
+    replyCode(sendTo(it->second, kResizeSurface, req));
     OH_IPCParcel_Destroy(req);
 }
 
-void ncp_client_pointer(int32_t x, int32_t y, int32_t buttons)
+void ncp_client_pointer(const std::string &vmId, int32_t x, int32_t y, int32_t buttons)
 {
-    std::lock_guard<std::mutex> lock(g_ch.mu);
-    if (g_ch.proxy == nullptr || !g_ch.vmRunning) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    auto it = g_children.find(vmId);
+    if (it == g_children.end() || it->second.proxy == nullptr || !it->second.vmRunning) {
         return;
     }
     OHIPCParcel *req = newRequest();
     OH_IPCParcel_WriteInt32(req, x);
     OH_IPCParcel_WriteInt32(req, y);
     OH_IPCParcel_WriteInt32(req, buttons);
-    replyCode(sendLocked(kPointer, req));
+    replyCode(sendTo(it->second, kPointer, req));
     OH_IPCParcel_Destroy(req);
 }
 
-void ncp_client_key(int32_t qcode, bool down)
+void ncp_client_key(const std::string &vmId, int32_t qcode, bool down)
 {
-    std::lock_guard<std::mutex> lock(g_ch.mu);
-    if (g_ch.proxy == nullptr || !g_ch.vmRunning) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    auto it = g_children.find(vmId);
+    if (it == g_children.end() || it->second.proxy == nullptr || !it->second.vmRunning) {
         return;
     }
     OHIPCParcel *req = newRequest();
     OH_IPCParcel_WriteInt32(req, qcode);
     OH_IPCParcel_WriteInt32(req, down ? 1 : 0);
-    replyCode(sendLocked(kKey, req));
+    replyCode(sendTo(it->second, kKey, req));
     OH_IPCParcel_Destroy(req);
 }
 
-bool ncp_client_running()
+bool ncp_client_running(const std::string &vmId)
 {
-    std::lock_guard<std::mutex> lock(g_ch.mu);
-    if (g_ch.proxy == nullptr || !g_ch.vmRunning) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    auto it = g_children.find(vmId);
+    if (it == g_children.end() || it->second.proxy == nullptr || !it->second.vmRunning) {
         return false;
     }
-    /* 自愈：exit 回调未必可靠（实测有不触发的情况），主动向子进程 QUERY；
-     * 子进程已死（发送失败）或 VM 已退出（running=0）就清理状态 */
+    /* 自愈：exit 回调未必可靠，主动向子进程 QUERY；子进程已死（发送失败）
+     * 或 VM 已退出（running=0）就清理状态 */
+    ChildState &ch = it->second;
     OHIPCParcel *req = newRequest();
-    OHIPCParcel *reply = sendLocked(kQuery, req);
+    OHIPCParcel *reply = sendTo(ch, kQuery, req);
     OH_IPCParcel_Destroy(req);
     int32_t running = -1;
     if (reply != nullptr) {
@@ -276,20 +336,21 @@ bool ncp_client_running()
     if (running == 1) {
         return true;
     }
-    OH_LOG_INFO(LOG_APP, "qemu child no longer running (query %{public}s), cleanup",
-                reply != nullptr ? "replied 0" : "failed");
-    cleanupLocked();
+    OH_LOG_INFO(LOG_APP, "qemu child no longer running vm=%{public}s (query %{public}s), cleanup",
+                vmId.c_str(), reply != nullptr ? "replied 0" : "failed");
+    cleanupLocked(ch);
     return false;
 }
 
-int ncp_client_query_display(int *w, int *h)
+int ncp_client_query_display(const std::string &vmId, int *w, int *h)
 {
-    std::lock_guard<std::mutex> lock(g_ch.mu);
-    if (g_ch.proxy == nullptr) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    auto it = g_children.find(vmId);
+    if (it == g_children.end() || it->second.proxy == nullptr) {
         return -1;
     }
     OHIPCParcel *req = newRequest();
-    OHIPCParcel *reply = sendLocked(kQuery, req);
+    OHIPCParcel *reply = sendTo(it->second, kQuery, req);
     OH_IPCParcel_Destroy(req);
     if (reply == nullptr) {
         return -1;
@@ -304,15 +365,17 @@ int ncp_client_query_display(int *w, int *h)
     return 0;
 }
 
-int ncp_client_screenshot(int maxW, int *w, int *h, std::vector<uint8_t> &pixels)
+int ncp_client_screenshot(const std::string &vmId, int maxW, int *w, int *h,
+                          std::vector<uint8_t> &pixels)
 {
-    std::lock_guard<std::mutex> lock(g_ch.mu);
-    if (g_ch.proxy == nullptr) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    auto it = g_children.find(vmId);
+    if (it == g_children.end() || it->second.proxy == nullptr) {
         return -1;
     }
     OHIPCParcel *req = newRequest();
     OH_IPCParcel_WriteInt32(req, maxW);
-    OHIPCParcel *reply = sendLocked(kScreenshot, req);
+    OHIPCParcel *reply = sendTo(it->second, kScreenshot, req);
     OH_IPCParcel_Destroy(req);
     if (reply == nullptr) {
         return -1;
@@ -335,14 +398,15 @@ int ncp_client_screenshot(int maxW, int *w, int *h, std::vector<uint8_t> &pixels
     return pixels.empty() ? -1 : 0;
 }
 
-void ncp_client_shutdown()
+void ncp_client_shutdown(const std::string &vmId)
 {
-    std::lock_guard<std::mutex> lock(g_ch.mu);
-    if (g_ch.proxy == nullptr) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    auto it = g_children.find(vmId);
+    if (it == g_children.end() || it->second.proxy == nullptr) {
         return;
     }
     OHIPCParcel *req = newRequest();
-    replyCode(sendLocked(kShutdown, req));
+    replyCode(sendTo(it->second, kShutdown, req));
     OH_IPCParcel_Destroy(req);
-    /* 不在这里清状态：等 onChildExit 回调清，避免重用已销毁 proxy */
+    /* 不在这里清状态：等下一次 QUERY 自愈清，避免重用已销毁 proxy */
 }

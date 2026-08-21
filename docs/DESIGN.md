@@ -9,27 +9,30 @@
 ┌──────────────────── 应用进程（ArkUI，libentry.so）────────────────────┐
 │ ArkTS (VmList/VmEdit/Console)                                        │
 │   └─ XComponent(SURFACE) ── surfaceId ─┐                             │
-│ napi_init.cpp                          │                             │
+│ napi_init.cpp（全部接口按 vmId 路由）    │                             │
 │   ├─ ncp_client.cpp ── IPC (IPCKit/Binder, qemu_ipc.h 协议) ─┐       │
-│   └─ qmp.cpp ── QMP loopback TCP ──────────────────────┐     │       │
-└────────────────────────────────────────────────────────┼─────┼───────┘
-                                                          │     │
-┌──────────── qemu 子进程（NCP，libqemu_child.so）────────┼─────┼───────┐
-│ qemu_child.cpp  IPC 分发 + 生命周期（一进程一轮 VM）     │     │       │
-│   ├─ vm.cpp      VM 线程: dlopen(libqemu-system-*.so) ◄─┘     │       │
-│   │              调用 qemu_system_entry(argc, argv)           │       │
-│   ├─ fb.cpp      DCL 回调: qemu 显存 → X8R8G8B8 back buffer   │       │
-│   ├─ renderer.cpp 渲染线程: back buffer → GL 纹理 → EGL 上屏  │       │
-│   │              （窗口经 parcel 传来；letterbox，脏带合并）   │       │
-│   └─ input.cpp   触摸/键盘 → qemu_input_*（IPC 转发）         │       │
-│        ▲ OHNativeWindow 由父进程创建、WriteToParcel 传入 ◄────┘       │
-│        QMP server 在子进程监听 127.0.0.1，父进程直连 ◄────────────────┘
+│   │   （vmId → 子进程注册表；NCP 拉起串行化）                 │       │
+│   └─ qmp.cpp ── QMP unix socket（每 VM 一条）───────────┐    │       │
+└────────────────────────────────────────────────────────┼───┼──┼───────┘
+                                                          │   │  │
+┌──────────── qemu 子进程（NCP，libqemu_child.so）────────┼───┼──┼──────┐
+│ qemu_child.cpp  IPC 分发 + 生命周期（一进程一台 VM）     │   │  │      │
+│   ├─ vm.cpp      VM 线程: dlopen(libqemu-system-*.so) ◄─┘   │  │      │
+│   │              调用 qemu_system_entry(argc, argv)          │  │      │
+│   ├─ fb.cpp      DCL 回调: qemu 显存 → X8R8G8B8 back buffer │  │      │
+│   ├─ renderer.cpp 渲染线程: back buffer → GL 纹理 → EGL 上屏 │  │      │
+│   │              （窗口经 parcel 传来；letterbox，脏带合并）  │  │      │
+│   └─ input.cpp   触摸/键盘 → qemu_input_*（IPC 转发）        │  │      │
+│        ▲ OHNativeWindow 由父进程创建、WriteToParcel 传入 ◄───┘  │      │
+│        QMP server 监听 unix socket（沙箱内路径），父进程直连 ◄───┘      │
 └───────────────────────────────────────────────────────────────────────┘
+         多台 VM 并行 = 多个这样的子进程（每 VM 一个），互不感知
 ```
 
 VM 退出（QMP quit / guest 关机）→ qemu_system_entry 返回 → 子进程
 MainProc 退出 → 进程结束。再次启动 = 父进程另起一个**全新的 NCP 子进程**，
-因此不再有「一进程一轮 VM」的进程重启问题。
+因此不再有「一进程一轮 VM」的进程重启问题；多实例下各 VM 生命周期完全
+独立（一台关机/崩溃不影响其他）。
 
 ## 关键技术决策
 
@@ -113,19 +116,21 @@ napi；native 用 `OH_NativeWindow_CreateNativeWindowFromSurfaceId()`
   `vms/<id>.jpg`。
 - **VmEdit**：配置表单——名称、架构（x86_64/i386/aarch64）、内存、
   CPU 核数、光盘/磁盘（qcow2 可经 napi `createDisk` 调
-  `qemu_img_entry` 创建）、QMP 端口等，保存时由 `buildArgs()`
+  `qemu_img_entry` 创建）、MTTCG/tb-size 等，保存时由 `buildArgs()`
   翻译成 qemu 命令行。
 - **Console**：XComponent 画面 + 工具条（电源菜单、Ctrl+Alt+Del、
   截图、状态文本）。返回列表时 VM 继续在后台跑。
 
-**QMP 通道**：VM 启动参数带 `-qmp tcp:127.0.0.1:<port>,server=on,
-wait=off`；父进程 `qmp.cpp` 是极简 QMP TCP 客户端（每端口一条
-连接、命令串行、events 经 tsfn 推给 ArkTS），直连子进程里 qemu 的
-loopback 监听（NCP NORMAL 隔离共享网络）。UI 包装的电源功能：
-暂停/恢复（`stop`/`cont`）、复位（`system_reset`）、强制断电
-（`quit`）、Ctrl+Alt+Del（`send-key ctrl-alt-delete`）。SHUTDOWN /
-STOP / RESUME 等事件驱动 UI 状态。**必须声明
-`ohos.permission.INTERNET`**，否则 qemu 建 socket 即 EPERM 退出。
+**QMP 通道（每 VM 一条 unix socket）**：VM 启动参数带 `-qmp
+unix:<vmDataDir>/qmp-<vmId>.sock,server=on,wait=off`；父进程 `qmp.cpp`
+是极简 QMP 客户端（AF_UNIX，每 VM 一条连接、命令串行、events 经 per-VM
+tsfn 推给对应 Console 页）。unix socket 走沙箱文件系统路径，天然没有
+端口冲突（曾硬编码 TCP 4444，两个应用实例并存时后起者 bind 失败静默
+退出）。UI 包装的电源功能：暂停/恢复（`stop`/`cont`）、复位
+（`system_reset`）、强制断电（`quit`）、Ctrl+Alt+Del（`send-key
+ctrl-alt-delete`）。SHUTDOWN / STOP / RESUME 等事件驱动 UI 状态。
+**仍需声明 `ohos.permission.INTERNET`**（guest user-mode 网络要建
+socket，QMP 本身已不再需要）。
 
 **截图**：napi `captureScreen()` 经 IPC 让子进程把 back buffer 当前帧
 缩放到 ≤512 宽转 RGBA_8888 回传（binder 事务大小限制），ArkTS 侧包成
@@ -163,10 +168,11 @@ phone 形态下 OHNativeWindow 不能跨 Binder 传（退化为 shm 渲染），
 
 **实施**（已落地）：
 
-- 父进程（`libentry.so`）：`ncp_client.cpp` 封装
+- 父进程（`libentry.so`）：`ncp_client.cpp` 按 vmId 维护
+  「vmId → 子进程 proxy/状态」注册表，封装
   `OH_Ability_CreateNativeChildProcess("libqemu_child.so")` 与全部
-  IPC 请求；`qmp.cpp` 不变（QMP 走 loopback TCP 直连子进程里的 qemu，
-  `NCP_ISOLATION_MODE_NORMAL` 共享网络与沙箱）。
+  IPC 请求；NCP 启动回调不带可关联信息，拉起动作串行化（在途最多一个，
+  其余排队）。`qmp.cpp` 同样按 vmId 各管一条 unix socket 连接。
 - 子进程（`libqemu_child.so`）：`qemu_child.cpp` 导出
   `NativeChildProcess_OnConnect`/`MainProc`，跑 vm/fb/renderer/input
   全套；`MainProc` 阻塞到「VM 一轮结束」或收到 kShutdown 或父进程
@@ -275,3 +281,11 @@ Alpine Linux 验证完整引导。
   纹理，而新建的 GL 纹理是空的、旧纹理尺寸缓存又使全量分支不命中，
   guest 无输出时就永远不上传。修复：attach 时重置 `texW/texH` 为 0，
   强制首轮从 back buffer 全量回传。
+- QMP 曾硬编码 TCP 4444：设备上同时装着两个本应用实例（如改名前后的
+  新旧包名）时，第二个 VM bind EADDRINUSE 静默退出——表象是黑屏停在
+  "starting..."，子进程无任何崩溃日志。已改为每 VM 一条 unix socket
+  （`qmp-<vmId>.sock`），端口冲突这一类问题整体消失；启动 10s 无输出
+  状态栏会显示「启动失败（子进程退出）」。
+- 列表页「运行中」徽标不能直接在读稿（build）时调 native 同步查询：
+  ArkUI 对不读 @State 的 builder 可能不重跑，徽标会停在旧值。改为
+  页面可见期间每 2s 轮询 `vmRunning(id)` 写入 @State，徽标从状态渲染。

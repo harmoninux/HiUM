@@ -21,7 +21,6 @@ export interface VmProfile {
   mttcg: boolean;
   tbSize: number;
   extraArgs: string;  /* escape hatch：原样追加到 qemu 命令行 */
-  qmpPort: number;
 }
 
 export function newProfileId(): string {
@@ -44,7 +43,6 @@ export function blankProfile(id: string): VmProfile {
     mttcg: true,
     tbSize: 1024,
     extraArgs: '',
-    qmpPort: 4444,
   };
 }
 
@@ -74,6 +72,11 @@ function parseForwards(text: string): string[] {
   return out;
 }
 
+/* 该 VM 的 QMP unix socket 路径（每 VM 一个，天然无端口冲突） */
+export function qmpSockPath(p: VmProfile, vmDataDir: string): string {
+  return `${vmDataDir}/qmp-${p.id}.sock`;
+}
+
 export function buildArgs(p: VmProfile, vmDataDir: string): string[] {
   let args: string[] = [
     '-L', vmDataDir,
@@ -82,13 +85,13 @@ export function buildArgs(p: VmProfile, vmDataDir: string): string[] {
     '-accel', `tcg,thread=${p.mttcg ? 'multi' : 'single'},tb-size=${p.tbSize}`,
     '-display', 'none',
     '-device', 'virtio-tablet-pci',
-    '-qmp', `tcp:127.0.0.1:${p.qmpPort},server=on,wait=off`,
+    '-qmp', `unix:${qmpSockPath(p, vmDataDir)},server=on,wait=off`,
   ];
   if (p.arch === 'aarch64') {
     args = args.concat(['-machine', 'virt', '-cpu', 'max', '-device', 'virtio-gpu-pci']);
   } else {
     args.push('-vga', p.vga);
-    args.push('-serial', 'file:' + vmDataDir + '/serial.log');
+    args.push('-serial', `file:${vmDataDir}/serial-${p.id}.log`);
   }
   if (p.diskPath.length > 0) {
     args.push('-drive', `file=${p.diskPath},if=virtio,format=raw`);
@@ -174,7 +177,6 @@ export class VmStore {
       if (obj.mttcg === undefined) obj.mttcg = d.mttcg;
       if (obj.tbSize === undefined) obj.tbSize = d.tbSize;
       if (obj.extraArgs === undefined) obj.extraArgs = d.extraArgs;
-      if (obj.qmpPort === undefined) obj.qmpPort = d.qmpPort;
       obj.id = id;
       return obj;
     } catch {

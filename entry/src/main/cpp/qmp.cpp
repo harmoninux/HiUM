@@ -1,14 +1,15 @@
 #include "qmp.h"
 
-#include <arpa/inet.h>
 #include <hilog/log.h>
-#include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <atomic>
 #include <condition_variable>
 #include <cstring>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <thread>
 
@@ -18,6 +19,9 @@
 #define LOG_TAG "QemuQmp"
 
 namespace {
+
+/* 一台 VM 的 QMP 连接。条目创建后常驻 map（不随断开释放）：reader 线程
+ * detach 运行，释放 State 有 UAF 风险；vmId 数量小，泄漏可忽略。 */
 struct QmpState {
     std::atomic<int> fd{-1};
     std::atomic<bool> readerRunning{false};
@@ -34,15 +38,28 @@ struct QmpState {
     napi_threadsafe_function tsfn = nullptr;
     std::mutex tsfnMu;
 };
-QmpState g_qmp;
 
-void dispatchEvent(const std::string &evt)
+std::mutex g_mapMu;
+std::map<std::string, std::unique_ptr<QmpState>> g_qmp;
+
+/* 获取或创建 vmId 的状态；返回的指针常驻有效 */
+QmpState *stateOf(const std::string &vmId)
 {
-    std::lock_guard<std::mutex> lk(g_qmp.tsfnMu);
-    if (!g_qmp.tsfn) {
+    std::lock_guard<std::mutex> lk(g_mapMu);
+    auto &slot = g_qmp[vmId];
+    if (!slot) {
+        slot = std::make_unique<QmpState>();
+    }
+    return slot.get();
+}
+
+void dispatchEvent(QmpState *st, const std::string &evt)
+{
+    std::lock_guard<std::mutex> lk(st->tsfnMu);
+    if (!st->tsfn) {
         return;
     }
-    napi_call_threadsafe_function(g_qmp.tsfn, new std::string(evt), napi_tsfn_nonblocking);
+    napi_call_threadsafe_function(st->tsfn, new std::string(evt), napi_tsfn_nonblocking);
 }
 
 /* a line is a command response if it carries "return"/"error"; QMP async
@@ -54,19 +71,19 @@ bool isResponse(const std::string &line)
            line.find("\"error\"") != std::string::npos;
 }
 
-void handleLine(const std::string &line)
+void handleLine(QmpState *st, const std::string &line)
 {
     if (line.empty() || line.find("\"QMP\"") != std::string::npos) {
         return; /* greeting */
     }
     if (isResponse(line)) {
-        std::lock_guard<std::mutex> lk(g_qmp.respMu);
-        g_qmp.resp = line;
-        g_qmp.hasResp = true;
-        g_qmp.respCv.notify_all();
+        std::lock_guard<std::mutex> lk(st->respMu);
+        st->resp = line;
+        st->hasResp = true;
+        st->respCv.notify_all();
         return;
     }
-    dispatchEvent(line);
+    dispatchEvent(st, line);
 }
 
 bool sendAll(int fd, const char *data, size_t len)
@@ -82,41 +99,45 @@ bool sendAll(int fd, const char *data, size_t len)
     return true;
 }
 
-bool connectOnce(int port)
+bool connectOnce(QmpState *st, const std::string &path)
 {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
         return false;
     }
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
-    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    if (path.size() >= sizeof(addr.sun_path)) {
+        OH_LOG_ERROR(LOG_APP, "qmp sock path too long (%{public}zu)", path.size());
+        close(fd);
+        return false;
+    }
+    strcpy(addr.sun_path, path.c_str());
     if (connect(fd, (sockaddr *)&addr, sizeof(addr)) != 0) {
         close(fd);
         return false;
     }
-    g_qmp.fd.store(fd);
+    st->fd.store(fd);
     return true;
 }
 
-void readerMain(int port)
+void readerMain(QmpState *st, std::string path)
 {
     pthread_setname_np(pthread_self(), "qmp-reader");
     /* qemu needs a moment to set up the monitor after vm_start */
-    for (int i = 0; i < 300 && g_qmp.readerRunning.load(); i++) {
-        if (connectOnce(port)) {
+    for (int i = 0; i < 300 && st->readerRunning.load(); i++) {
+        if (connectOnce(st, path)) {
             break;
         }
         usleep(200 * 1000);
     }
-    int fd = g_qmp.fd.load();
+    int fd = st->fd.load();
     if (fd < 0) {
-        OH_LOG_ERROR(LOG_APP, "qmp connect to port %{public}d failed", port);
-        g_qmp.readerRunning.store(false);
+        OH_LOG_ERROR(LOG_APP, "qmp connect to %{public}s failed", path.c_str());
+        st->readerRunning.store(false);
         return;
     }
-    OH_LOG_INFO(LOG_APP, "qmp connected on port %{public}d", port);
+    OH_LOG_INFO(LOG_APP, "qmp connected on %{public}s", path.c_str());
 
     /* capability negotiation: greeting is read in the main loop below */
     static const char caps[] = "{\"execute\":\"qmp_capabilities\"}\n";
@@ -124,7 +145,7 @@ void readerMain(int port)
 
     std::string buf;
     char chunk[4096];
-    while (g_qmp.readerRunning.load()) {
+    while (st->readerRunning.load()) {
         ssize_t n = recv(fd, chunk, sizeof(chunk), 0);
         if (n <= 0) {
             break;
@@ -132,23 +153,23 @@ void readerMain(int port)
         buf.append(chunk, (size_t)n);
         size_t pos;
         while ((pos = buf.find('\n')) != std::string::npos) {
-            handleLine(buf.substr(0, pos));
+            handleLine(st, buf.substr(0, pos));
             buf.erase(0, pos + 1);
         }
     }
 
     close(fd);
-    g_qmp.fd.store(-1);
+    st->fd.store(-1);
     /* wake any blocked command, then tell ArkTS the monitor is gone */
     {
-        std::lock_guard<std::mutex> lk(g_qmp.respMu);
-        g_qmp.hasResp = true;
-        g_qmp.resp.clear();
-        g_qmp.respCv.notify_all();
+        std::lock_guard<std::mutex> lk(st->respMu);
+        st->hasResp = true;
+        st->resp.clear();
+        st->respCv.notify_all();
     }
-    dispatchEvent("{\"event\":\"QMP_DISCONNECT\"}");
+    dispatchEvent(st, "{\"event\":\"QMP_DISCONNECT\"}");
     OH_LOG_INFO(LOG_APP, "qmp disconnected");
-    g_qmp.readerRunning.store(false);
+    st->readerRunning.store(false);
 }
 
 void callJs(napi_env env, napi_value cb, void * /*context*/, void *data)
@@ -163,67 +184,72 @@ void callJs(napi_env env, napi_value cb, void * /*context*/, void *data)
 }
 } // namespace
 
-int qmp_connect(int port)
+int qmp_connect(const std::string &vmId, const std::string &sockPath)
 {
+    QmpState *st = stateOf(vmId);
     bool expected = false;
-    if (!g_qmp.readerRunning.compare_exchange_strong(expected, true)) {
+    if (!st->readerRunning.compare_exchange_strong(expected, true)) {
         return 0; /* already running */
     }
-    g_qmp.reader = std::thread(readerMain, port);
-    g_qmp.reader.detach();
+    st->reader = std::thread(readerMain, st, sockPath);
+    st->reader.detach();
     return 0;
 }
 
-std::string qmp_command(const std::string &json)
+std::string qmp_command(const std::string &vmId, const std::string &json)
 {
-    std::lock_guard<std::mutex> cmdLk(g_qmp.cmdMu);
-    int fd = g_qmp.fd.load();
+    QmpState *st = stateOf(vmId);
+    std::lock_guard<std::mutex> cmdLk(st->cmdMu);
+    int fd = st->fd.load();
     if (fd < 0) {
         return "";
     }
     {
-        std::lock_guard<std::mutex> lk(g_qmp.respMu);
-        g_qmp.hasResp = false;
-        g_qmp.resp.clear();
+        std::lock_guard<std::mutex> lk(st->respMu);
+        st->hasResp = false;
+        st->resp.clear();
     }
     std::string wire = json + "\n";
     if (!sendAll(fd, wire.c_str(), wire.size())) {
         return "";
     }
-    std::unique_lock<std::mutex> lk(g_qmp.respMu);
-    if (!g_qmp.respCv.wait_for(lk, std::chrono::seconds(5), [] { return g_qmp.hasResp; })) {
+    std::unique_lock<std::mutex> lk(st->respMu);
+    if (!st->respCv.wait_for(lk, std::chrono::seconds(5), [st] { return st->hasResp; })) {
         OH_LOG_WARN(LOG_APP, "qmp command timed out: %{public}s", json.c_str());
         return "";
     }
-    return g_qmp.resp;
+    return st->resp;
 }
 
-void qmp_disconnect()
+void qmp_disconnect(const std::string &vmId)
 {
-    g_qmp.readerRunning.store(false);
-    int fd = g_qmp.fd.exchange(-1);
+    QmpState *st = stateOf(vmId);
+    st->readerRunning.store(false);
+    int fd = st->fd.exchange(-1);
     if (fd >= 0) {
         shutdown(fd, SHUT_RDWR);
         close(fd);
     }
 }
 
-bool qmp_connected()
+bool qmp_connected(const std::string &vmId)
 {
-    return g_qmp.fd.load() >= 0;
+    return stateOf(vmId)->fd.load() >= 0;
 }
 
-void qmp_set_event_callback(napi_env env, napi_value cb)
+void qmp_set_event_callback(const std::string &vmId, napi_env env, napi_value cb)
 {
-    std::lock_guard<std::mutex> lk(g_qmp.tsfnMu);
-    if (g_qmp.tsfn) {
-        napi_release_threadsafe_function(g_qmp.tsfn, napi_tsfn_release);
-        g_qmp.tsfn = nullptr;
+    QmpState *st = stateOf(vmId);
+    std::lock_guard<std::mutex> lk(st->tsfnMu);
+    if (st->tsfn) {
+        napi_release_threadsafe_function(st->tsfn, napi_tsfn_release);
+        st->tsfn = nullptr;
     }
     if (!cb) {
         return;
     }
     napi_value name;
     napi_create_string_utf8(env, "qmpEvent", NAPI_AUTO_LENGTH, &name);
-    napi_create_threadsafe_function(env, cb, nullptr, name, 0, 1, nullptr, nullptr, nullptr, callJs, &g_qmp.tsfn);
+    napi_create_threadsafe_function(env, cb, nullptr, name, 0, 1, nullptr, nullptr, nullptr,
+                                    callJs, &st->tsfn);
 }

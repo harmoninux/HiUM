@@ -1,5 +1,5 @@
 // 虚拟机列表页（首页）：卡片 + 新建/编辑/删除/启动。
-// VM 单实例运行：同一时间只允许一台 VM 处于 running。
+// 多实例：每台 VM 独立子进程，可同时运行多台（受内存约束）。
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
@@ -9,7 +9,7 @@ import {
 } from '../lib/vmprofile';
 
 interface VmRunningNapi {
-  vmRunning: () => boolean;
+  vmRunning: (vmId: string) => boolean;
 }
 
 const napi = napiModule as VmRunningNapi;
@@ -20,13 +20,31 @@ export struct VmList {
   @StorageLink('vmDataDir') vmDataDir: string = '';
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('firmwareReady') firmwareReady: boolean = false;
-  @StorageLink('runningVmId') runningVmId: string = '';
   @StorageLink('vmListVersion') @Watch('reload') vmListVersion: number = 0;
   @State profiles: VmProfile[] = [];
   @State thumbTick: number = 0;
+  @State runningIds: Record<string, boolean> = {};
+  private pollTimer: number = -1;
 
   aboutToAppear(): void {
     this.reload();
+    /* 运行徽标靠 native 查询，不在 ArkUI 响应式链路里；页面可见期间轮询刷新，
+     * 顺便覆盖「后台 VM 自行退出」的徽标更新 */
+    this.pollTick();
+    this.pollTimer = setInterval(() => this.pollTick(), 2000);
+  }
+
+  aboutToDisappear(): void {
+    clearInterval(this.pollTimer);
+    this.pollTimer = -1;
+  }
+
+  private pollTick(): void {
+    const next: Record<string, boolean> = {};
+    for (const p of this.profiles) {
+      next[p.id] = napi.vmRunning(p.id);
+    }
+    this.runningIds = next;
   }
 
   private store(): VmStore {
@@ -44,18 +62,14 @@ export struct VmList {
     }
     this.profiles = list;
     this.thumbTick++;
+    this.pollTick();
   }
 
   private isRunning(p: VmProfile): boolean {
-    return this.runningVmId === p.id && napi.vmRunning();
+    return this.runningIds[p.id] === true;
   }
 
   private openConsole(p: VmProfile): void {
-    const runningElsewhere = napi.vmRunning() && this.runningVmId !== p.id;
-    if (runningElsewhere) {
-      promptAction.showToast({ message: '已有虚拟机在运行，请先关闭它' });
-      return;
-    }
     this.navStack.pushPath({ name: 'console', param: p });
   }
 

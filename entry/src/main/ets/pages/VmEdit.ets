@@ -35,7 +35,6 @@ export struct VmEdit {
   @State portForwards: string = '';
   @State mttcg: boolean = true;
   @State tbSizeText: string = '1024';
-  @State qmpPortText: string = '4444';
   @State extraArgs: string = '';
   @State showAdvanced: boolean = false;
 
@@ -56,7 +55,6 @@ export struct VmEdit {
     this.portForwards = p.portForwards;
     this.mttcg = p.mttcg;
     this.tbSizeText = String(p.tbSize);
-    this.qmpPortText = String(p.qmpPort);
     this.extraArgs = p.extraArgs;
   }
 
@@ -85,7 +83,6 @@ export struct VmEdit {
       return;
     }
     const tbSize = Number(this.tbSizeText);
-    const qmpPort = Number(this.qmpPortText);
     const p: VmProfile = {
       id: this.profile.id,
       name: this.name.trim().length > 0 ? this.name.trim() : '未命名',
@@ -101,7 +98,6 @@ export struct VmEdit {
       mttcg: this.mttcg,
       tbSize: Number.isInteger(tbSize) && tbSize > 0 ? tbSize : 1024,
       extraArgs: this.extraArgs.trim(),
-      qmpPort: Number.isInteger(qmpPort) && qmpPort > 1024 ? qmpPort : 4444,
     };
     new VmStore(this.filesDir).save(p);
     this.vmListVersion++;
@@ -288,14 +284,6 @@ export struct VmEdit {
               TextInput({ text: this.tbSizeText })
                 .layoutWeight(1)
                 .onChange((v: string) => this.tbSizeText = v)
-            }.padding(12)
-          }
-          ListItem() {
-            Row() {
-              Text('QMP 端口').fontSize(14).width(96)
-              TextInput({ text: this.qmpPortText })
-                .layoutWeight(1)
-                .onChange((v: string) => this.qmpPortText = v)
             }.padding(12)
           }
           ListItem() {

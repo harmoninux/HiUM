@@ -1,16 +1,16 @@
-export const startVm: (arch: string, args: string[], surfaceId: bigint) => number;
-export const vmRunning: () => boolean;
-export const createSurface: (surfaceId: bigint) => number;
-export const resizeSurface: (w: number, h: number) => number;
-export const destroySurface: () => number;
-export const sendPointer: (x: number, y: number, buttons: number) => void;
-export const sendKey: (qcode: number, down: boolean) => void;
-export const qmpConnect: (port: number) => number;
-export const qmpCommand: (cmd: string) => string;
-export const qmpDisconnect: () => void;
-export const qmpConnected: () => boolean;
-export const setQmpEventCallback: (cb: ((evt: string) => void) | null) => void;
-export const captureScreen: () => ScreenShot | null;
+export const startVm: (vmId: string, arch: string, args: string[], surfaceId: bigint) => number;
+export const vmRunning: (vmId: string) => boolean;
+export const createSurface: (vmId: string, surfaceId: bigint) => number;
+export const resizeSurface: (vmId: string, w: number, h: number) => number;
+export const destroySurface: (vmId: string) => number;
+export const sendPointer: (vmId: string, x: number, y: number, buttons: number) => void;
+export const sendKey: (vmId: string, qcode: number, down: boolean) => void;
+export const qmpConnect: (vmId: string, sockPath: string) => number;
+export const qmpCommand: (vmId: string, cmd: string) => string;
+export const qmpDisconnect: (vmId: string) => void;
+export const qmpConnected: (vmId: string) => boolean;
+export const setQmpEventCallback: (vmId: string, cb: ((evt: string) => void) | null) => void;
+export const captureScreen: (vmId: string) => ScreenShot | null;
 export const createDisk: (path: string, sizeMB: number) => number;
 
 export interface ScreenShot {

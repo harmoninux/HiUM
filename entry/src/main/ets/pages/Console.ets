@@ -6,7 +6,7 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
-import { VmProfile, VmStore, buildArgs } from '../lib/vmprofile';
+import { VmProfile, VmStore, buildArgs, qmpSockPath } from '../lib/vmprofile';
 
 interface ScreenShotBuf {
   width: number;
@@ -15,18 +15,18 @@ interface ScreenShotBuf {
 }
 
 interface QemuNapi {
-  startVm: (arch: string, args: string[], surfaceId: bigint) => number;
-  vmRunning: () => boolean;
-  createSurface: (surfaceId: bigint) => number;
-  resizeSurface: (w: number, h: number) => number;
-  destroySurface: () => number;
-  sendPointer: (x: number, y: number, buttons: number) => void;
-  sendKey: (qcode: number, down: boolean) => void;
-  qmpConnect: (port: number) => number;
-  qmpCommand: (cmd: string) => string;
-  qmpConnected: () => boolean;
-  setQmpEventCallback: (cb: ((evt: string) => void) | null) => void;
-  captureScreen: () => ScreenShotBuf | null;
+  startVm: (vmId: string, arch: string, args: string[], surfaceId: bigint) => number;
+  vmRunning: (vmId: string) => boolean;
+  createSurface: (vmId: string, surfaceId: bigint) => number;
+  resizeSurface: (vmId: string, w: number, h: number) => number;
+  destroySurface: (vmId: string) => number;
+  sendPointer: (vmId: string, x: number, y: number, buttons: number) => void;
+  sendKey: (vmId: string, qcode: number, down: boolean) => void;
+  qmpConnect: (vmId: string, sockPath: string) => number;
+  qmpCommand: (vmId: string, cmd: string) => string;
+  qmpConnected: (vmId: string) => boolean;
+  setQmpEventCallback: (vmId: string, cb: ((evt: string) => void) | null) => void;
+  captureScreen: (vmId: string) => ScreenShotBuf | null;
 }
 
 const napi: QemuNapi = napiModule as QemuNapi;
@@ -39,6 +39,7 @@ interface QmpEvent {
 }
 
 class VmXComponentController extends XComponentController {
+  vmId: string = '';
   surfaceId: bigint = 0n;
   surfaceWidth: number = 0;
   surfaceHeight: number = 0;
@@ -49,8 +50,9 @@ class VmXComponentController extends XComponentController {
     /* 页面转场期间立刻挂窗会得到坏 queue（swap 必报 EGL_BAD_SURFACE）：
      * 等转场稳定后再挂（实测 500ms 足够；首启的 START 自带窗口不受影响） */
     const id = this.surfaceId;
+    const vmId = this.vmId;
     setTimeout(() => {
-      napi.createSurface(id);
+      napi.createSurface(vmId, id);
       if (this.onReady) {
         this.onReady();
       }
@@ -60,11 +62,11 @@ class VmXComponentController extends XComponentController {
   onSurfaceChanged(surfaceId: string, rect: SurfaceRect): void {
     this.surfaceWidth = rect.surfaceWidth;
     this.surfaceHeight = rect.surfaceHeight;
-    napi.resizeSurface(rect.surfaceWidth, rect.surfaceHeight);
+    napi.resizeSurface(this.vmId, rect.surfaceWidth, rect.surfaceHeight);
   }
 
   onSurfaceDestroyed(surfaceId: string): void {
-    napi.destroySurface();
+    napi.destroySurface(this.vmId);
     this.surfaceId = 0n;
   }
 }
@@ -74,7 +76,6 @@ export struct Console {
   profile: VmProfile | null = null;
   @StorageLink('vmDataDir') vmDataDir: string = '';
   @StorageLink('filesDir') filesDir: string = '';
-  @StorageLink('runningVmId') runningVmId: string = '';
   @StorageLink('vmListVersion') vmListVersion: number = 0;
   @State status: string = '';
   @State paused: boolean = false;
@@ -92,7 +93,12 @@ export struct Console {
     return Math.round(vp * surfaceSize / vpSize);
   }
 
+  private vmId(): string {
+    return this.profile ? this.profile.id : '';
+  }
+
   aboutToAppear(): void {
+    this.xcController.vmId = this.vmId();
     this.xcController.onReady = () => {
       this.surfaceReady = true;
       if (this.startPending) {
@@ -100,12 +106,12 @@ export struct Console {
         this.startVm();
       }
     };
-    napi.setQmpEventCallback((evt: string) => this.onQmpEvent(evt));
+    napi.setQmpEventCallback(this.vmId(), (evt: string) => this.onQmpEvent(evt));
     this.enterVm();
   }
 
   aboutToDisappear(): void {
-    napi.setQmpEventCallback(null);
+    napi.setQmpEventCallback(this.vmId(), null);
     this.saveThumb(); /* 顺手更新列表页缩略图 */
   }
 
@@ -113,9 +119,10 @@ export struct Console {
     if (!this.profile) {
       return;
     }
-    if (napi.vmRunning() && this.runningVmId === this.profile.id) {
+    if (napi.vmRunning(this.vmId())) {
+      /* 已在后台运行（上次离开只是摘窗）：重新挂窗，接管 QMP */
       this.status = 'running';
-      napi.qmpConnect(this.profile.qmpPort);
+      napi.qmpConnect(this.vmId(), qmpSockPath(this.profile, this.vmDataDir));
       return;
     }
     if (this.surfaceReady) {
@@ -126,23 +133,34 @@ export struct Console {
   }
 
   private startVm(): void {
-    if (!this.profile || napi.vmRunning()) {
+    if (!this.profile || napi.vmRunning(this.vmId())) {
       return;
     }
     if (this.xcController.surfaceId === 0n) {
       this.startPending = true;
       return;
     }
-    /* 每次启动都是一个新的 NCP 子进程，不再有「一进程一轮 VM」的重启流程 */
-    const ret = napi.startVm(this.profile.arch, buildArgs(this.profile, this.vmDataDir),
-      this.xcController.surfaceId);
+    /* 每次启动都是一个新的 NCP 子进程；多实例按 vmId 各起各的 */
+    const ret = napi.startVm(this.vmId(), this.profile.arch,
+      buildArgs(this.profile, this.vmDataDir), this.xcController.surfaceId);
     if (ret !== 0) {
       this.status = '启动失败: ' + ret;
       return;
     }
-    this.runningVmId = this.profile.id;
     this.status = 'starting...';
-    napi.qmpConnect(this.profile.qmpPort);
+    napi.qmpConnect(this.vmId(), qmpSockPath(this.profile, this.vmDataDir));
+    /* 首次启动 qemu 不发 RESUME 事件，按实际运行状态翻牌；长时间没起来
+     * 说明子进程早夭（如参数/资源问题），给个可见的失败 */
+    setTimeout(() => {
+      if (this.status === 'starting...' && napi.vmRunning(this.vmId())) {
+        this.status = 'running';
+      }
+    }, 2000);
+    setTimeout(() => {
+      if (this.status === 'starting...' && !napi.vmRunning(this.vmId())) {
+        this.status = '启动失败（子进程退出）';
+      }
+    }, 10000);
   }
 
   private onQmpEvent(evt: string): void {
@@ -169,9 +187,6 @@ export struct Console {
       case 'QMP_DISCONNECT':
         this.paused = false;
         this.status = '已关机';
-        if (this.runningVmId === this.profile?.id) {
-          this.runningVmId = '';
-        }
         this.vmListVersion++;
         break;
       default:
@@ -184,17 +199,17 @@ export struct Console {
     if (argsJson) {
       req += `,"arguments":${argsJson}`;
     }
-    const resp = napi.qmpCommand(req + '}');
+    const resp = napi.qmpCommand(this.vmId(), req + '}');
     if (resp.indexOf('"error"') >= 0) {
       promptAction.showToast({ message: cmd + ' 失败: ' + resp.substring(0, 120) });
     }
   }
 
   private saveThumb(): void {
-    if (!this.profile || !napi.vmRunning()) {
+    if (!this.profile || !napi.vmRunning(this.vmId())) {
       return;
     }
-    const shot = napi.captureScreen();
+    const shot = napi.captureScreen(this.vmId());
     if (!shot || shot.width <= 0) {
       return;
     }
@@ -264,7 +279,7 @@ export struct Console {
             }
             const px = this.toSurfacePx(touch.x, this.areaW, this.xcController.surfaceWidth);
             const py = this.toSurfacePx(touch.y, this.areaH, this.xcController.surfaceHeight);
-            napi.sendPointer(px, py, this.touchButtons);
+            napi.sendPointer(this.vmId(), px, py, this.touchButtons);
           })
       }
       .width('100%')
@@ -299,9 +314,9 @@ export struct Console {
         return;
       }
       if (event.type === KeyType.Down) {
-        napi.sendKey(qcode, true);
+        napi.sendKey(this.vmId(), qcode, true);
       } else if (event.type === KeyType.Up) {
-        napi.sendKey(qcode, false);
+        napi.sendKey(this.vmId(), qcode, false);
       }
       event.stopPropagation();
     })
