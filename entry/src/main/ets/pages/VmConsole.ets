@@ -5,7 +5,6 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { image } from '@kit.ImageKit';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
-import { util } from '@kit.ArkTS';
 import { promptAction } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import napiModule from 'libentry.so';
@@ -103,9 +102,6 @@ struct VmConsole {
   @State fabX: number = -1;    /* <0 = 尚未初始化（等 onAreaChange 定初位） */
   @State fabY: number = -1;
   @State menuOpen: boolean = false;  /* 竖向面板展开 */
-  /* 串口尾随面板 */
-  @State showSerial: boolean = false;
-  @State serialText: string = '';
   private vmId: string = '';
   private profile: VmProfile | null = null;
   private xcController: VmXComponentController = new VmXComponentController();
@@ -410,35 +406,6 @@ struct VmConsole {
     }
   }
 
-  /* ================= 串口尾随 ================= */
-
-  private refreshSerial(): void {
-    if (!this.profile) {
-      return;
-    }
-    const path = `${this.vmDataDir}/serial-${this.profile.id}.log`;
-    let text = '';
-    try {
-      if (fs.accessSync(path)) {
-        const fd = fs.openSync(path, fs.OpenMode.READ_ONLY);
-        const buf = new ArrayBuffer(256 * 1024);
-        const n = fs.readSync(fd.fd, buf);
-        fs.closeSync(fd);
-        text = util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n));
-      }
-    } catch {
-      text = '';
-    }
-    this.serialText = text.length > 0 ? text : '（串口为空）';
-  }
-
-  private toggleSerial(): void {
-    this.showSerial = !this.showSerial;
-    if (this.showSerial) {
-      this.refreshSerial();
-    }
-  }
-
   private saveThumb(): void {
     if (!this.profile || !napi.vmRunning(this.vmId)) {
       return;
@@ -591,9 +558,6 @@ struct VmConsole {
   fabMenu() {
     Column({ space: 2 }) {
       this.fabMenuHeader()
-      /* 电源组：四分隔线感，最上方加个分组标题 */
-      Text('电源').fontSize(tMono).fontColor('#ff9fb0c4').width('100%').textAlign(TextAlign.Center)
-        .padding({ top: 2, bottom: 2 })
       Button('关机 (ACPI)').focusable(false).fontSize(tBody)
         .fontColor(MENU_TEXT).width('100%').height(btnH).borderRadius(rBtn)
         .backgroundColor(Color.Transparent)
@@ -610,10 +574,6 @@ struct VmConsole {
         .fontColor(MENU_TEXT).width('100%').height(btnH).borderRadius(rBtn)
         .backgroundColor(Color.Transparent)
         .onClick(() => { this.actReset() })
-      Button('串口').focusable(false).fontSize(tBody)
-        .fontColor(MENU_TEXT).width('100%').height(btnH).borderRadius(rBtn)
-        .backgroundColor(Color.Transparent)
-        .onClick(() => { this.toggleSerial() })
     }
     .width(PANEL_W)
     .padding({ top: 6, bottom: 6 })
@@ -650,29 +610,6 @@ struct VmConsole {
           .onClick(() => {
             this.menuOpen = false;
           })
-      }
-
-      /* 串口尾随抽屉 */
-      if (this.showSerial) {
-        Column({ space: 6 }) {
-          Row() {
-            Text('串口输出').fontSize(13).fontColor(Color.White)
-            Blank()
-            Button('刷新').focusable(false).fontSize(12)
-              .onClick(() => this.refreshSerial())
-          }.width('100%')
-          Scroll() {
-            Text(this.serialText).fontSize(11).fontColor('#ffdddddd')
-              .width('100%')
-          }
-          .layoutWeight(1)
-          .align(Alignment.TopStart)
-        }
-        .width('100%')
-        .height(220)
-        .padding(8)
-        .backgroundColor('#cc000000')
-        .align(Alignment.Bottom)
       }
 
       /* 悬浮操作面板：停在按钮正上方、右缘与按钮对齐。用固定高度的定位盒 +
