@@ -5,7 +5,7 @@ import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import napiModule from 'libentry.so';
-import { VmProfile, VmStore } from '../lib/vmprofile';
+import { VmProfile, VmStore, buildArgs, sharedDir } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
 import {
   VmSnapshotEntry, snapshotApply, snapshotDelete, parseSnapshots,
@@ -14,7 +14,7 @@ import { isTempSnapshot } from '../lib/tempSession';
 import {
   cPrimary, cDanger, cRunning, cSuccess, cText, cSub, cWeak,
   cCard, cBlock, cChip, cBorder,
-  tCard, tLabel, tBody, tSub,
+  tCard, tLabel, tBody, tSub, tMono,
   sp1, sp2, sp3, sp4, sp5, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
@@ -31,6 +31,7 @@ export struct VmManage {
   profile: VmProfile | null = null; /* 由导航参数传入 */
   @Consume('navStack') navStack: NavPathStack;
   @StorageLink('filesDir') filesDir: string = '';
+  @StorageLink('vmDataDir') vmDataDir: string = '';
   @StorageLink('vmListVersion') vmListVersion: number = 0;
 
   @State name: string = '';
@@ -391,6 +392,19 @@ export struct VmManage {
   @Builder
   secAdvanced() {
     this.secHead('高级')
+    Row() {
+      Text('qemu 启动参数预览').fontSize(tSub).fontColor(cSub)
+      Blank()
+      Text('只读').fontSize(tSub).fontColor(cWeak)
+    }.width('100%').padding({ top: sp1, bottom: sp1 })
+    Text(this.qemuArgsText())
+      .fontSize(tMono)
+      .fontColor(cText)
+      .padding(8)
+      .width('100%')
+      .backgroundColor(cBlock)
+      .borderRadius(rElem)
+      .textAlign(TextAlign.Start)
     Text('TCG 多线程 · tb-size · 自定义参数（到配置页编辑）').fontSize(tSub).fontColor(cSub)
       .padding({ top: sp1, bottom: sp2 })
   }
@@ -400,6 +414,16 @@ export struct VmManage {
       new VmStore(this.filesDir).save(this.profile);
       this.vmListVersion++;
     }
+  }
+
+  /* qemu 命令行预览：buildArgs 是纯函数，直接用当前 profile 派生（同 VmWizard 第⑥步）。
+   * 9p 共享目录取 sharedDir（Download 或回退）；VM 空盘等边界照常渲染 */
+  private qemuArgsText(): string {
+    const p = this.profile;
+    if (!p) {
+      return '';
+    }
+    return buildArgs(p, this.vmDataDir, sharedDir(this.filesDir)).join(' ');
   }
 
   build() {
