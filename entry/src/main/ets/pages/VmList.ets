@@ -526,6 +526,7 @@ export struct VmList {
       }
       .width('100%').height('100%').backgroundColor('#52000000')
       .justifyContent(FlexAlign.Center)
+      .hitTestBehavior(HitTestMode.Block) /* 遮罩+卡片整体消费命中，阻断下层侧栏点击 */
     }
     }
     .width('100%')

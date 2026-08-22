@@ -67,6 +67,32 @@ export struct VmWizard {
 
   aboutToAppear(): void {
     const pm = this.param;
+    /* 每次打开都重置到默认，防止组件实例跨 if(showWizard) 开关复用残留上一次状态 */
+    this.step = 0;
+    this.showTiles = (pm.mode === 'new' && !pm.template);
+    this.name = '';
+    this.arch = 'x86_64';
+    this.board = 'pc';
+    this.firmware = 'seabios';
+    this.vga = 'std';
+    this.cpuModel = '';
+    this.memoryMB = 1024;
+    this.cpus = 2;
+    this.mttcg = true;
+    this.tbSizeText = '1024';
+    this.diskEnabled = false;
+    this.diskGB = 8;
+    this.diskAlloc = 'dynamic';
+    this.diskPath = '';
+    this.cdromPath = '';
+    this.bootFromCdrom = false;
+    this.kernelBoot = false;
+    this.kernelPath = '';
+    this.initrdPath = '';
+    this.kernelArgs = '';
+    this.netEnabled = true;
+    this.portForwards = '';
+    this.sharedFolder = false;
     if (pm.mode === 'edit' && pm.profile) {
       const p = pm.profile;
       this.name = p.name;
@@ -187,7 +213,6 @@ export struct VmWizard {
       }
     }
     new VmStore(this.filesDir).save(p);
-    this.vmListVersion++;
     promptAction.showToast({ message: `已保存「${p.name}」` });
     if (this.onClose) { this.onClose(); }
   }
