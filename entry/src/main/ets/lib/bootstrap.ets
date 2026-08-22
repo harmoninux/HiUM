@@ -21,6 +21,9 @@ const FIRMWARE_FILES: string[] = [
   'vgabios-ramfb.bin',
   'efi-virtio.rom',
   'edk2-aarch64-code.fd', /* aarch64 客户机 UEFI 固件（virt 机器经 -bios 加载） */
+  'edk2-arm-code.fd', /* arm(32位) 客户机 UEFI 固件（virt 机器经 -bios 加载） */
+  'edk2-loongarch64-code.fd', /* loongarch64 客户机 UEFI 固件（virt 机器经 -bios 加载） */
+  'edk2-riscv-code.fd', /* riscv64 客户机 UEFI 固件（virt 机器经 -bios 加载） */
 ];
 
 function writeRaw(resMgr: resourceManager.ResourceManager, rawPath: string, dst: string): void {

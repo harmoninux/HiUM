@@ -6,16 +6,16 @@ endif
 
 # to disable jit, add --enable-tcg-interpreter option
 
-# guest targets: x86 / x86_64 / arm64 system emulators
-TARGET_LIST := x86_64-softmmu,i386-softmmu,aarch64-softmmu
-QEMU_LIBS := libqemu-system-x86_64.so libqemu-system-i386.so libqemu-system-aarch64.so libqemu-img.so
+# guest targets: x86 / x86_64 / arm / arm64 / loongarch64 / riscv64 system emulators
+TARGET_LIST := x86_64-softmmu,i386-softmmu,aarch64-softmmu,arm-softmmu,loongarch64-softmmu,riscv64-softmmu
+QEMU_LIBS := libqemu-system-x86_64.so libqemu-system-i386.so libqemu-system-aarch64.so libqemu-system-arm.so libqemu-system-loongarch64.so libqemu-system-riscv64.so libqemu-img.so
 
 # firmware blobs needed at runtime (packed into HAP rawfile)
 FIRMWARE := bios-256k.bin bios.bin kvmvapic.bin linuxboot.bin linuxboot_dma.bin \
 	vgabios-stdvga.bin vgabios-virtio.bin vgabios-ramfb.bin \
 	efi-virtio.rom keymaps/en-us
 # optional blobs (present only when the corresponding firmware is shipped)
-FIRMWARE_OPT := edk2-aarch64-code.fd
+FIRMWARE_OPT := edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd
 
 all: download/qemu
 	rm -rf temp build

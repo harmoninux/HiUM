@@ -57,7 +57,7 @@ output/.stamp: $(STAMP) $(ALPINE_ISO) Makefile
 	mkdir -p ../entry/src/main/resources/rawfile/vm/firmware
 	for fw in bios-256k.bin bios.bin kvmvapic.bin linuxboot.bin linuxboot_dma.bin \
 		vgabios-stdvga.bin vgabios-virtio.bin vgabios-ramfb.bin \
-		efi-virtio.rom edk2-aarch64-code.fd; do cp output/$$fw ../entry/src/main/resources/rawfile/vm/firmware/ 2>/dev/null || true; done
+		efi-virtio.rom edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd; do cp output/$$fw ../entry/src/main/resources/rawfile/vm/firmware/ 2>/dev/null || true; done
 	# Alpine ISO 拷进 rawfile/vm/（bootstrap 运行时解包给内置模板）
 	cp $(ALPINE_ISO) ../entry/src/main/resources/rawfile/vm/alpine-virt.iso
 	touch output/.stamp

@@ -28,7 +28,7 @@ export interface WizardParam {
 }
 
 const STEPS: string[] = ['架构', '板卡/固件', 'CPU/内存', '介质', '网络', '命名'];
-const ARCH_OPTIONS: VmArch[] = ['x86_64', 'i386', 'aarch64'];
+const ARCH_OPTIONS: VmArch[] = ['x86_64', 'i386', 'aarch64', 'arm', 'loongarch64', 'riscv64'];
 const DISK_SIZES: number[] = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 
 @Component
@@ -139,12 +139,26 @@ export struct VmWizard {
   }
 
   private boards(): string[] {
-    return this.arch === 'aarch64' ? ['virt', 'raspi2'] : ['pc', 'q35'];
+    if (this.arch === 'aarch64') { return ['virt', 'raspi2', 'raspi3']; }
+    if (this.arch === 'arm') { return ['virt', 'raspi2', 'raspi3']; }
+    if (this.arch === 'loongarch64' || this.arch === 'riscv64') { return ['virt']; }
+    return ['pc', 'q35'];
+  }
+
+  /* 架构卡片显示名：存储值(loongarch64)较长，UI 主标题用短称 loongarch */
+  private archLabel(a: VmArch): string {
+    return a === 'loongarch64' ? 'loongarch' : a;
+  }
+
+  /* 该架构走 virt 机器 + 固定 EDK2 UEFI 固件（buildArgs 强制 -bios，无 SeaBIOS/OVMF 切换意义） */
+  private isArmLike(): boolean {
+    return ['aarch64', 'arm', 'loongarch64', 'riscv64'].indexOf(this.arch) >= 0;
   }
 
   private boardName(b: string): string {
     if (b === 'virt') return 'virt (通用)';
-    if (b === 'raspi2') return 'raspi2 (树莓派)';
+    if (b === 'raspi2') return 'raspi2b (树莓派2B)';
+    if (b === 'raspi3') return 'raspi3b (树莓派3B)';
     if (b === 'q35') return 'q35 (现代PCIe)';
     return 'pc (兼容最好)';
   }
@@ -245,8 +259,10 @@ export struct VmWizard {
         Button('×').backgroundColor(Color.Transparent).fontColor(cWeak)
           .onClick(() => { if (this.onClose) this.onClose(); })
       }.width('100%').padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
+      /* 新建选项精简为两枚磁贴：内置 Alpine Linux + 「自定义」(手工向导)。
+       * 其余模板(Android-x86/FreeDOS/裸内核)暂不设选项，需要时再从 OS_TEMPLATES 加回 */
       Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
-        ForEach(OS_TEMPLATES, (t: OsTemplate) => {
+        ForEach(OS_TEMPLATES.filter((t: OsTemplate) => t.id === 'alpine'), (t: OsTemplate) => {
           Column() {
             Text(t.icon ?? '💿').fontSize(26)
             Text(t.name).fontSize(tCard).fontWeight(FontWeight.Medium).margin({ top: sp1 })
@@ -259,11 +275,19 @@ export struct VmWizard {
           .border({ width: bw, color: cBorder })
           .onClick(() => { this.loadTemplate(t); this.step = 0; this.showTiles = false; })
         }, (t: OsTemplate) => t.id)
-      }.width('100%').padding({ left: sp4, right: sp4 })
-      Row() {
-        Button('从零开始（手工向导）').fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
-          .onClick(() => { this.step = 0; this.showTiles = false; })
-      }.width('100%').justifyContent(FlexAlign.End).padding({ left: sp4, right: sp4, top: sp3, bottom: sp4 })
+
+        /* 「自定义」磁贴：等效原「从零开始（手工向导）」按钮，进空向导逐步配置 */
+        Column() {
+          Text('✏️').fontSize(26)
+          Text('自定义').fontSize(tCard).fontWeight(FontWeight.Medium).margin({ top: sp1 })
+          Text('从零开始').fontSize(tMono).fontColor(cSub).fontFamily('monospace')
+          Text('全手动配置').fontSize(tMono).fontColor(cWeak)
+        }
+        .width('48%').margin({ bottom: sp2 }).padding(sp3)
+        .backgroundColor(cCard).borderRadius(rCard)
+        .border({ width: bw, color: cBorder })
+        .onClick(() => { this.step = 0; this.showTiles = false; })
+      }.width('100%').padding({ left: sp4, right: sp4, bottom: sp4 })
     }.width('100%').backgroundColor(cCard).borderRadius(rCard)
   }
 
@@ -277,11 +301,14 @@ export struct VmWizard {
       Row({ space: 10 }) {
         ForEach(ARCH_OPTIONS, (a: VmArch) => {
           Column() {
-            Text(a).fontSize(tCard).fontWeight(FontWeight.Medium)
+            Text(this.archLabel(a)).fontSize(tCard).fontWeight(FontWeight.Medium)
               .fontColor(this.arch === a ? Color.White : (this.isEdit() ? cWeak : cText))
-            if (a === 'aarch64') { Text('arm64').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
-            if (a === 'x86_64') { Text('现代 x86').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
-            if (a === 'i386') { Text('复古 x86').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
+            if (a === 'aarch64') { Text('ARM 64 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
+            if (a === 'arm') { Text('ARM 32 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
+            if (a === 'x86_64') { Text('64 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
+            if (a === 'i386') { Text('32 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
+            if (a === 'loongarch64') { Text('64 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
+            if (a === 'riscv64') { Text('RISC-V').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
           }
           .layoutWeight(1)
           .padding(12)
@@ -321,23 +348,31 @@ export struct VmWizard {
       }
       .width('100%')
 
-      Row({ space: 10 }) {
-        Column() {
+      if (this.isArmLike()) {
+        Row({ space: 8 }) {
           Text('固件').fontSize(tSub).fontColor(cSub)
-          Text('SeaBIOS').fontSize(tLabel)
-            .fontColor(this.firmware === 'seabios' ? cPrimary : cText)
-            .onClick(() => this.firmware = 'seabios')
-        }.layoutWeight(1)
-        Column() {
-          Text('OVMF (UEFI)').fontSize(tSub).fontColor(cSub)
-          Text('OVMF').fontSize(tLabel)
-            .fontColor(this.firmware === 'ovmf' ? cPrimary : cText)
-            .onClick(() => this.firmware = 'ovmf')
-        }.layoutWeight(1)
+          Text('UEFI (edk2)').fontSize(tLabel).fontColor(cPrimary)
+        }.width('100%')
+        Text('该架构经 virt 机器固定用 EDK2 UEFI 固件引导，不可切换').fontSize(tSub).fontColor(cWeak)
+      } else {
+        Row({ space: 10 }) {
+          Column() {
+            Text('固件').fontSize(tSub).fontColor(cSub)
+            Text('SeaBIOS').fontSize(tLabel)
+              .fontColor(this.firmware === 'seabios' ? cPrimary : cText)
+              .onClick(() => this.firmware = 'seabios')
+          }.layoutWeight(1)
+          Column() {
+            Text('OVMF (UEFI)').fontSize(tSub).fontColor(cSub)
+            Text('OVMF').fontSize(tLabel)
+              .fontColor(this.firmware === 'ovmf' ? cPrimary : cText)
+              .onClick(() => this.firmware = 'ovmf')
+          }.layoutWeight(1)
+        }
+        .width('100%')
       }
-      .width('100%')
 
-      Text('CPU 机型（留空 = 自动；aarch64 默认 max，x86 用板卡默认）').fontSize(tSub).fontColor(cWeak)
+      Text('CPU 机型（留空 = 自动；ARM/ARM64/龙芯/RISC-V 默认 max，x86 用板卡默认）').fontSize(tSub).fontColor(cWeak)
       TextInput({ text: this.cpuModel, placeholder: '如 cortex-a57 / max / host' })
         .fontSize(tBody)
         .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })

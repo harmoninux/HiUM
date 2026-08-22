@@ -7,28 +7,30 @@ import { util } from '@kit.ArkTS';
 
 export const SCHEMA_VERSION = 2;
 
-export type VmArch = 'x86_64' | 'i386' | 'aarch64';
+export type VmArch = 'x86_64' | 'i386' | 'aarch64' | 'arm' | 'loongarch64' | 'riscv64';
 export type VgaType = 'std' | 'virtio';
-export type VmBoard = 'pc' | 'q35' | 'virt' | 'raspi2';
+export type VmBoard = 'pc' | 'q35' | 'virt' | 'raspi2' | 'raspi3';
 export type VmFirmware = 'seabios' | 'ovmf';
 
 /* 机器层：架构/显卡 + 板卡/固件/CPU 模型。机器工坊按此生成 -machine/-cpu 参数 */
 export interface VmMachine {
   arch: VmArch;
   vga: VgaType;
-  machine: VmBoard;    /* 板卡：x86 pc/q35，arm64 virt/raspi2 */
+  machine: VmBoard;    /* 板卡：x86 pc/q35，arm64/arm virt/raspi2/raspi3，loongarch64/riscv64 virt */
   firmware: VmFirmware; /* 固件：seabios(BIOS) / ovmf(UEFI，暂需 OVMF 文件) */
-  cpuModel: string;     /* '' = 自动（aarch64 给 max） */
+  cpuModel: string;     /* '' = 自动（arm64/arm/loongarch64 给 max） */
 }
 
-/* 板卡是否适配某架构（aarch64 只认 virt/raspi2；x86 只认 pc/q35） */
+/* 板卡是否适配某架构（aarch64/loongarch64 只认 virt/raspi2；x86 只认 pc/q35） */
 export function defaultBoard(arch: VmArch): VmBoard {
-  return arch === 'aarch64' ? 'virt' : 'pc';
+  return (arch === 'aarch64' || arch === 'arm' || arch === 'loongarch64' || arch === 'riscv64') ? 'virt' : 'pc';
 }
 
 /* 把 board 收紧成与 arch 兼容的值；不兼容则回退该架构默认板卡 */
 export function fitBoard(arch: VmArch, board: string): VmBoard {
-  const allowed: string[] = arch === 'aarch64' ? ['virt', 'raspi2'] : ['pc', 'q35'];
+  const allowed: string[] = arch === 'aarch64' ? ['virt', 'raspi2', 'raspi3'] :
+    arch === 'arm' ? ['virt', 'raspi2', 'raspi3'] :
+    (arch === 'loongarch64' || arch === 'riscv64') ? ['virt'] : ['pc', 'q35'];
   return allowed.indexOf(board) >= 0 ? board as VmBoard : defaultBoard(arch);
 }
 
@@ -169,7 +171,7 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
 
   if (m) {
     const arch = jStr(m, 'arch');
-    if (arch === 'i386' || arch === 'aarch64') {
+    if (arch === 'i386' || arch === 'aarch64' || arch === 'arm' || arch === 'loongarch64') {
       p.machine.arch = arch as VmArch;
     }
     if (jStr(m, 'vga') === 'virtio') {
@@ -246,16 +248,26 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
    * aarch64 virt 现已接入 edk2-aarch64-code.fd（-bios）；x86 的 firmware=ovmf
    * 仍未接 pflash（需 OVMF_CODE/VARS 固件），缺件回落 seabios。 */
   const board = fitBoard(p.machine.arch, p.machine.machine);
-  if (board === 'virt' || board === 'raspi2') {
+  const isRaspi = board === 'raspi2' || board === 'raspi3';
+  if (isRaspi) {
+    /* 树莓派：qemu 10.2 实际机器名 raspi2b/raspi3b（旧代码 'raspi2' 会报 unsupported machine）。
+     * 树莓派 SoC 自带引导、不依赖 edk2/BIOS；无 PCI，故不挂 virtio-gpu/net；磁盘经 SD 卡控制器。 */
+    args.push('-machine', board === 'raspi2' ? 'raspi2b' : 'raspi3b');
+  } else if (board === 'virt') {
     args.push('-machine', board);
     args.push('-cpu', p.machine.cpuModel.length > 0 ? p.machine.cpuModel : 'max');
-    if (board === 'virt') {
-      args.push('-device', 'virtio-gpu-pci');
-      /* aarch64 的 virt 机器必须提供 UEFI 固件才能引导客户机：edk2-aarch64-code.fd
-       * 由 make deps 产出、bootstrap 解到 vmDir，qemu 经 -bios(绝对路径) 载入 flash0。 */
-      if (p.machine.arch === 'aarch64') {
-        args.push('-bios', vmDataDir + '/edk2-aarch64-code.fd');
-      }
+    args.push('-device', 'virtio-gpu-pci');
+    /* aarch64 的 virt 机器必须提供 UEFI 固件才能引导客户机：edk2-aarch64-code.fd
+     * 由 make deps 产出、bootstrap 解到 vmDir，qemu 经 -bios(绝对路径) 载入 flash0。
+     * loongarch64/arm(32位) 同理，对应各自 edk2-*.fd。 */
+    if (p.machine.arch === 'aarch64') {
+      args.push('-bios', vmDataDir + '/edk2-aarch64-code.fd');
+    } else if (p.machine.arch === 'loongarch64') {
+      args.push('-bios', vmDataDir + '/edk2-loongarch64-code.fd');
+    } else if (p.machine.arch === 'arm') {
+      args.push('-bios', vmDataDir + '/edk2-arm-code.fd');
+    } else if (p.machine.arch === 'riscv64') {
+      args.push('-bios', vmDataDir + '/edk2-riscv-code.fd');
     }
   } else {
     args.push('-machine', board);
@@ -268,13 +280,19 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
   if (p.media.diskPath.length > 0) {
     /* 默认新建的是 qcow2；导入的 raw 镜像仍按扩展名回退到 raw */
     const fmt = p.media.diskPath.toLowerCase().endsWith('.qcow2') ? 'qcow2' : 'raw';
-    args.push('-drive', `file=${p.media.diskPath},if=virtio,format=${fmt}`);
+    const bus = isRaspi ? 'sd' : 'virtio'; /* 树莓派经 SD 卡控制器，非 virtio-blk */
+    args.push('-drive', `file=${p.media.diskPath},if=${bus},format=${fmt}`);
   }
-  if (p.media.cdromPath.length > 0) {
-    args.push('-cdrom', p.media.cdromPath);
+  if (!isRaspi) {
+    if (p.media.cdromPath.length > 0) {
+      args.push('-cdrom', p.media.cdromPath);
+    }
+    args.push('-boot', p.media.bootFromCdrom ? 'd' : 'c');
   }
-  args.push('-boot', p.media.bootFromCdrom ? 'd' : 'c');
-  if (p.net.enabled) {
+  if (isRaspi) {
+    /* 树莓派无 PCI，virtio-net 不可用；网络在 qemu 树莓派模拟下受限（实验性） */
+    args.push('-nic', 'none');
+  } else if (p.net.enabled) {
     let netdev = 'user,id=n0';
     for (const fwd of parseForwards(p.net.portForwards)) {
       netdev += ',' + fwd;
