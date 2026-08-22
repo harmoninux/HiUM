@@ -2,6 +2,7 @@
 // 独立的 VmConsoleAbility 窗口（见 VmList.openConsole）。
 import { VmList } from './VmList';
 import { VmEdit } from './VmEdit';
+import { VmWizard, WizardParam } from './VmWizard';
 import { VmManage } from './VmManage';
 import { StorageOverview } from './StorageOverview';
 import { VmProfile } from '../lib/vmprofile';
@@ -16,6 +17,8 @@ struct Index {
     NavDestination() {
       if (name === 'edit') {
         VmEdit({ profile: param as VmProfile })
+      } else if (name === 'wizard') {
+        VmWizard({ param: param as WizardParam })
       } else if (name === 'manage') {
         VmManage({ profile: param as VmProfile })
       } else if (name === 'storage') {

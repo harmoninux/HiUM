@@ -8,9 +8,10 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import napiModule from 'libentry.so';
 import {
   VmProfile, VmStore,
-  newProfileId, blankProfile, alpineProfile, qmpSockPath,
+  newProfileId, alpineProfile, qmpSockPath,
 } from '../lib/vmprofile';
-import { OS_TEMPLATES, OsTemplate, buildTemplateProfile } from '../lib/osTemplates';
+import { OS_TEMPLATES, OsTemplate } from '../lib/osTemplates';
+import { WizardParam } from './VmWizard';
 import {
   initVmRegistry, refreshRunningMap, vmIsRunning,
   subscribeVmLifecycle, unsubscribeVmLifecycle, VmLifecycleEvent,
@@ -21,12 +22,6 @@ interface QmpNapi {
   qmpConnect: (vmId: string, sockPath: string) => number;
   qmpCommand: (vmId: string, cmd: string) => string;
 }
-/* 模板一键创建要用的 qemu-img create（盘在创建时建好，失败不落配置） */
-interface DiskNapi {
-  createDisk: (path: string, sizeMB: number, alloc: string) => number;
-}
-const diskNapi = napiModule as DiskNapi;
-
 const qmpNapi = napiModule as QmpNapi;
 
 @Component
@@ -180,21 +175,17 @@ export struct VmList {
     }
   }
 
-  /* 从模板一键创建：建盘 + 存配置 + 刷新。新盘用动态分配（稀疏，实占≈0）。 */
-  private templateCreate(tpl: OsTemplate): void {
-    const id = newProfileId();
-    const p = buildTemplateProfile(tpl, id, this.filesDir, this.vmDataDir);
-    if (tpl.diskMB > 0 && p.media.diskPath.length > 0) {
-      const ret = diskNapi.createDisk(p.media.diskPath, tpl.diskMB, 'dynamic');
-      if (ret !== 0) {
-        promptAction.showToast({ message: '创建磁盘失败' });
-        return;
-      }
-    }
-    this.store().save(p);
-    this.vmListVersion++;
+  /* 模板 → 机器工坊（预填，可逐步改）；从零 → 规格化默认 */
+  private openWizardNew(tpl: OsTemplate | null): void {
     this.showPicker = false;
-    promptAction.showToast({ message: `已创建「${p.name}」` });
+    const prm: WizardParam = tpl ? { mode: 'new', template: tpl } : { mode: 'new' };
+    this.navStack.pushPath({ name: 'wizard', param: prm });
+  }
+
+  private openWizardEdit(p: VmProfile): void {
+    this.showPicker = false;
+    const prm: WizardParam = { mode: 'edit', profile: p };
+    this.navStack.pushPath({ name: 'wizard', param: prm });
   }
 
   private openConsole(p: VmProfile): void {
@@ -288,7 +279,7 @@ export struct VmList {
             .padding(12)
             .backgroundColor(Color.White)
             .borderRadius(8)
-            .onClick(() => this.templateCreate(t))
+            .onClick(() => this.openWizardNew(t))
           }, (t: OsTemplate) => t.id)
 
           Column({ space: 4 }) {
@@ -300,10 +291,7 @@ export struct VmList {
           .padding(12)
           .backgroundColor(Color.White)
           .borderRadius(8)
-          .onClick(() => {
-            this.showPicker = false;
-            this.navStack.pushPath({ name: 'edit', param: blankProfile(newProfileId()) });
-          })
+          .onClick(() => this.openWizardNew(null))
         }
         .width('100%')
         .padding({ left: 16, right: 16, bottom: 24 })
@@ -326,7 +314,7 @@ export struct VmList {
           .onClick(() => this.confirmPowerOff(p, true))
       }
       Button('编辑').focusable(false).width('100%')
-        .onClick(() => this.navStack.pushPath({ name: 'edit', param: p }))
+        .onClick(() => this.openWizardEdit(p))
       Button('删除').focusable(false).width('100%')
         .fontColor(Color.Red)
         .onClick(() => this.confirmDelete(p))
