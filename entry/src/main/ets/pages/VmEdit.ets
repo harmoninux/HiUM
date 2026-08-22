@@ -4,7 +4,7 @@ import { promptAction } from '@kit.ArkUI';
 import { pathExists } from '../lib/fsutil';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore, VmArch, VgaType, SCHEMA_VERSION, fitBoard } from '../lib/vmprofile';
-import { cPrimary, cRunning, cWarn, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub } from '../lib/uiTokens';
+import { cPrimary, cRunning, cWarn, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, rBtn, btnSh } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -163,13 +163,17 @@ export struct VmEdit {
   build() {
     Column() {
       Row() {
-        Button('取消').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
+        Button('取消').focusable(false).fontSize(tBody)
+          .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
+          .backgroundColor(Color.Transparent)
           .fontColor(cPrimary)
           .onClick(() => this.navStack.pop())
         Blank()
         Text('虚拟机配置').fontSize(tPage).fontWeight(FontWeight.Medium)
         Blank()
-        Button('保存').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
+        Button('保存').focusable(false).fontSize(tBody)
+          .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
+          .backgroundColor(Color.Transparent)
           .fontColor(cPrimary)
           .onClick(() => this.save())
       }
@@ -226,8 +230,10 @@ export struct VmEdit {
                 .layoutWeight(1)
               if (this.diskPath) {
                 Button('信息').focusable(false).fontSize(tBody)
+                  .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
                   .onClick(() => this.showDiskInfo())
                 Button('移除').focusable(false).fontSize(tBody)
+                  .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
                   .onClick(() => {
                     this.diskPath = '';
                     this.diskCreate = false;
@@ -277,6 +283,7 @@ export struct VmEdit {
                 .layoutWeight(1)
               if (this.cdromPath) {
                 Button('移除').focusable(false).fontSize(tBody)
+                  .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
                   .onClick(() => this.cdromPath = '')
               }
             }
@@ -286,6 +293,7 @@ export struct VmEdit {
                   .layoutWeight(1)
                   .onChange((v: string) => this.cdromPath = v)
                 Button('内置 Alpine').focusable(false).fontSize(tBody)
+                  .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
                   .onClick(() => {
                     const iso = this.vmDataDir + '/alpine-virt.iso';
                     if (pathExists(iso)) {

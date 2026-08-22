@@ -37,3 +37,9 @@ export const rCard = 8;   /* 卡/按钮 */
 export const rElem = 6;   /* 小元素 */
 export const rBadge = 3;  /* 徽标 */
 export const bw = 1;
+
+/* ---- 按钮尺寸（对齐设计稿：小圆角矩形，而非系统默认胶囊） ---- */
+export const rBtn = 6;    /* 按钮外圆角（设计稿 radius:6） */
+export const btnH = 32;   /* 主/标准按钮高 */
+export const btnSh = 26;  /* 小/文字式动作按钮高 */
+export const btnPadX = 12;/* 按钮水平内边距（紧凑） */

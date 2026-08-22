@@ -12,7 +12,7 @@ import { HOS_TO_QKEYCODE } from '../lib/keymap';
 import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir } from '../lib/vmprofile';
 import { prepareStart } from '../lib/tempSession';
 import { getConsoleWindow, takePendingVmId } from '../lib/vmwindows';
-import { cDanger } from '../lib/uiTokens';
+import { cDanger, rBtn, btnSh } from '../lib/uiTokens';
 
 interface ScreenShotBuf {
   width: number;
@@ -490,12 +490,16 @@ struct VmConsole {
   powerBuilder() {
     Column({ space: 4 }) {
       Button('关机 (ACPI)').focusable(false).width('100%')
+        .height(btnSh).borderRadius(rBtn)
         .onClick(() => this.qmp('system_powerdown'))
       Button(this.paused ? '恢复运行' : '暂停').focusable(false).width('100%')
+        .height(btnSh).borderRadius(rBtn)
         .onClick(() => this.qmp(this.paused ? 'cont' : 'stop'))
       Button('重启').focusable(false).width('100%')
+        .height(btnSh).borderRadius(rBtn)
         .onClick(() => this.qmp('system_reset'))
       Button('强制断电').focusable(false).width('100%')
+        .height(btnSh).borderRadius(rBtn)
         .fontColor(cDanger)
         .onClick(() => this.qmp('quit'))
     }
@@ -523,22 +527,28 @@ struct VmConsole {
 
       Row({ space: 8 }) {
         Button('电源').focusable(false).fontSize(13)
+          .height(btnSh).borderRadius(rBtn)
           .bindMenu(this.powerBuilder())
         Button('Ctrl+Alt+Del').focusable(false).fontSize(13)
+          .height(btnSh).borderRadius(rBtn)
           .onClick(() => this.qmp('send-key',
             '{"keys":[{"type":"qcode","data":"ctrl"},' +
             '{"type":"qcode","data":"alt"},' +
             '{"type":"qcode","data":"delete"}]}'))
         Button('截图').focusable(false).fontSize(13)
+          .height(btnSh).borderRadius(rBtn)
           .onClick(() => {
             this.saveThumb();
             promptAction.showToast({ message: '已保存为虚拟机封面' });
           })
         Button(this.fullscreen ? '退出全屏' : '全屏').focusable(false).fontSize(13)
+          .height(btnSh).borderRadius(rBtn)
           .onClick(() => this.toggleFullscreen())
         Button('串口').focusable(false).fontSize(13)
+          .height(btnSh).borderRadius(rBtn)
           .onClick(() => this.toggleSerial())
         Button('QMP').focusable(false).fontSize(13)
+          .height(btnSh).borderRadius(rBtn)
           .onClick(() => this.toggleQmp())
         Text(this.status).fontSize(12).fontColor(Color.White).layoutWeight(1)
       }

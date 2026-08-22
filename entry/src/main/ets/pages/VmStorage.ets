@@ -9,9 +9,9 @@ import { VmProfile, VmStore } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
 import {
   cPrimary, cDanger, cRunning, cSuccess, cText, cSub, cWeak,
-  cCard, cBlock, cChip,
+  cCard, cBlock, cChip, cBorder,
   tCard, tLabel, tBody, tSub,
-  sp1, sp2, sp3, sp4, sp5, rElem, rBadge,
+  sp1, sp2, sp3, sp4, sp5, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
 } from '../lib/uiTokens';
 
 interface DiskNapi {
@@ -181,8 +181,9 @@ export struct VmStorage {
 
   @Builder
   secHead(t: string) {
+    Divider().color(cBorder).margin({ top: sp2 })
     Text(t).fontSize(tSub).fontColor(cWeak).fontWeight(FontWeight.Bold).letterSpacing(0.5)
-      .padding({ top: sp3, bottom: sp1 }).width('100%')
+      .padding({ top: sp1, bottom: sp1 }).width('100%')
   }
 
   /* 系统盘：信息 / 扩容 / 移除（从 VmManage 平移到 per-VM 存储页） */
@@ -205,14 +206,20 @@ export struct VmStorage {
             .height(6).backgroundColor(cPrimary).borderRadius(rElem)
         }.width('100%').margin({ top: sp1, bottom: sp1 })
         Row({ space: sp2 }) {
-          Button('信息').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cSub)
+          Button('信息').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cSub)
             .onClick(() => this.showDiskInfo())
-          Button('扩容').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cSub)
+          Button('扩容').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cSub)
             .onClick(() => {
               this.newGBText = this.diskVirtualGB > 0 ? String(Math.ceil(this.diskVirtualGB)) : '';
               this.expandMode = !this.expandMode;
             })
-          Button('移除').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cDanger)
+          Button('移除').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.confirmRemove())
         }
         if (this.expandMode) {
@@ -220,9 +227,13 @@ export struct VmStorage {
             Text('新大小(GB)').fontSize(tSub).fontColor(cSub)
             TextInput({ text: this.newGBText }).type(InputType.Number).layoutWeight(1).fontSize(tSub)
               .onChange((v: string) => this.newGBText = v)
-            Button('确定').focusable(false).fontSize(tSub).backgroundColor(cPrimary).fontColor(Color.White)
+            Button('确定').focusable(false).fontSize(tSub)
+              .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
+              .backgroundColor(cPrimary).fontColor(Color.White)
               .onClick(() => this.doExpand())
-            Button('取消').focusable(false).fontSize(tSub).backgroundColor(Color.Transparent).fontColor(cSub)
+            Button('取消').focusable(false).fontSize(tSub)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cSub)
               .onClick(() => this.expandMode = false)
           }.margin({ top: sp2 })
         }
@@ -239,7 +250,9 @@ export struct VmStorage {
         Text(this.cdromPath ? this.baseName(this.cdromPath) : '未引用光盘')
           .fontSize(tSub).fontColor(this.cdromPath ? cSub : cWeak).layoutWeight(1)
         if (this.cdromPath.length > 0) {
-          Button('清除').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cDanger)
+          Button('清除').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.clearCdrom())
         }
       }.width('100%').padding({ top: sp1, bottom: sp2 })
@@ -252,7 +265,9 @@ export struct VmStorage {
         /* 顶部行：返回(宽屏隐藏) / 存储 ·VM名 / arch */
         Row({ space: sp2 }) {
           if (!this.isWide) {
-            Button('返回').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+            Button('返回').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cPrimary)
               .onClick(() => this.navStack.pop())
           }
           Column({ space: 1 }) {

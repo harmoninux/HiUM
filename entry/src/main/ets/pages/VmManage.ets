@@ -13,9 +13,9 @@ import {
 import { isTempSnapshot } from '../lib/tempSession';
 import {
   cPrimary, cDanger, cRunning, cSuccess, cText, cSub, cWeak,
-  cCard, cBlock, cChip,
+  cCard, cBlock, cChip, cBorder,
   tCard, tLabel, tBody, tSub,
-  sp1, sp2, sp3, sp4, sp5, rElem, rBadge,
+  sp1, sp2, sp3, sp4, sp5, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
 } from '../lib/uiTokens';
 
 interface DiskNapi {
@@ -309,12 +309,25 @@ export struct VmManage {
     return this.profile ? this.profile.machine.machine : '';
   }
 
+  private firmwareLabel(): string {
+    return this.profile ? this.profile.machine.firmware : '';
+  }
+
+  private vgaLabel(): string {
+    return this.profile ? this.profile.machine.vga : '';
+  }
+
+  private netLabel(): string {
+    return this.profile ? (this.profile.net.enabled ? '网络开' : '网络关') : '';
+  }
+
   /* ================= 分区 ================= */
 
   @Builder
   secHead(t: string) {
+    Divider().color(cBorder).margin({ top: sp2 })
     Text(t).fontSize(tSub).fontColor(cWeak).fontWeight(FontWeight.Bold).letterSpacing(0.5)
-      .padding({ top: sp3, bottom: sp1 }).width('100%')
+      .padding({ top: sp1, bottom: sp1 }).width('100%')
   }
 
   @Builder
@@ -326,7 +339,9 @@ export struct VmManage {
       Row() {
         Text(`系统盘 ${this.diskFmt} · 虚拟 ${this.diskVirtualGB.toFixed(1)}G · 实占 ${this.diskActualGB.toFixed(1)}G`)
           .fontSize(tSub).fontColor(cSub).layoutWeight(1)
-        Button('去存储页管理').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+        Button('去存储页管理').focusable(false).fontSize(tBody)
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .backgroundColor(Color.Transparent).fontColor(cPrimary)
           .onClick(() => this.openStorage())
       }.width('100%').padding({ top: sp1, bottom: sp2 }).alignItems(VerticalAlign.Center)
     }
@@ -347,18 +362,26 @@ export struct VmManage {
 
       if (this.canSnapshot()) {
         Row({ space: sp2 }) {
-          Button('新建快照').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+          Button('新建快照').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cPrimary)
             .onClick(() => this.snapCreateMode = !this.snapCreateMode)
-          Button('刷新').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cSub)
+          Button('刷新').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cSub)
             .onClick(() => this.refreshSnapshot())
         }.width('100%')
         if (this.snapCreateMode) {
           Row({ space: sp2 }) {
             TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tBody)
               .onChange((v: string) => this.snapNameText = v)
-            Button('创建').focusable(false).fontSize(tSub).backgroundColor(cPrimary).fontColor(Color.White)
+            Button('创建').focusable(false).fontSize(tSub)
+              .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
+              .backgroundColor(cPrimary).fontColor(Color.White)
               .onClick(() => this.doSnapshotCreate())
-            Button('取消').focusable(false).fontSize(tSub).backgroundColor(Color.Transparent).fontColor(cSub)
+            Button('取消').focusable(false).fontSize(tSub)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cSub)
               .onClick(() => this.snapCreateMode = false)
           }.margin({ top: sp1, bottom: sp1 })
         }
@@ -376,9 +399,13 @@ export struct VmManage {
               Text(s.name).fontSize(tLabel)
               Text(this.dateStr(s.dateSec)).fontSize(10).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Button('恢复').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+            Button('恢复').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cPrimary)
               .onClick(() => this.doSnapshotApply(s))
-            Button('删除').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cDanger)
+            Button('删除').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cDanger)
               .onClick(() => this.doSnapshotDelete(s))
           }.width('100%').padding({ top: sp1, bottom: sp1 })
         }, (s: VmSnapshotEntry) => s.id + ':' + s.name)
@@ -438,7 +465,9 @@ export struct VmManage {
         /* 顶部行：返回 / 名称+运行徽标+arch / 进入·编辑·删除 */
         Row({ space: sp2 }) {
           if (!this.isWide) {
-            Button('返回').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+            Button('返回').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cPrimary)
               .onClick(() => this.navStack.pop())
           }
           Column({ space: 1 }) {
@@ -453,13 +482,20 @@ export struct VmManage {
             Text(this.arch).fontSize(tSub).fontColor(cSub)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
           Button(this.running ? '进入' : '启动').focusable(false).fontSize(tBody)
+            .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
             .backgroundColor(cPrimary).fontColor(Color.White)
             .onClick(() => this.openConsole())
-          Button('编辑').focusable(false).fontSize(tBody).backgroundColor(cBlock).fontColor(cPrimary)
+          Button('编辑').focusable(false).fontSize(tBody)
+            .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
+            .backgroundColor(cBlock).fontColor(cPrimary)
             .onClick(() => this.openEdit())
-          Button('存储').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+          Button('存储').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cPrimary)
             .onClick(() => this.openStorage())
-          Button('删除').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cDanger)
+          Button('删除').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.confirmDeleteVm())
         }
         .width('100%')
@@ -478,8 +514,16 @@ export struct VmManage {
                 Text(this.cpuLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
-              if (this.boardLabel().length > 0) {
-                Text(this.boardLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+              if (this.firmwareLabel().length > 0) {
+                Text(this.firmwareLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
+              if (this.vgaLabel().length > 0) {
+                Text(this.vgaLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
+              if (this.netLabel().length > 0) {
+                Text(this.netLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
             }

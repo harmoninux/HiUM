@@ -12,7 +12,7 @@ import { OsTemplate, OS_TEMPLATES } from '../lib/osTemplates';
 import {
   cPrimary, cSub, cWeak, cText, cCard, cBorder, cRunning, cWarn, cBg, cBlock,
   tPage, tCard, tBody, tSub, tLabel, tMono,
-  sp1, sp2, sp3, sp4, rCard, bw,
+  sp1, sp2, sp3, sp4, rCard, bw, rBtn, btnH, btnSh, btnPadX,
 } from '../lib/uiTokens';
 
 interface DiskNapi {
@@ -410,6 +410,7 @@ export struct VmWizard {
           .fontSize(tSub).fontColor(cSub).layoutWeight(1)
         if (this.cdromPath.length > 0) {
           Button('移除').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
             .onClick(() => this.cdromPath = '')
         }
       }
@@ -419,6 +420,7 @@ export struct VmWizard {
             .layoutWeight(1).fontSize(tLabel)
             .onChange((v: string) => this.cdromPath = v)
           Button('内置 Alpine').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
             .onClick(() => {
               const iso = this.vmDataDir + '/alpine-virt.iso';
               if (pathExists(iso)) { this.cdromPath = iso; } else {
@@ -516,14 +518,18 @@ export struct VmWizard {
       } else {
         Column() {
           Row({ space: sp2 }) {
-            Button('上一步').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
+            Button('上一步').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent)
               .fontColor(this.step > 0 ? cPrimary : cWeak)
               .enabled(this.step > 0)
               .onClick(() => { if (this.step > 0) { this.step--; } })
             Blank()
             Text('创建虚拟机').fontSize(tPage).fontWeight(FontWeight.Medium)
             Blank()
-            Button('关闭').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
+            Button('关闭').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent)
               .fontColor(cSub)
               .onClick(() => { if (this.onClose) this.onClose(); })
           }
@@ -551,7 +557,9 @@ export struct VmWizard {
           Row() {
             Blank()
             Button(this.step === STEPS.length - 1 ? '完成' : '下一步')
-              .focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
+              .focusable(false).fontSize(tBody)
+              .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
+              .backgroundColor(Color.Transparent)
               .fontColor(cPrimary)
               .onClick(() => {
                 if (this.step < STEPS.length - 1) {
@@ -572,6 +580,8 @@ export struct VmWizard {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(cBg)
+    /* 磁贴模式整个弹窗铺白：templateTiles 只占内容高度，根背景若不一起变白，
+     * 下半空白会露出 cBg 灰，形成「上白下灰」两层色 */
+    .backgroundColor(this.showTiles && !this.isEdit() ? cCard : cBg)
   }
 }

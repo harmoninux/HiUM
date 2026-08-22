@@ -22,7 +22,7 @@ import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
   cBg, cCard, cBorder, cBlock, cChip, cSel, cSelBg,
   tPage, tCard, tLabel, tBody, tSub,
-  sp1, sp2, sp3, sp4, sp5, rCard, rElem, rBadge, bw,
+  sp1, sp2, sp3, sp4, sp5, rCard, rElem, rBadge, bw, rBtn, btnH, btnSh, btnPadX,
 } from '../lib/uiTokens';
 
 /* 只用于「运行中 VM 安全关机/断电」的一次性 QMP 调用（连接是 per-vm 单例，无抢占） */
@@ -240,14 +240,18 @@ export struct VmList {
     Column({ space: sp1 }) {
       if (this.isRunning(p)) {
         Button('安全关机 (ACPI)').focusable(false).width('100%')
+          .height(btnSh).borderRadius(rBtn)
           .onClick(() => this.confirmPowerOff(p, false))
         Button('强制断电').focusable(false).width('100%')
+          .height(btnSh).borderRadius(rBtn)
           .fontColor(cDanger)
           .onClick(() => this.confirmPowerOff(p, true))
       }
       Button('编辑').focusable(false).width('100%')
+        .height(btnSh).borderRadius(rBtn)
         .onClick(() => this.openWizardEdit(p))
       Button('删除').focusable(false).width('100%')
+        .height(btnSh).borderRadius(rBtn)
         .fontColor(cDanger)
         .onClick(() => this.confirmDelete(p))
     }
@@ -272,6 +276,7 @@ export struct VmList {
         Button('＋ 新建')
           .focusable(false)
           .fontSize(tBody)
+          .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
           .backgroundColor(cPrimary)
           .onClick(() => {
             this.openWizardNew(null);
@@ -279,6 +284,7 @@ export struct VmList {
         Button('从零开始')
           .focusable(false)
           .fontSize(tBody)
+          .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
           .backgroundColor(cBlock)
           .fontColor(cPrimary)
           .onClick(() => this.openWizardNew(null))
@@ -355,6 +361,7 @@ export struct VmList {
       Button(this.isRunning(p) ? '进入' : '启动')
         .focusable(false)
         .fontSize(tBody)
+        .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
         .backgroundColor(this.isRunning(p) ? cPrimary : Color.Transparent)
         .fontColor(this.isRunning(p) ? Color.White : cPrimary)
         .onClick(() => this.openConsole(p))
@@ -376,6 +383,7 @@ export struct VmList {
         Button('＋ 新建')
           .focusable(false)
           .fontSize(tBody)
+          .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
           .backgroundColor(cPrimary)
           .onClick(() => {
             this.openWizardNew(null);
