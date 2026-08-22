@@ -12,7 +12,6 @@ import napiModule from 'libentry.so';
 import {
   VmProfile, VmStore, qmpSockPath,
 } from '../lib/vmprofile';
-import { OsTemplate } from '../lib/osTemplates';
 import { WizardParam } from './VmWizard';
 import {
   initVmRegistry, refreshRunningMap, vmIsRunning,
@@ -20,7 +19,7 @@ import {
 } from '../lib/vmregistry';
 import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
-  cBg, cCard, cBorder, cBlock, cChip, cSel, cSelBg,
+  cBg, cCard, cBorder, cChip, cSel, cSelBg,
   tPage, tCard, tLabel, tBody, tSub,
   sp1, sp2, sp3, sp4, sp5, rCard, rElem, rBadge, bw, rBtn, btnH, btnSh, btnPadX,
 } from '../lib/uiTokens';
@@ -189,9 +188,9 @@ export struct VmList {
     }
   }
 
-  /* 模板 → 机器工坊（模态浮层，预填可逐步改）；从零 → 规格化默认 */
-  private openWizardNew(tpl: OsTemplate | null): void {
-    this.wizardParam = tpl ? { mode: 'new', template: tpl } : { mode: 'new' };
+  /* 新建 → 机器工坊（模态浮层，手工向导新建即开箱） */
+  private openWizardNew(): void {
+    this.wizardParam = { mode: 'new' };
     this.showWizard = true;
   }
 
@@ -289,15 +288,8 @@ export struct VmList {
           .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
           .backgroundColor(cPrimary)
           .onClick(() => {
-            this.openWizardNew(null);
+            this.openWizardNew();
           })
-        Button('从零开始')
-          .focusable(false)
-          .fontSize(tBody)
-          .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
-          .backgroundColor(cBlock)
-          .fontColor(cPrimary)
-          .onClick(() => this.openWizardNew(null))
       }
     }
     .width('100%')
@@ -368,7 +360,7 @@ export struct VmList {
           .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
           .backgroundColor(cPrimary)
           .onClick(() => {
-            this.openWizardNew(null);
+            this.openWizardNew();
           })
       }
       .width('100%')

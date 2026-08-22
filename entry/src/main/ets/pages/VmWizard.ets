@@ -1,20 +1,19 @@
 // 机器工坊：分步配置向导（架构→板卡/固件→CPU/内存→介质→网络→命名+预览）。
-// 取代扁平 VmEdit 作为「从模板/从零新建 + 编辑」的主路径；VmEdit 保留为高级入口。
-// 模板预填 = 把 OsTemplate 灌进各步 state；第⑥步实时 buildArgs 只读预览。
+// 新建 / 编辑统一主路径：新建直接进手工向导，无需模板磁贴；VmEdit 保留为高级入口。
+// 第⑥步实时 buildArgs 只读预览。
 import { promptAction } from '@kit.ArkUI';
 import { pathExists } from '../lib/fsutil';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
 import {
   VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType,
-  blankProfile, newProfileId, fitBoard, buildArgs, sharedDir, SCHEMA_VERSION, builtinIsoFor,
+  newProfileId, fitBoard, buildArgs, sharedDir, SCHEMA_VERSION, builtinIsoFor,
 } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
-import { OsTemplate, OS_TEMPLATES } from '../lib/osTemplates';
 import {
-  cPrimary, cSub, cWeak, cText, cCard, cBorder, cRunning, cWarn, cBg, cBlock,
+  cPrimary, cSub, cWeak, cText, cBorder, cWarn, cBg, cBlock,
   tPage, tCard, tBody, tSub, tLabel, tMono,
-  sp1, sp2, sp3, sp4, rCard, bw, rBtn, btnH, btnSh, btnPadX,
+  sp2, sp3, sp4, bw, rBtn, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
@@ -25,7 +24,6 @@ const napi = napiModule as DiskNapi;
 
 export interface WizardParam {
   mode: string;            /* 'new' | 'edit' */
-  template?: OsTemplate;   /* 从模板新建 */
   profile?: VmProfile;     /* 编辑已有 */
 }
 
@@ -40,8 +38,6 @@ export struct VmWizard {
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmDataDir') vmDataDir: string = '';
   @StorageLink('vmListVersion') vmListVersion: number = 0;
-
-  @State showTiles: boolean = true; /* 新建先展示磁贴；编辑直接进表单 */
 
   @State step: number = 0;
   @State arch: VmArch = 'x86_64';
@@ -73,7 +69,6 @@ export struct VmWizard {
     const pm = this.param;
     /* 每次打开都重置到默认，防止组件实例跨 if(showWizard) 开关复用残留上一次状态 */
     this.step = 0;
-    this.showTiles = (pm.mode === 'new' && !pm.template);
     this.name = '';
     this.arch = 'x86_64';
     this.board = 'pc';
@@ -114,28 +109,7 @@ export struct VmWizard {
       this.netEnabled = p.net.enabled;
       this.portForwards = p.net.portForwards;
       this.sharedFolder = p.net.sharedFolder;
-    } else if (pm.template) {
-      /* 已带模板（从模板选择面板点入）直接进表单，不再展示磁贴 */
-      this.loadTemplate(pm.template);
-      this.showTiles = false;
     }
-  }
-
-  /* 磁贴选中：把模板参数灌进各步 state（与 aboutToAppear 模板预填同一逻辑） */
-  private loadTemplate(t: OsTemplate): void {
-    this.name = t.name + ' (新建)';
-    this.arch = t.arch;
-    this.vga = t.vga;
-    this.board = t.board;
-    this.firmware = t.firmware;
-    this.memoryMB = t.memoryMB;
-    this.cpus = t.cpus;
-    this.mttcg = t.mttcg;
-    this.tbSizeText = String(t.tbSize);
-    this.diskGB = Math.max(1, Math.ceil(t.diskMB / 1024));
-    this.cdromPath = t.isoName.length > 0 ? `${this.vmDataDir}/${t.isoName}` : '';
-    this.bootFromCdrom = t.bootFromCdrom;
-    this.kernelBoot = t.kernelBoot;
   }
 
   /* 「内置 Alpine」按钮：按当前架构确保内置 iso 就绪（缺失则按需下载），完成后挂到光驱 */
@@ -274,48 +248,6 @@ export struct VmWizard {
       }, (s: string) => s)
     }
     .width('100%').padding({ left: sp2, right: sp2 })
-  }
-
-  /* 新建时的磁贴模板选择：点磁贴预填进工坊；「从零开始」进手工向导 */
-  @Builder
-  templateTiles() {
-    Column() {
-      Row() {
-        Text('新建虚拟机').fontSize(tPage).fontWeight(FontWeight.Bold)
-        Blank()
-        Button('×').backgroundColor(Color.Transparent).fontColor(cWeak)
-          .onClick(() => { if (this.onClose) this.onClose(); })
-      }.width('100%').padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
-      /* 新建选项精简为两枚磁贴：内置 Alpine Linux + 「自定义」(手工向导)。
-       * 其余模板(Android-x86/FreeDOS/裸内核)暂不设选项，需要时再从 OS_TEMPLATES 加回 */
-      Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
-        ForEach(OS_TEMPLATES.filter((t: OsTemplate) => t.id === 'alpine'), (t: OsTemplate) => {
-          Column() {
-            Text(t.icon ?? '💿').fontSize(26)
-            Text(t.name).fontSize(tCard).fontWeight(FontWeight.Medium).margin({ top: sp1 })
-            Text(t.arch).fontSize(tMono).fontColor(cSub).fontFamily('monospace')
-            Text(t.imageNeeded ? '需自备' : '内置镜像').fontSize(tMono)
-              .fontColor(t.imageNeeded ? cWarn : cRunning)
-          }
-          .width('48%').margin({ bottom: sp2 }).padding(sp3)
-          .backgroundColor(cCard).borderRadius(rCard)
-          .border({ width: bw, color: cBorder })
-          .onClick(() => { this.loadTemplate(t); this.step = 0; this.showTiles = false; })
-        }, (t: OsTemplate) => t.id)
-
-        /* 「自定义」磁贴：等效原「从零开始（手工向导）」按钮，进空向导逐步配置 */
-        Column() {
-          Text('✏️').fontSize(26)
-          Text('自定义').fontSize(tCard).fontWeight(FontWeight.Medium).margin({ top: sp1 })
-          Text('从零开始').fontSize(tMono).fontColor(cSub).fontFamily('monospace')
-          Text('全手动配置').fontSize(tMono).fontColor(cWeak)
-        }
-        .width('48%').margin({ bottom: sp2 }).padding(sp3)
-        .backgroundColor(cCard).borderRadius(rCard)
-        .border({ width: bw, color: cBorder })
-        .onClick(() => { this.step = 0; this.showTiles = false; })
-      }.width('100%').padding({ left: sp4, right: sp4, bottom: sp4 })
-    }.width('100%').backgroundColor(cCard).borderRadius(rCard)
   }
 
   @Builder
@@ -552,7 +484,6 @@ export struct VmWizard {
     Column({ space: 8 }) {
       Text('名称').fontSize(tLabel).width(72)
       TextInput({ text: this.name })
-        .layoutWeight(1)
         .fontSize(tBody)
         .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
         .onChange((v: string) => this.name = v)
@@ -580,12 +511,8 @@ export struct VmWizard {
 
   build() {
     Column() {
-      if (this.showTiles && !this.isEdit()) {
-        /* 新建：先展示磁贴模板；点磁贴/「从零开始」才进表单 */
-        this.templateTiles()
-      } else {
-        Column() {
-          Row({ space: sp2 }) {
+      Column() {
+        Row({ space: sp2 }) {
             Button('上一步').focusable(false).fontSize(tBody)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
               .backgroundColor(Color.Transparent)
@@ -641,15 +568,12 @@ export struct VmWizard {
           .width('100%')
           .padding({ left: sp2, right: sp2, top: sp2, bottom: sp2 })
           .backgroundColor(cBg)
-        }
-        .width('100%')
-        .height('100%')
       }
+      .width('100%')
+      .height('100%')
     }
     .width('100%')
     .height('100%')
-    /* 磁贴模式整个弹窗铺白：templateTiles 只占内容高度，根背景若不一起变白，
-     * 下半空白会露出 cBg 灰，形成「上白下灰」两层色 */
-    .backgroundColor(this.showTiles && !this.isEdit() ? cCard : cBg)
+    .backgroundColor(cBg)
   }
 }
