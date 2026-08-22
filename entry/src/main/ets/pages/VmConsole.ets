@@ -12,8 +12,9 @@ import { HOS_TO_QKEYCODE } from '../lib/keymap';
 import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir } from '../lib/vmprofile';
 import { prepareStart } from '../lib/tempSession';
 import { takePendingVmId } from '../lib/vmwindows';
+import { VirtualKeyboard } from '../lib/VirtualKeyboard';
 import {
-  cDanger,
+  cDanger, cPrimary,
   rBtn, rElem, btnH, tBody, tMono, sp1, sp2, sp3,
 } from '../lib/uiTokens';
 
@@ -102,6 +103,7 @@ struct VmConsole {
   @State fabX: number = -1;    /* <0 = 尚未初始化（等 onAreaChange 定初位） */
   @State fabY: number = -1;
   @State menuOpen: boolean = false;  /* 竖向面板展开 */
+  @State showKbd: boolean = false;   /* 虚拟键盘显隐（浮动菜单开关，按 vmId 持久化） */
   private vmId: string = '';
   private profile: VmProfile | null = null;
   private xcController: VmXComponentController = new VmXComponentController();
@@ -153,6 +155,7 @@ struct VmConsole {
       }
     };
     napi.setQmpEventCallback(this.vmId, (evt: string) => this.onQmpEvent(evt));
+    this.loadKbd();
     this.enterVm();
   }
 
@@ -528,6 +531,28 @@ struct VmConsole {
     }
   }
 
+  /* 虚拟键盘显隐持久化（Preferences 按 vmId 区分，重开窗口记住开/关） */
+  private loadKbd(): void {
+    if (this.vmId.length === 0) {
+      return;
+    }
+    preferences.getPreferences(this.fabCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
+      this.showKbd = prefs.getSync(this.fabPrefKey('kbd'), false) as boolean;
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN, TAG, 'loadKbd: %{public}s', JSON.stringify(e));
+    });
+  }
+
+  private toggleKbd(): void {
+    this.showKbd = !this.showKbd;
+    preferences.getPreferences(this.fabCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
+      prefs.putSync(this.fabPrefKey('kbd'), this.showKbd);
+      prefs.flush();
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN, TAG, 'saveKbd: %{public}s', JSON.stringify(e));
+    });
+  }
+
   private actReset(): void {
     this.qmp('send-key',
       '{"keys":[{"type":"qcode","data":"ctrl"},' +
@@ -574,6 +599,10 @@ struct VmConsole {
         .fontColor(MENU_TEXT).width('100%').height(btnH).borderRadius(rBtn)
         .backgroundColor(Color.Transparent)
         .onClick(() => { this.actReset() })
+      Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(tBody)
+        .fontColor(this.showKbd ? cPrimary : MENU_TEXT).width('100%').height(btnH).borderRadius(rBtn)
+        .backgroundColor(Color.Transparent)
+        .onClick(() => { this.toggleKbd() })
     }
     .width(PANEL_W)
     .padding({ top: 6, bottom: 6 })
@@ -600,6 +629,12 @@ struct VmConsole {
       }
       .width('100%')
       .height('100%')
+
+      /* 虚拟键盘 overlay：VM 画面之上、悬浮按钮之下。面板空白处透传给画面，
+       * 键帽/把手消费触摸（见 VirtualKeyboard 组件 hitTest 说明） */
+      if (this.showKbd) {
+        VirtualKeyboard({ vmId: this.vmId, showKbd: this.$showKbd })
+      }
 
       /* 面板展开时：点面板外的空白区收起面板（透明 catcher，盖在 VM 之上）。
        * 用 Stack 全屏透明层拦截触摸，避免点穿透到客机输入 */
