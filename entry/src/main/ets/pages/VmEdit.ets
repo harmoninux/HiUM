@@ -3,7 +3,7 @@
 import { promptAction } from '@kit.ArkUI';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import napiModule from 'libentry.so';
-import { VmProfile, VmStore, VmArch, VgaType, SCHEMA_VERSION } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmArch, VgaType, SCHEMA_VERSION, fitBoard } from '../lib/vmprofile';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -130,6 +130,9 @@ export struct VmEdit {
       machine: {
         arch: this.arch,
         vga: this.vga,
+        machine: fitBoard(this.arch, this.profile.machine.machine),
+        firmware: this.profile.machine.firmware,
+        cpuModel: this.profile.machine.cpuModel,
       },
       runtime: {
         memoryMB: Math.round(this.memoryMB),

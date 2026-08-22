@@ -9,11 +9,27 @@ export const SCHEMA_VERSION = 2;
 
 export type VmArch = 'x86_64' | 'i386' | 'aarch64';
 export type VgaType = 'std' | 'virtio';
+export type VmBoard = 'pc' | 'q35' | 'virt' | 'raspi2';
+export type VmFirmware = 'seabios' | 'ovmf';
 
-/* 机器层：目前只有架构/显卡有 UI；Phase 1 机器工坊再扩 machine/firmware/cpu/设备图 */
+/* 机器层：架构/显卡 + 板卡/固件/CPU 模型。机器工坊按此生成 -machine/-cpu 参数 */
 export interface VmMachine {
   arch: VmArch;
   vga: VgaType;
+  machine: VmBoard;    /* 板卡：x86 pc/q35，arm64 virt/raspi2 */
+  firmware: VmFirmware; /* 固件：seabios(BIOS) / ovmf(UEFI，暂需 OVMF 文件) */
+  cpuModel: string;     /* '' = 自动（aarch64 给 max） */
+}
+
+/* 板卡是否适配某架构（aarch64 只认 virt/raspi2；x86 只认 pc/q35） */
+export function defaultBoard(arch: VmArch): VmBoard {
+  return arch === 'aarch64' ? 'virt' : 'pc';
+}
+
+/* 把 board 收紧成与 arch 兼容的值；不兼容则回退该架构默认板卡 */
+export function fitBoard(arch: VmArch, board: string): VmBoard {
+  const allowed: string[] = arch === 'aarch64' ? ['virt', 'raspi2'] : ['pc', 'q35'];
+  return allowed.indexOf(board) >= 0 ? board as VmBoard : defaultBoard(arch);
 }
 
 /* 运行时层：可被 JIT 性能预设覆盖（memory/cpus/accel） */
@@ -59,7 +75,7 @@ export function blankProfile(id: string): VmProfile {
     schemaVersion: SCHEMA_VERSION,
     id: id,
     name: '新虚拟机',
-    machine: { arch: 'x86_64', vga: 'std' },
+    machine: { arch: 'x86_64', vga: 'std', machine: 'pc', firmware: 'seabios', cpuModel: '' },
     runtime: { memoryMB: 1024, cpus: 2, mttcg: true, tbSize: 1024 },
     media: { diskPath: '', cdromPath: '', bootFromCdrom: false },
     net: { enabled: true, portForwards: '', sharedFolder: false },
@@ -124,6 +140,9 @@ function migrateV1(o: Record<string, Object>): VmProfile {
     p.machine.arch = arch as VmArch;
   }
   p.machine.vga = jStr(o, 'vga') === 'virtio' ? 'virtio' : 'std';
+  p.machine.machine = defaultBoard(p.machine.arch);
+  p.machine.firmware = 'seabios';
+  p.machine.cpuModel = '';
   p.runtime.memoryMB = jNum(o, 'memoryMB', 1024);
   p.runtime.cpus = jNum(o, 'cpus', 2);
   p.runtime.mttcg = jBool(o, 'mttcg', true);
@@ -156,6 +175,9 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
     if (jStr(m, 'vga') === 'virtio') {
       p.machine.vga = 'virtio';
     }
+    p.machine.machine = fitBoard(p.machine.arch, jStr(m, 'machine'));
+    p.machine.firmware = jStr(m, 'firmware') === 'ovmf' ? 'ovmf' : 'seabios';
+    p.machine.cpuModel = jStr(m, 'cpuModel');
   }
   if (r) {
     p.runtime.memoryMB = jNum(r, 'memoryMB', p.runtime.memoryMB);
@@ -217,9 +239,21 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     '-device', 'virtio-tablet-pci',
     '-qmp', `unix:${qmpSockPath(p, vmDataDir)},server=on,wait=off`,
   ];
-  if (p.machine.arch === 'aarch64') {
-    args = args.concat(['-machine', 'virt', '-cpu', 'max', '-device', 'virtio-gpu-pci']);
+  /* 板卡/固件/CPU：默认 pc(x86)/virt(arm64) 与旧行为一致（qemu 默认即 pc）；
+   * 新板卡 q35/raspi2 走对应 -machine。aarch64 默认给 -cpu max，virt 挂 virtio-gpu。
+   * firmware=ovmf 暂未接 pflash（需 OVMF_CODE/VARS 固件，make deps 未产出），缺件回落 seabios。 */
+  const board = fitBoard(p.machine.arch, p.machine.machine);
+  if (board === 'virt' || board === 'raspi2') {
+    args.push('-machine', board);
+    args.push('-cpu', p.machine.cpuModel.length > 0 ? p.machine.cpuModel : 'max');
+    if (board === 'virt') {
+      args.push('-device', 'virtio-gpu-pci');
+    }
   } else {
+    args.push('-machine', board);
+    if (p.machine.cpuModel.length > 0) {
+      args.push('-cpu', p.machine.cpuModel);
+    }
     args.push('-vga', p.machine.vga);
     args.push('-serial', `file:${vmDataDir}/serial-${p.id}.log`);
   }
