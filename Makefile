@@ -10,8 +10,8 @@
 
 export TOOL_HOME ?= /apps/harmony
 
-OHOS_ARCH ?= x86_64
-OHOS_ABI ?= x86_64
+OHOS_ARCH ?= aarch64
+OHOS_ABI ?= arm64-v8a
 
 HDC := /apps/harmony/sdk/default/openharmony/toolchains/hdc -s 192.168.1.3:8710 -t 127.0.0.1:5555
 BUNDLE := app.hackeris.hium

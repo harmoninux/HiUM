@@ -7,9 +7,9 @@ endif
 export DEVECO_SDK_HOME = $(TOOL_HOME)/sdk
 export OHOS_SDK_HOME = $(TOOL_HOME)/sdk/default/openharmony
 
-# Set default platform to x86_64 for emulator
-OHOS_ARCH ?= x86_64
-OHOS_ABI ?= x86_64
+# Set default platform to aarch64 (arm64-v8a) for real-arm target devices
+OHOS_ARCH ?= aarch64
+OHOS_ABI ?= arm64-v8a
 
 PKGS=zstd \
     zlib \
