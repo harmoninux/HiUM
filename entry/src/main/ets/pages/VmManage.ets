@@ -37,6 +37,7 @@ export struct VmManage {
   @State arch: string = '';
   @State running: boolean = false;
   @State diskPath: string = '';
+  @State cdromPath: string = '';
   @State diskFmt: string = '?';
   @State diskVirtualGB: number = 0;
   @State diskActualGB: number = 0;
@@ -55,6 +56,7 @@ export struct VmManage {
     this.arch = p.machine.arch;
     this.running = vmIsRunning(p.id);
     this.diskPath = p.media.diskPath;
+    this.cdromPath = p.media.cdromPath;
     this.netEnabled = p.net.enabled;
     this.refreshDisk();
     this.refreshSnapshot();
@@ -94,6 +96,23 @@ export struct VmManage {
     } catch {
       /* 解析失败保持默认 */
     }
+  }
+
+  private baseName(path: string): string {
+    const i = path.lastIndexOf('/');
+    return i >= 0 ? path.substring(i + 1) : path;
+  }
+
+  /* 系统盘概览一句话（无盘 → 未配置） */
+  private diskSummary(): string {
+    return this.diskPath
+      ? `${this.diskFmt} · 虚拟 ${this.diskVirtualGB.toFixed(1)}G · 实占 ${this.diskActualGB.toFixed(1)}G`
+      : '未配置';
+  }
+
+  /* 光盘概览（未引用 → 未引用） */
+  private cdromName(): string {
+    return this.cdromPath.length > 0 ? this.baseName(this.cdromPath) : '未引用';
   }
 
   /* ================= 快照 / 时光机（Phase 1，离线 qcow2 内部快照） ================= */
@@ -294,20 +313,22 @@ export struct VmManage {
   }
 
   @Builder
-  secSystemDisk() {
-    this.secHead('系统盘')
-    if (!this.diskPath) {
-      Text('未配置系统盘，可到配置页添加').fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp1 })
-    } else {
-      Row() {
-        Text(`系统盘 ${this.diskFmt} · 虚拟 ${this.diskVirtualGB.toFixed(1)}G · 实占 ${this.diskActualGB.toFixed(1)}G`)
-          .fontSize(tSub).fontColor(cSub).layoutWeight(1)
-        Button('去存储页管理').focusable(false).fontSize(tBody)
-          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-          .backgroundColor(Color.Transparent).fontColor(cPrimary)
-          .onClick(() => this.openStorage())
-      }.width('100%').padding({ top: sp1, bottom: sp2 }).alignItems(VerticalAlign.Center)
-    }
+  secStorage() {
+    this.secHead('存储')
+    Row() {
+      Column({ space: sp1 }) {
+        Text(`系统盘 ${this.diskSummary()}`)
+          .fontSize(tSub).fontColor(cSub).maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(`光盘 ${this.cdromName()}`)
+          .fontSize(tSub).fontColor(cSub).maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+      Button('存储管理').focusable(false).fontSize(tBody)
+        .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+        .backgroundColor(Color.Transparent).fontColor(cPrimary)
+        .onClick(() => this.openStorage())
+    }.width('100%').padding({ top: sp1, bottom: sp2 }).alignItems(VerticalAlign.Center)
   }
 
   @Builder
@@ -456,7 +477,7 @@ export struct VmManage {
             .width('100%')
             .padding({ top: sp2, bottom: sp2 })
 
-            this.secSystemDisk()
+            this.secStorage()
             this.secNet()
             this.secSnapshot()
             this.secAdvanced()
