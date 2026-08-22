@@ -8,7 +8,12 @@ import {
   VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType,
   blankProfile, newProfileId, fitBoard, buildArgs, sharedDir, SCHEMA_VERSION,
 } from '../lib/vmprofile';
-import { OsTemplate } from '../lib/osTemplates';
+import { OsTemplate, OS_TEMPLATES } from '../lib/osTemplates';
+import {
+  cPrimary, cSub, cWeak, cCard, cBorder, cRunning, cWarn, cBg,
+  tPage, tCard, tBody, tSub,
+  sp1, sp2, sp3, sp4, rCard, bw,
+} from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -28,10 +33,12 @@ const DISK_SIZES: number[] = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 @Component
 export struct VmWizard {
   param: WizardParam = { mode: 'new' };
-  @Consume('navStack') navStack: NavPathStack;
+  onClose: (() => void) | null = null; /* 模态关闭回调（宿主 Stack 置 false）；非响应式，够用 */
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmDataDir') vmDataDir: string = '';
   @StorageLink('vmListVersion') vmListVersion: number = 0;
+
+  @State showTiles: boolean = true; /* 新建先展示磁贴；编辑直接进表单 */
 
   @State step: number = 0;
   @State arch: VmArch = 'x86_64';
@@ -80,22 +87,28 @@ export struct VmWizard {
       this.portForwards = p.net.portForwards;
       this.sharedFolder = p.net.sharedFolder;
     } else if (pm.template) {
-      const t = pm.template;
-      this.name = t.name + ' (新建)';
-      this.arch = t.arch;
-      this.vga = t.vga;
-      this.board = t.board;
-      this.firmware = t.firmware;
-      this.memoryMB = t.memoryMB;
-      this.cpus = t.cpus;
-      this.mttcg = t.mttcg;
-      this.tbSizeText = String(t.tbSize);
-      this.diskEnabled = t.diskMB > 0;
-      this.diskGB = Math.max(1, Math.ceil(t.diskMB / 1024));
-      this.cdromPath = t.isoName.length > 0 ? `${this.vmDataDir}/${t.isoName}` : '';
-      this.bootFromCdrom = t.bootFromCdrom;
-      this.kernelBoot = t.kernelBoot;
+      /* 已带模板（从模板选择面板点入）直接进表单，不再展示磁贴 */
+      this.loadTemplate(pm.template);
+      this.showTiles = false;
     }
+  }
+
+  /* 磁贴选中：把模板参数灌进各步 state（与 aboutToAppear 模板预填同一逻辑） */
+  private loadTemplate(t: OsTemplate): void {
+    this.name = t.name + ' (新建)';
+    this.arch = t.arch;
+    this.vga = t.vga;
+    this.board = t.board;
+    this.firmware = t.firmware;
+    this.memoryMB = t.memoryMB;
+    this.cpus = t.cpus;
+    this.mttcg = t.mttcg;
+    this.tbSizeText = String(t.tbSize);
+    this.diskEnabled = t.diskMB > 0;
+    this.diskGB = Math.max(1, Math.ceil(t.diskMB / 1024));
+    this.cdromPath = t.isoName.length > 0 ? `${this.vmDataDir}/${t.isoName}` : '';
+    this.bootFromCdrom = t.bootFromCdrom;
+    this.kernelBoot = t.kernelBoot;
   }
 
   private isEdit(): boolean {
@@ -176,29 +189,62 @@ export struct VmWizard {
     new VmStore(this.filesDir).save(p);
     this.vmListVersion++;
     promptAction.showToast({ message: `已保存「${p.name}」` });
-    this.navStack.pop();
+    if (this.onClose) { this.onClose(); }
   }
 
   @Builder
   stepHeader() {
-    Row({ space: 4 }) {
+    Row() {
       ForEach(STEPS, (s: string, i: number) => {
-        Column() {
-          Text(String(i + 1)).fontSize(12)
-            .fontColor(this.step === i ? Color.White : '#ff666666')
-          Text(s).fontSize(10)
-            .fontColor(this.step === i ? '#ff007dff' : '#ff999999')
+        Row({ space: 6 }) {
+          Text(String(i + 1)).fontSize(10)
+            .fontColor(this.step === i ? Color.White : cSub)
+            .width(20).height(20).textAlign(TextAlign.Center)
+            .backgroundColor(this.step === i ? cPrimary : Color.Transparent)
+            .border({ width: bw, color: this.step === i ? cPrimary : cBorder })
+            .borderRadius(10)
+          Text(s).fontSize(10).fontColor(this.step === i ? cPrimary : cWeak)
         }
-        .width(46)
-        .padding({ top: 4, bottom: 4 })
-        .backgroundColor(this.step === i ? '#ff007dff' : '#11000000')
-        .borderRadius(6)
+        .layoutWeight(1).justifyContent(FlexAlign.Center)
         .onClick(() => this.step = i)
       }, (s: string) => s)
     }
-    .width('100%')
-    .justifyContent(FlexAlign.SpaceBetween)
-    .padding({ left: 8, right: 8 })
+    .width('100%').padding({ left: sp2, right: sp2 })
+  }
+
+  /* 新建时的磁贴模板选择：点磁贴预填进工坊；「从零开始」进手工向导 */
+  @Builder
+  templateTiles() {
+    Column() {
+      Row() {
+        Text('新建虚拟机').fontSize(tPage).fontWeight(FontWeight.Bold)
+        Blank()
+        Button('×').backgroundColor(Color.Transparent).fontColor(cWeak)
+          .onClick(() => { if (this.onClose) this.onClose(); })
+      }.width('100%').padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
+      Row() {
+        ForEach(OS_TEMPLATES, (t: OsTemplate) => {
+          Column() {
+            Text(t.icon ?? '💿').fontSize(20)
+            Text(t.name).fontSize(tCard).fontWeight(FontWeight.Medium).margin({ top: sp1 })
+            Text(t.arch).fontSize(10).fontColor(cSub).fontFamily('monospace')
+            Text(t.imageNeeded ? '需自备' : '内置镜像').fontSize(10)
+              .fontColor(t.imageNeeded ? cWarn : cRunning)
+          }
+          .layoutWeight(1).padding(sp3)
+          .backgroundColor(cCard).borderRadius(rCard)
+          .border({ width: bw, color: cBorder })
+          .margin({ right: sp2 })
+          .onClick(() => { this.loadTemplate(t); this.step = 0; this.showTiles = false; })
+        }, (t: OsTemplate) => t.id)
+      }.width('100%')
+      Row() {
+        Text('都不合适？').fontSize(tSub).fontColor(cSub)
+        Blank()
+        Button('从零开始（手工向导）').fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+          .onClick(() => { this.step = 0; this.showTiles = false; })
+      }.width('100%').padding({ left: sp4, right: sp4, top: sp3, bottom: sp4 })
+    }.width('100%').backgroundColor(cCard).borderRadius(rCard)
   }
 
   @Builder
@@ -438,53 +484,58 @@ export struct VmWizard {
 
   build() {
     Column() {
-      Row() {
-        Button('取消').focusable(false).fontSize(14).backgroundColor(Color.Transparent)
-          .fontColor('#ff007dff')
-          .onClick(() => this.navStack.pop())
-        Blank()
-        Text('机器工坊').fontSize(18).fontWeight(FontWeight.Medium)
-        Blank()
-        Button(this.step === STEPS.length - 1 ? '完成' : '下一步')
-          .focusable(false).fontSize(14).backgroundColor(Color.Transparent)
-          .fontColor('#ff007dff')
-          .onClick(() => {
-            if (this.step < STEPS.length - 1) {
-              this.step++;
-            } else {
-              this.finish();
-            }
-          })
-      }
-      .width('100%')
-      .padding({ left: 8, right: 8, top: 8, bottom: 8 })
-
-      this.stepHeader()
-
-      Scroll() {
-        Column() {
-          if (this.step === 0) { this.stepArch() }
-          else if (this.step === 1) { this.stepBoard() }
-          else if (this.step === 2) { this.stepCpuMem() }
-          else if (this.step === 3) { this.stepMedia() }
-          else if (this.step === 4) { this.stepNet() }
-          else if (this.step === 5) { this.stepPreview() }
-          if (this.step < STEPS.length - 1) {
-            Button('上一步').focusable(false).fontSize(14)
-              .backgroundColor('#ff000000')
-              .fontColor('#ff666666')
-              .margin({ top: 16 })
-              .onClick(() => { if (this.step > 0) this.step--; })
-          }
+      if (this.showTiles && !this.isEdit()) {
+        /* 新建：先展示磁贴模板；点磁贴/「从零开始」才进表单 */
+        this.templateTiles()
+      } else {
+        Row() {
+          Button('取消').focusable(false).fontSize(14).backgroundColor(Color.Transparent)
+            .fontColor(cPrimary)
+            .onClick(() => { if (this.onClose) this.onClose(); })
+          Blank()
+          Text('机器工坊').fontSize(18).fontWeight(FontWeight.Medium)
+          Blank()
+          Button(this.step === STEPS.length - 1 ? '完成' : '下一步')
+            .focusable(false).fontSize(14).backgroundColor(Color.Transparent)
+            .fontColor(cPrimary)
+            .onClick(() => {
+              if (this.step < STEPS.length - 1) {
+                this.step++;
+              } else {
+                this.finish();
+              }
+            })
         }
         .width('100%')
-        .padding({ bottom: 24 })
+        .padding({ left: sp2, right: sp2, top: sp2, bottom: sp2 })
+
+        this.stepHeader()
+
+        Scroll() {
+          Column() {
+            if (this.step === 0) { this.stepArch() }
+            else if (this.step === 1) { this.stepBoard() }
+            else if (this.step === 2) { this.stepCpuMem() }
+            else if (this.step === 3) { this.stepMedia() }
+            else if (this.step === 4) { this.stepNet() }
+            else if (this.step === 5) { this.stepPreview() }
+            if (this.step < STEPS.length - 1) {
+              Button('上一步').focusable(false).fontSize(14)
+                .backgroundColor('#ff000000')
+                .fontColor('#ff666666')
+                .margin({ top: 16 })
+                .onClick(() => { if (this.step > 0) this.step--; })
+            }
+          }
+          .width('100%')
+          .padding({ bottom: 24 })
+        }
+        .layoutWeight(1)
+        .align(Alignment.Top)
       }
-      .layoutWeight(1)
-      .align(Alignment.Top)
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#fff2f3f5')
+    .backgroundColor(cBg)
   }
 }

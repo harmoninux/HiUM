@@ -12,7 +12,6 @@ import {
   VmSnapshotEntry, snapshotCreate, snapshotApply, snapshotDelete, parseSnapshots,
 } from '../lib/vmsnapshot';
 import { isTempSnapshot } from '../lib/tempSession';
-import { WizardParam } from './VmWizard';
 import {
   cPrimary, cDanger, cRunning, cText, cSub, cWeak,
   cCard, cBlock, cChip,
@@ -330,8 +329,8 @@ export struct VmManage {
     if (!p) {
       return;
     }
-    const prm: WizardParam = { mode: 'edit', profile: p };
-    this.navStack.pushPath({ name: 'wizard', param: prm });
+    /* 工坊已迁模态（VmList 侧栏长按「编辑」承载）；详情页编辑走扁平高级入口 VmEdit */
+    this.navStack.pushPath({ name: 'edit', param: p });
   }
 
   private confirmDeleteVm(): void {

@@ -8,6 +8,7 @@ import {
 
 export interface OsTemplate {
   id: string;          /* 'alpine' | 'android-x86' | 'free-dos' | 'bare-kernel' */
+  icon?: string;       /* 磁贴 emoji；缺省回落 💿 */
   name: string;
   arch: VmArch;
   desc: string;        /* 卡片一句话 */
@@ -29,6 +30,7 @@ export interface OsTemplate {
 export const OS_TEMPLATES: OsTemplate[] = [
   {
     id: 'alpine',
+    icon: '🐧',
     name: 'Alpine Linux',
     arch: 'x86_64',
     desc: '内置 ISO 引导 + 8G 系统盘，开箱即起',
@@ -41,6 +43,7 @@ export const OS_TEMPLATES: OsTemplate[] = [
   },
   {
     id: 'android-x86',
+    icon: '🤖',
     name: 'Android-x86',
     arch: 'x86_64',
     desc: 'q35 板卡 + virtio 显存优先，跑安卓',
@@ -53,6 +56,7 @@ export const OS_TEMPLATES: OsTemplate[] = [
   },
   {
     id: 'free-dos',
+    icon: '💾',
     name: 'FreeDOS',
     arch: 'i386',
     desc: '经典 DOS，单核最低配，怀旧/教学',
@@ -65,6 +69,7 @@ export const OS_TEMPLATES: OsTemplate[] = [
   },
   {
     id: 'bare-kernel',
+    icon: '⚙️',
     name: '裸内核 (直启)',
     arch: 'aarch64',
     desc: '-kernel/-initrd 直启，最小内核教学',

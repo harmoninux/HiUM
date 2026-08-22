@@ -2,7 +2,7 @@
 // 宽屏下作为 Index 的 sideBar 常驻左侧，点行 push 'manage' 在右侧渲染详情；
 // 多实例：每台 VM 独立子进程，可同时运行多台（受内存约束）；
 // console 为每台 VM 一个 VmConsoleAbility 独立窗口（specified 模式按 vmId 归并）。
-// 工坊（wizard）仍走 NavDestination，Task4 再迁成模态，此处原样保留。
+// 工坊为内嵌居中模态：Stack 遮罩浮层承载 VmWizard（showWizard 开关 + wizardParam 参数）。
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
@@ -13,7 +13,7 @@ import {
   newProfileId, alpineProfile, qmpSockPath,
 } from '../lib/vmprofile';
 import { OS_TEMPLATES, OsTemplate } from '../lib/osTemplates';
-import { WizardParam } from './VmWizard';
+import { VmWizard, WizardParam } from './VmWizard';
 import {
   initVmRegistry, refreshRunningMap, vmIsRunning,
   subscribeVmLifecycle, unsubscribeVmLifecycle, VmLifecycleEvent,
@@ -44,6 +44,8 @@ export struct VmList {
   @State runningIds: Record<string, boolean> = {};
   @State diskUsage: Record<string, number> = {}; /* vmId → 磁盘实占字节数 */
   @State showPicker: boolean = false; /* 「+ 新建」模板选择面板 */
+  @State showWizard: boolean = false; /* 机器工坊模态浮层开关 */
+  @State wizardParam: WizardParam = { mode: 'new' }; /* 工坊参数（新建/编辑） */
   @State filter: string = ''; /* 搜索关键词（名称/架构） */
   @State selectedId: string = ''; /* 当前选中行（详情区正在展示的 VM） */
   private pollTimer: number = -1;
@@ -185,17 +187,28 @@ export struct VmList {
     }
   }
 
-  /* 模板 → 机器工坊（预填，可逐步改）；从零 → 规格化默认 */
+  /* 模板 → 机器工坊（模态浮层，预填可逐步改）；从零 → 规格化默认 */
   private openWizardNew(tpl: OsTemplate | null): void {
     this.showPicker = false;
-    const prm: WizardParam = tpl ? { mode: 'new', template: tpl } : { mode: 'new' };
-    this.navStack.pushPath({ name: 'wizard', param: prm });
+    this.wizardParam = tpl ? { mode: 'new', template: tpl } : { mode: 'new' };
+    this.showWizard = true;
   }
 
   private openWizardEdit(p: VmProfile): void {
     this.showPicker = false;
-    const prm: WizardParam = { mode: 'edit', profile: p };
-    this.navStack.pushPath({ name: 'wizard', param: prm });
+    this.wizardParam = { mode: 'edit', profile: p };
+    this.showWizard = true;
+  }
+
+  /* 工坊关闭：收起浮层并刷新列表（保存/取消都会走到这里） */
+  private closeWizard(): void {
+    this.showWizard = false;
+    this.vmListVersion++;
+  }
+
+  @Builder
+  wizardCover() {
+    VmWizard({ param: this.wizardParam, onClose: () => this.closeWizard() })
   }
 
   private openConsole(p: VmProfile): void {
@@ -502,6 +515,17 @@ export struct VmList {
 
     if (this.showPicker) {
       this.templatePicker()
+    }
+
+    if (this.showWizard) {
+      Row() {
+        Column() { this.wizardCover() }
+          .width(720).height('100%')
+          .constraintSize({ maxHeight: 680 })
+          .backgroundColor(cCard).borderRadius(rCard)
+      }
+      .width('100%').height('100%').backgroundColor('#52000000')
+      .justifyContent(FlexAlign.Center)
     }
     }
     .width('100%')
