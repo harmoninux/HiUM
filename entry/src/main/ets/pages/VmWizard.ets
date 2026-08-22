@@ -2,7 +2,7 @@
 // 取代扁平 VmEdit 作为「从模板/从零新建 + 编辑」的主路径；VmEdit 保留为高级入口。
 // 模板预填 = 把 OsTemplate 灌进各步 state；第⑥步实时 buildArgs 只读预览。
 import { promptAction } from '@kit.ArkUI';
-import { fileIo as fs } from '@kit.CoreFileKit';
+import { pathExists } from '../lib/fsutil';
 import napiModule from 'libentry.so';
 import {
   VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType,
@@ -11,7 +11,7 @@ import {
 import { OsTemplate, OS_TEMPLATES } from '../lib/osTemplates';
 import {
   cPrimary, cSub, cWeak, cText, cCard, cBorder, cRunning, cWarn, cBg, cBlock,
-  tPage, tCard, tBody, tSub,
+  tPage, tCard, tBody, tSub, tLabel, tMono,
   sp1, sp2, sp3, sp4, rCard, bw,
 } from '../lib/uiTokens';
 
@@ -204,7 +204,7 @@ export struct VmWizard {
     const id = this.isEdit() ? (this.param.profile as VmProfile).id : newProfileId();
     const p = this.assemble(id);
     if (this.diskEnabled && p.media.diskPath.length > 0) {
-      if (!fs.accessSync(p.media.diskPath)) {
+      if (!pathExists(p.media.diskPath)) {
         const ret = napi.createDisk(p.media.diskPath, Math.round(this.diskGB * 1024), this.diskAlloc);
         if (ret !== 0) {
           promptAction.showToast({ message: '创建磁盘失败' });
@@ -222,13 +222,13 @@ export struct VmWizard {
     Row() {
       ForEach(STEPS, (s: string, i: number) => {
         Row({ space: 6 }) {
-          Text(String(i + 1)).fontSize(10)
+          Text(String(i + 1)).fontSize(tMono)
             .fontColor(this.step === i ? Color.White : cSub)
             .width(20).height(20).textAlign(TextAlign.Center)
             .backgroundColor(this.step === i ? cPrimary : Color.Transparent)
             .border({ width: bw, color: this.step === i ? cPrimary : cBorder })
             .borderRadius(10)
-          Text(s).fontSize(10).fontColor(this.step === i ? cPrimary : cWeak)
+          Text(s).fontSize(tMono).fontColor(this.step === i ? cPrimary : cWeak)
         }
         .layoutWeight(1).justifyContent(FlexAlign.Center)
         .onClick(() => this.step = i)
@@ -252,8 +252,8 @@ export struct VmWizard {
           Column() {
             Text(t.icon ?? '💿').fontSize(26)
             Text(t.name).fontSize(tCard).fontWeight(FontWeight.Medium).margin({ top: sp1 })
-            Text(t.arch).fontSize(10).fontColor(cSub).fontFamily('monospace')
-            Text(t.imageNeeded ? '需自备' : '内置镜像').fontSize(10)
+            Text(t.arch).fontSize(tMono).fontColor(cSub).fontFamily('monospace')
+            Text(t.imageNeeded ? '需自备' : '内置镜像').fontSize(tMono)
               .fontColor(t.imageNeeded ? cWarn : cRunning)
           }
           .width('48%').margin({ bottom: sp2 }).padding(sp3)
@@ -274,14 +274,14 @@ export struct VmWizard {
   @Builder
   stepArch() {
     Column({ space: 12 }) {
-      Text('选择 CPU 架构（决定可用板卡与固件）').fontSize(13).fontColor(cSub)
+      Text('选择 CPU 架构（决定可用板卡与固件）').fontSize(tSub).fontColor(cSub)
       Row({ space: 10 }) {
         ForEach(ARCH_OPTIONS, (a: VmArch) => {
           Column() {
-            Text(a).fontSize(15).fontWeight(FontWeight.Medium)
-            if (a === 'aarch64') { Text('arm64').fontSize(11).fontColor(cWeak) }
-            if (a === 'x86_64') { Text('现代 x86').fontSize(11).fontColor(cWeak) }
-            if (a === 'i386') { Text('复古 x86').fontSize(11).fontColor(cWeak) }
+            Text(a).fontSize(tCard).fontWeight(FontWeight.Medium)
+            if (a === 'aarch64') { Text('arm64').fontSize(tSub).fontColor(cWeak) }
+            if (a === 'x86_64') { Text('现代 x86').fontSize(tSub).fontColor(cWeak) }
+            if (a === 'i386') { Text('复古 x86').fontSize(tSub).fontColor(cWeak) }
           }
           .layoutWeight(1)
           .padding(12)
@@ -302,12 +302,12 @@ export struct VmWizard {
   @Builder
   stepBoard() {
     Column({ space: 10 }) {
-      Text('板卡 + 固件（按架构过滤）').fontSize(13).fontColor(cSub)
+      Text('板卡 + 固件（按架构过滤）').fontSize(tSub).fontColor(cSub)
       Row({ space: 10 }) {
         ForEach(this.boards(), (b: string) => {
           Column() {
-            Text(b).fontSize(15).fontWeight(FontWeight.Medium)
-            Text(this.boardName(b)).fontSize(10).fontColor(cWeak)
+            Text(b).fontSize(tCard).fontWeight(FontWeight.Medium)
+            Text(this.boardName(b)).fontSize(tMono).fontColor(cWeak)
           }
           .layoutWeight(1)
           .padding(12)
@@ -320,28 +320,28 @@ export struct VmWizard {
 
       Row({ space: 10 }) {
         Column() {
-          Text('固件').fontSize(13).fontColor(cSub)
-          Text('SeaBIOS').fontSize(14)
+          Text('固件').fontSize(tSub).fontColor(cSub)
+          Text('SeaBIOS').fontSize(tLabel)
             .fontColor(this.firmware === 'seabios' ? cPrimary : Color.Black)
             .onClick(() => this.firmware = 'seabios')
         }.layoutWeight(1)
         Column() {
-          Text('OVMF (UEFI)').fontSize(13).fontColor(cSub)
-          Text('OVMF').fontSize(14)
+          Text('OVMF (UEFI)').fontSize(tSub).fontColor(cSub)
+          Text('OVMF').fontSize(tLabel)
             .fontColor(this.firmware === 'ovmf' ? cPrimary : Color.Black)
             .onClick(() => this.firmware = 'ovmf')
         }.layoutWeight(1)
       }
       .width('100%')
 
-      Text('CPU 机型（留空 = 自动；aarch64 默认 max，x86 用板卡默认）').fontSize(12).fontColor(cWeak)
+      Text('CPU 机型（留空 = 自动；aarch64 默认 max，x86 用板卡默认）').fontSize(tSub).fontColor(cWeak)
       TextInput({ text: this.cpuModel, placeholder: '如 cortex-a57 / max / host' })
-        .fontSize(13)
+        .fontSize(tLabel)
         .onChange((v: string) => this.cpuModel = v)
 
       if (this.firmware === 'ovmf') {
         Text('OVMF 需板卡支持 + OVMF_CODE/VARS 固件（make deps 尚未产出，暂回落 SeaBIOS）')
-          .fontSize(11).fontColor(cWarn)
+          .fontSize(tSub).fontColor(cWarn)
       }
     }
     .alignItems(HorizontalAlign.Start)
@@ -351,22 +351,22 @@ export struct VmWizard {
   @Builder
   stepCpuMem() {
     Column({ space: 8 }) {
-      Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(14)
+      Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
       Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
         .onChange((v: number) => this.memoryMB = v)
-      Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(14)
+      Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
       Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
         .onChange((v: number) => this.cpus = v)
       Row() {
-        Text('TCG 多线程 (MTTCG)').fontSize(14).layoutWeight(1)
+        Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)
         Toggle({ type: ToggleType.Switch, isOn: this.mttcg })
           .onChange((v: boolean) => this.mttcg = v)
       }
       Row() {
-        Text('tb-size').fontSize(14).width(90)
+        Text('tb-size').fontSize(tLabel).width(90)
         TextInput({ text: this.tbSizeText })
           .layoutWeight(1)
-          .fontSize(13)
+          .fontSize(tLabel)
           .onChange((v: string) => this.tbSizeText = v)
       }
     }
@@ -378,73 +378,73 @@ export struct VmWizard {
   stepMedia() {
     Column({ space: 8 }) {
       Row() {
-        Text('系统盘').fontSize(14).layoutWeight(1)
+        Text('系统盘').fontSize(tLabel).layoutWeight(1)
         Toggle({ type: ToggleType.Switch, isOn: this.diskEnabled })
           .onChange((v: boolean) => this.diskEnabled = v)
       }
       if (this.diskEnabled) {
-        Text(this.diskPath ? fs.accessSync(this.diskPath) ? '已有盘: ' + this.baseName(this.diskPath) : '新建: ' + this.baseName(this.diskPath) : '保存时创建')
-          .fontSize(12).fontColor(cSub)
+        Text(this.diskPath ? pathExists(this.diskPath) ? '已有盘: ' + this.baseName(this.diskPath) : '新建: ' + this.baseName(this.diskPath) : '保存时创建')
+          .fontSize(tSub).fontColor(cSub)
         Row({ space: 8 }) {
           Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
             min: 0, max: DISK_SIZES.length - 1, step: 1 })
             .layoutWeight(1)
             .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
-          Text(`${Math.round(this.diskGB)}GB`).fontSize(13)
+          Text(`${Math.round(this.diskGB)}GB`).fontSize(tLabel)
         }
         Row({ space: 8 }) {
-          Text('动态分配').fontSize(13)
+          Text('动态分配').fontSize(tLabel)
             .fontColor(this.diskAlloc === 'dynamic' ? cPrimary : Color.Black)
             .onClick(() => this.diskAlloc = 'dynamic')
-          Text('固定大小').fontSize(13)
+          Text('固定大小').fontSize(tLabel)
             .fontColor(this.diskAlloc === 'fixed' ? cPrimary : Color.Black)
             .onClick(() => this.diskAlloc = 'fixed')
         }
       }
 
       Row() {
-        Text('光盘 ISO').fontSize(14).width(72)
+        Text('光盘 ISO').fontSize(tLabel).width(72)
         Text(this.cdromPath ? this.baseName(this.cdromPath) : '无')
-          .fontSize(13).fontColor(cSub).layoutWeight(1)
+          .fontSize(tSub).fontColor(cSub).layoutWeight(1)
         if (this.cdromPath.length > 0) {
-          Button('移除').focusable(false).fontSize(12)
+          Button('移除').focusable(false).fontSize(tBody)
             .onClick(() => this.cdromPath = '')
         }
       }
       if (this.cdromPath.length === 0 && !this.kernelBoot) {
         Row({ space: 8 }) {
           TextInput({ placeholder: 'ISO 完整路径', text: this.cdromPath })
-            .layoutWeight(1).fontSize(13)
+            .layoutWeight(1).fontSize(tLabel)
             .onChange((v: string) => this.cdromPath = v)
-          Button('内置 Alpine').focusable(false).fontSize(12)
+          Button('内置 Alpine').focusable(false).fontSize(tBody)
             .onClick(() => {
               const iso = this.vmDataDir + '/alpine-virt.iso';
-              if (fs.accessSync(iso)) { this.cdromPath = iso; } else {
+              if (pathExists(iso)) { this.cdromPath = iso; } else {
                 promptAction.showToast({ message: '内置 ISO 不存在（需 make deps）' });
               }
             })
         }
       }
       Row() {
-        Text('从光盘启动').fontSize(14).layoutWeight(1)
+        Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
         Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
           .onChange((v: boolean) => this.bootFromCdrom = v)
       }
 
-      Text('直启内核（-kernel/-initrd/-append，教学/实验室）').fontSize(13).fontColor(cSub)
+      Text('直启内核（-kernel/-initrd/-append，教学/实验室）').fontSize(tSub).fontColor(cSub)
         .margin({ top: 4 })
       Row() {
-        Text('直启内核').fontSize(14).layoutWeight(1)
+        Text('直启内核').fontSize(tLabel).layoutWeight(1)
         Toggle({ type: ToggleType.Switch, isOn: this.kernelBoot })
           .onChange((v: boolean) => this.kernelBoot = v)
       }
       if (this.kernelBoot) {
         TextInput({ placeholder: 'kernel 路径，如 /data/.../kernel_aarch64', text: this.kernelPath })
-          .fontSize(13).onChange((v: string) => this.kernelPath = v)
+          .fontSize(tLabel).onChange((v: string) => this.kernelPath = v)
         TextInput({ placeholder: 'initrd 路径（可空）', text: this.initrdPath })
-          .fontSize(13).onChange((v: string) => this.initrdPath = v)
+          .fontSize(tLabel).onChange((v: string) => this.initrdPath = v)
         TextInput({ placeholder: '内核参数（可为空），如 console=ttyS0', text: this.kernelArgs })
-          .fontSize(13).onChange((v: string) => this.kernelArgs = v)
+          .fontSize(tLabel).onChange((v: string) => this.kernelArgs = v)
       }
     }
     .alignItems(HorizontalAlign.Start)
@@ -455,21 +455,21 @@ export struct VmWizard {
   stepNet() {
     Column({ space: 8 }) {
       Row() {
-        Text('网络').fontSize(14).layoutWeight(1)
+        Text('网络').fontSize(tLabel).layoutWeight(1)
         Toggle({ type: ToggleType.Switch, isOn: this.netEnabled })
           .onChange((v: boolean) => this.netEnabled = v)
       }
       if (this.netEnabled) {
-        Text('端口转发（宿主端口:客机端口，逗号分隔）').fontSize(12).fontColor(cSub)
+        Text('端口转发（宿主端口:客机端口，逗号分隔）').fontSize(tSub).fontColor(cSub)
         TextInput({ placeholder: '如 2222:22,8080:80', text: this.portForwards })
-          .fontSize(13).onChange((v: string) => this.portForwards = v)
+          .fontSize(tLabel).onChange((v: string) => this.portForwards = v)
         Row() {
-          Text('9p 共享目录').fontSize(14).layoutWeight(1)
+          Text('9p 共享目录').fontSize(tLabel).layoutWeight(1)
           Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
             .onChange((v: boolean) => this.sharedFolder = v)
         }
         if (this.sharedFolder) {
-          Text('挂载宿主 filesDir/shared 到客机 /shared（9p）').fontSize(11).fontColor(cWeak)
+          Text('挂载宿主 filesDir/shared 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
         }
       }
     }
@@ -480,17 +480,17 @@ export struct VmWizard {
   @Builder
   stepPreview() {
     Column({ space: 8 }) {
-      Text('名称').fontSize(14).width(72)
+      Text('名称').fontSize(tLabel).width(72)
       TextInput({ text: this.name })
         .layoutWeight(1)
         .onChange((v: string) => this.name = v)
       Row() {
-        Text('qemu 参数预览').fontSize(13).fontColor(cSub)
+        Text('qemu 参数预览').fontSize(tSub).fontColor(cSub)
         Blank()
-        Text('只读').fontSize(11).fontColor(cWeak)
+        Text('只读').fontSize(tSub).fontColor(cWeak)
       }
       Text(buildArgs(this.assemble(newProfileId()), this.vmDataDir, sharedDir(this.filesDir)).join(' '))
-        .fontSize(10)
+        .fontSize(tMono)
         .fontColor(cText)
         .padding(8)
         .width('100%')
@@ -513,14 +513,14 @@ export struct VmWizard {
         this.templateTiles()
       } else {
         Row() {
-          Button('取消').focusable(false).fontSize(14).backgroundColor(Color.Transparent)
+          Button('取消').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
             .fontColor(cPrimary)
             .onClick(() => { if (this.onClose) this.onClose(); })
           Blank()
-          Text('机器工坊').fontSize(18).fontWeight(FontWeight.Medium)
+          Text('机器工坊').fontSize(tPage).fontWeight(FontWeight.Medium)
           Blank()
           Button(this.step === STEPS.length - 1 ? '完成' : '下一步')
-            .focusable(false).fontSize(14).backgroundColor(Color.Transparent)
+            .focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
             .fontColor(cPrimary)
             .onClick(() => {
               if (this.step < STEPS.length - 1) {
@@ -544,7 +544,7 @@ export struct VmWizard {
             else if (this.step === 4) { this.stepNet() }
             else if (this.step === 5) { this.stepPreview() }
             if (this.step < STEPS.length - 1) {
-              Button('上一步').focusable(false).fontSize(14)
+              Button('上一步').focusable(false).fontSize(tBody)
                 .backgroundColor(Color.Black)
                 .fontColor(cSub)
                 .margin({ top: 16 })

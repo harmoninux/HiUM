@@ -3,9 +3,10 @@
 // 本页不改写任何 VM 媒体，只做：① 配额（各盘实占/虚拟合计）、② 每台 VM 的媒体体检、
 // ③ 基础镜像（vm 目录里的共享 ISO，可被多台 VM 引用）。媒体引用但文件失效的，打 ⚠。
 import { fileIo as fs } from '@kit.CoreFileKit';
+import { pathExists } from '../lib/fsutil';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore } from '../lib/vmprofile';
-import { cPrimary, cDanger, cSub, cWeak, cBg } from '../lib/uiTokens';
+import { cPrimary, cDanger, cSub, cWeak, cBg, tPage, tLabel, tBody, tSub } from '../lib/uiTokens';
 
 interface DiskNapi {
   diskInfo: (path: string) => string;
@@ -58,7 +59,7 @@ export struct StorageOverview {
     const missing: string[] = [];
     let diskOk = true, diskVirtualGB = 0, diskActualGB = 0;
     if (p.media.diskPath.length > 0) {
-      diskOk = fs.accessSync(p.media.diskPath);
+      diskOk = pathExists(p.media.diskPath);
       if (diskOk) {
         const s = napi.diskInfo(p.media.diskPath);
         if (s.length > 0) {
@@ -79,7 +80,7 @@ export struct StorageOverview {
     }
     let cdromOk = true;
     if (p.media.cdromPath.length > 0) {
-      cdromOk = fs.accessSync(p.media.cdromPath);
+      cdromOk = pathExists(p.media.cdromPath);
       if (!cdromOk) {
         missing.push('光盘缺失');
       }
@@ -162,13 +163,13 @@ export struct StorageOverview {
   build() {
     Column() {
       Row() {
-        Button('返回').focusable(false).fontSize(14).backgroundColor(Color.Transparent)
+        Button('返回').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
           .fontColor(cPrimary)
           .onClick(() => this.navStack.pop())
         Blank()
-        Text('存储概览').fontSize(18).fontWeight(FontWeight.Medium)
+        Text('存储概览').fontSize(tPage).fontWeight(FontWeight.Medium)
         Blank()
-        Text(`${this.vms.length} 台 VM`).fontSize(13).fontColor(cSub)
+        Text(`${this.vms.length} 台 VM`).fontSize(tSub).fontColor(cSub)
       }
       .width('100%')
       .padding({ left: 8, right: 8, top: 8, bottom: 8 })
@@ -177,9 +178,9 @@ export struct StorageOverview {
         Column({ space: 12 }) {
           /* 配额总览 */
           Column({ space: 4 }) {
-            Text('配额').fontSize(16).fontWeight(FontWeight.Medium)
+            Text('配额').fontSize(tPage).fontWeight(FontWeight.Medium)
             Text(`实占 ${this.totalActualGB.toFixed(2)} GB · 虚拟 ${this.totalVirtualGB.toFixed(2)} GB`)
-              .fontSize(13)
+              .fontSize(tSub)
               .fontColor(cSub)
           }
           .alignItems(HorizontalAlign.Start)
@@ -190,15 +191,15 @@ export struct StorageOverview {
 
           /* 基础镜像（共享 ISO） */
           Column({ space: 4 }) {
-            Text('基础镜像（共享 ISO）').fontSize(16).fontWeight(FontWeight.Medium)
+            Text('基础镜像（共享 ISO）').fontSize(tPage).fontWeight(FontWeight.Medium)
             if (this.isos.length === 0) {
-              Text('vm 目录下暂无 ISO').fontSize(12).fontColor(cWeak)
+              Text('vm 目录下暂无 ISO').fontSize(tSub).fontColor(cWeak)
             } else {
               ForEach(this.isos, (i: IsoEntry) => {
                 Row({ space: 8 }) {
                   Column({ space: 2 }) {
-                    Text(i.name).fontSize(13)
-                    Text(`${i.sizeMB.toFixed(1)} MB · ${i.refs} 台引用`).fontSize(11).fontColor(cWeak)
+                    Text(i.name).fontSize(tLabel)
+                    Text(`${i.sizeMB.toFixed(1)} MB · ${i.refs} 台引用`).fontSize(tSub).fontColor(cWeak)
                   }.alignItems(HorizontalAlign.Start).layoutWeight(1)
                 }.padding({ top: 4, bottom: 4 })
               }, (i: IsoEntry) => i.name)
@@ -212,20 +213,20 @@ export struct StorageOverview {
 
           /* 各 VM 媒体体检 */
           Column({ space: 4 }) {
-            Text('媒体体检').fontSize(16).fontWeight(FontWeight.Medium)
+            Text('媒体体检').fontSize(tPage).fontWeight(FontWeight.Medium)
             if (this.vms.length === 0) {
-              Text('暂无虚拟机').fontSize(12).fontColor(cWeak)
+              Text('暂无虚拟机').fontSize(tSub).fontColor(cWeak)
             } else {
               ForEach(this.vms, (v: MediaStat) => {
                 Row({ space: 8 }) {
                   Column({ space: 2 }) {
                     Row({ space: 6 }) {
-                      Text(v.name).fontSize(14)
+                      Text(v.name).fontSize(tLabel)
                       if (v.missing.length > 0) {
-                        Text('⚠ ' + v.missing).fontSize(11).fontColor(cDanger)
+                        Text('⚠ ' + v.missing).fontSize(tSub).fontColor(cDanger)
                       }
                     }
-                    Text(this.mediaDesc(v)).fontSize(11).fontColor(cWeak)
+                    Text(this.mediaDesc(v)).fontSize(tSub).fontColor(cWeak)
                   }.alignItems(HorizontalAlign.Start).layoutWeight(1)
                 }.padding({ top: 5, bottom: 5 })
               }, (v: MediaStat) => v.id)

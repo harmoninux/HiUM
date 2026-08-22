@@ -4,6 +4,7 @@
 // console 为每台 VM 一个 VmConsoleAbility 独立窗口（specified 模式按 vmId 归并）。
 // 工坊为内嵌居中模态：Stack 遮罩浮层承载 VmWizard（showWizard 开关 + wizardParam 参数）。
 import { fileIo as fs } from '@kit.CoreFileKit';
+import { pathExists } from '../lib/fsutil';
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -130,10 +131,10 @@ export struct VmList {
   /* 该 VM 引用的媒体（系统盘/光盘）文件是否失效；空串 = 正常 */
   private mediaIssue(p: VmProfile): string {
     const bad: string[] = [];
-    if (p.media.diskPath.length > 0 && !fs.accessSync(p.media.diskPath)) {
+    if (p.media.diskPath.length > 0 && !pathExists(p.media.diskPath)) {
       bad.push('系统盘');
     }
-    if (p.media.cdromPath.length > 0 && !fs.accessSync(p.media.cdromPath)) {
+    if (p.media.cdromPath.length > 0 && !pathExists(p.media.cdromPath)) {
       bad.push('光盘');
     }
     return bad.join('、');
@@ -299,7 +300,7 @@ export struct VmList {
   @Builder
   sideRow(p: VmProfile) {
     Row({ space: sp3 }) {
-      if (fs.accessSync(this.store().thumbPath(p.id))) {
+      if (pathExists(this.store().thumbPath(p.id))) {
         Image('file://' + this.store().thumbPath(p.id))
           .width(40)
           .height(26)

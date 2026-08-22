@@ -1,10 +1,10 @@
 // 虚拟机配置页：普通字段 + 高级折叠区（TCG/自定义参数）。
 // 只编辑 VmProfile JSON，保存后由列表页/console 窗口消费。
 import { promptAction } from '@kit.ArkUI';
-import { fileIo as fs } from '@kit.CoreFileKit';
+import { pathExists } from '../lib/fsutil';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore, VmArch, VgaType, SCHEMA_VERSION, fitBoard } from '../lib/vmprofile';
-import { cPrimary, cRunning, cWarn, cSub, cWeak, cBg, cBorder } from '../lib/uiTokens';
+import { cPrimary, cRunning, cWarn, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -163,13 +163,13 @@ export struct VmEdit {
   build() {
     Column() {
       Row() {
-        Button('取消').focusable(false).fontSize(14).backgroundColor(Color.Transparent)
+        Button('取消').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
           .fontColor(cPrimary)
           .onClick(() => this.navStack.pop())
         Blank()
-        Text('虚拟机配置').fontSize(18).fontWeight(FontWeight.Medium)
+        Text('虚拟机配置').fontSize(tPage).fontWeight(FontWeight.Medium)
         Blank()
-        Button('保存').focusable(false).fontSize(14).backgroundColor(Color.Transparent)
+        Button('保存').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
           .fontColor(cPrimary)
           .onClick(() => this.save())
       }
@@ -179,7 +179,7 @@ export struct VmEdit {
       List({ space: 1 }) {
         ListItem() {
           Row() {
-            Text('名称').fontSize(14).width(72)
+            Text('名称').fontSize(tLabel).width(72)
             TextInput({ text: this.name })
               .layoutWeight(1)
               .onChange((v: string) => this.name = v)
@@ -188,7 +188,7 @@ export struct VmEdit {
 
         ListItem() {
           Row() {
-            Text('架构').fontSize(14).width(72)
+            Text('架构').fontSize(tLabel).width(72)
             Select(ARCH_OPTIONS.map((a: VmArch): SelectOption => {
               return { value: a };
             }))
@@ -202,7 +202,7 @@ export struct VmEdit {
 
         ListItem() {
           Column({ space: 4 }) {
-            Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(14)
+            Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
             Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
               .onChange((v: number) => this.memoryMB = v)
           }.alignItems(HorizontalAlign.Start).padding(12)
@@ -210,7 +210,7 @@ export struct VmEdit {
 
         ListItem() {
           Column({ space: 4 }) {
-            Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(14)
+            Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
             Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
               .onChange((v: number) => this.cpus = v)
           }.alignItems(HorizontalAlign.Start).padding(12)
@@ -219,15 +219,15 @@ export struct VmEdit {
         ListItem() {
           Column({ space: 6 }) {
             Row() {
-              Text('系统盘').fontSize(14).width(72)
+              Text('系统盘').fontSize(tLabel).width(72)
               Text(this.diskPath ? this.baseName(this.diskPath) : '无')
-                .fontSize(13)
+                .fontSize(tSub)
                 .fontColor(cSub)
                 .layoutWeight(1)
               if (this.diskPath) {
-                Button('信息').focusable(false).fontSize(12)
+                Button('信息').focusable(false).fontSize(tBody)
                   .onClick(() => this.showDiskInfo())
-                Button('移除').focusable(false).fontSize(12)
+                Button('移除').focusable(false).fontSize(tBody)
                   .onClick(() => {
                     this.diskPath = '';
                     this.diskCreate = false;
@@ -239,11 +239,11 @@ export struct VmEdit {
             }
             if (!this.diskPath && this.diskCreate) {
               Row({ space: 8 }) {
-                Text('分配方式').fontSize(13).fontColor(cSub)
-                Text('动态分配').fontSize(13)
+                Text('分配方式').fontSize(tSub).fontColor(cSub)
+                Text('动态分配').fontSize(tLabel)
                   .fontColor(this.diskAlloc === 'dynamic' ? cPrimary : Color.Black)
                   .onClick(() => this.diskAlloc = 'dynamic')
-                Text('固定大小').fontSize(13)
+                Text('固定大小').fontSize(tLabel)
                   .fontColor(this.diskAlloc === 'fixed' ? cPrimary : Color.Black)
                   .onClick(() => this.diskAlloc = 'fixed')
               }
@@ -252,15 +252,15 @@ export struct VmEdit {
                   min: 0, max: DISK_SIZES.length - 1, step: 1 })
                   .layoutWeight(1)
                   .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
-                Text(`${Math.round(this.diskGB)}GB`).fontSize(13)
+                Text(`${Math.round(this.diskGB)}GB`).fontSize(tLabel)
               }
               Text('保存时创建 ' + Math.round(this.diskGB) + 'GB ' +
                 (this.diskAlloc === 'fixed' ? '固定大小' : '动态分配') + ' 系统盘')
-                .fontSize(12)
+                .fontSize(tBody)
                 .fontColor(cRunning)
               if (this.diskAlloc === 'fixed') {
                 Text('固定大小：保存时立即预留整块空间，大容量请优先动态分配')
-                  .fontSize(12)
+                  .fontSize(tBody)
                   .fontColor(cWarn)
               }
             }
@@ -270,13 +270,13 @@ export struct VmEdit {
         ListItem() {
           Column({ space: 6 }) {
             Row() {
-              Text('光盘 ISO').fontSize(14).width(72)
+              Text('光盘 ISO').fontSize(tLabel).width(72)
               Text(this.cdromPath ? this.baseName(this.cdromPath) : '无')
-                .fontSize(13)
+                .fontSize(tSub)
                 .fontColor(cSub)
                 .layoutWeight(1)
               if (this.cdromPath) {
-                Button('移除').focusable(false).fontSize(12)
+                Button('移除').focusable(false).fontSize(tBody)
                   .onClick(() => this.cdromPath = '')
               }
             }
@@ -285,10 +285,10 @@ export struct VmEdit {
                 TextInput({ placeholder: 'ISO 完整路径', text: this.cdromPath })
                   .layoutWeight(1)
                   .onChange((v: string) => this.cdromPath = v)
-                Button('内置 Alpine').focusable(false).fontSize(12)
+                Button('内置 Alpine').focusable(false).fontSize(tBody)
                   .onClick(() => {
                     const iso = this.vmDataDir + '/alpine-virt.iso';
-                    if (fs.accessSync(iso)) {
+                    if (pathExists(iso)) {
                       this.cdromPath = iso;
                     } else {
                       promptAction.showToast({ message: '内置 ISO 不存在（需 make deps）' });
@@ -301,7 +301,7 @@ export struct VmEdit {
 
         ListItem() {
           Row() {
-            Text('从光盘启动').fontSize(14).layoutWeight(1)
+            Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
               .onChange((v: boolean) => this.bootFromCdrom = v)
           }.padding(12)
@@ -309,7 +309,7 @@ export struct VmEdit {
 
         ListItem() {
           Row() {
-            Text('显卡').fontSize(14).width(72)
+            Text('显卡').fontSize(tLabel).width(72)
             Select(VGA_OPTIONS.map((v: VgaType): SelectOption => {
               return { value: v };
             }))
@@ -323,7 +323,7 @@ export struct VmEdit {
 
         ListItem() {
           Row() {
-            Text('网络').fontSize(14).layoutWeight(1)
+            Text('网络').fontSize(tLabel).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.netEnabled })
               .onChange((v: boolean) => this.netEnabled = v)
           }.padding(12)
@@ -332,7 +332,7 @@ export struct VmEdit {
         if (this.netEnabled) {
           ListItem() {
             Column({ space: 4 }) {
-              Text('端口转发（宿主端口:客机端口，逗号分隔）').fontSize(13).fontColor(cSub)
+              Text('端口转发（宿主端口:客机端口，逗号分隔）').fontSize(tSub).fontColor(cSub)
               TextInput({ placeholder: '如 2222:22,8080:80', text: this.portForwards })
                 .onChange((v: string) => this.portForwards = v)
             }.alignItems(HorizontalAlign.Start).padding(12)
@@ -340,11 +340,11 @@ export struct VmEdit {
           ListItem() {
             Column({ space: 4 }) {
               Row() {
-                Text('9p 共享目录').fontSize(14).layoutWeight(1)
+                Text('9p 共享目录').fontSize(tLabel).layoutWeight(1)
                 Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
                   .onChange((v: boolean) => this.sharedFolder = v)
               }.padding({ left: 0, right: 0 })
-              Text('挂载宿主应用数据下 shared/ 到客机 /shared（9p）').fontSize(12).fontColor(cWeak)
+              Text('挂载宿主应用数据下 shared/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).padding({ left: 12, right: 12, bottom: 12 })
           }
         }
@@ -352,7 +352,7 @@ export struct VmEdit {
         ListItem() {
           Row() {
             Text(this.showAdvanced ? '▲ 高级选项' : '▼ 高级选项')
-              .fontSize(14)
+              .fontSize(tLabel)
               .fontColor(cPrimary)
               .layoutWeight(1)
           }
@@ -363,14 +363,14 @@ export struct VmEdit {
         if (this.showAdvanced) {
           ListItem() {
             Row() {
-              Text('TCG 多线程 (MTTCG)').fontSize(14).layoutWeight(1)
+              Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)
               Toggle({ type: ToggleType.Switch, isOn: this.mttcg })
                 .onChange((v: boolean) => this.mttcg = v)
             }.padding(12)
           }
           ListItem() {
             Row() {
-              Text('tb-size').fontSize(14).width(96)
+              Text('tb-size').fontSize(tLabel).width(96)
               TextInput({ text: this.tbSizeText })
                 .layoutWeight(1)
                 .onChange((v: string) => this.tbSizeText = v)
@@ -378,7 +378,7 @@ export struct VmEdit {
           }
           ListItem() {
             Column({ space: 4 }) {
-              Text('自定义 qemu 参数（追加到命令行末尾）').fontSize(13).fontColor(cSub)
+              Text('自定义 qemu 参数（追加到命令行末尾）').fontSize(tSub).fontColor(cSub)
               TextArea({ placeholder: '如 -device usb-kbd', text: this.extraArgs })
                 .onChange((v: string) => this.extraArgs = v)
             }.alignItems(HorizontalAlign.Start).padding(12)

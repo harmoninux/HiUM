@@ -49,6 +49,7 @@ export struct VmManage {
   @State tempSession: boolean = false;
   @State netEnabled: boolean = false;
   @State snack: string = '';
+  @State nowSec: number = 0; /* 进入页面时的时间基准，供「当前」快照节点稳定展示 */
 
   aboutToAppear(): void {
     const p = this.profile;
@@ -63,6 +64,7 @@ export struct VmManage {
     this.netEnabled = p.net.enabled;
     this.refreshDisk();
     this.refreshSnapshot();
+    this.nowSec = Math.floor(Date.now() / 1000);
   }
 
   /* 右下角 snackbar：成功类反馈走这里，错误类保留 toast */
@@ -481,7 +483,7 @@ export struct VmManage {
           Column().width(9).height(9).borderRadius(5).backgroundColor(cPrimary).margin({ right: sp2 })
           Column({ space: 1 }) {
             Text('当前').fontSize(tLabel)
-            Text(this.dateStr(Math.floor(Date.now() / 1000))).fontSize(10).fontColor(cWeak)
+            Text(this.dateStr(this.nowSec)).fontSize(10).fontColor(cWeak)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
         }.width('100%').padding({ top: sp1, bottom: sp1 })
         if (this.snapshots.length === 0 && this.canSnapshot()) {

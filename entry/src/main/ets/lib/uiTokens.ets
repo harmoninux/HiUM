@@ -23,6 +23,7 @@ export const tCard  = 13; /* 卡片/行标题 600 */
 export const tLabel = 13; /* 设置行标签 400 */
 export const tBody  = 12; /* 正文/按钮 400 */
 export const tSub   = 11; /* 次级说明 400 */
+export const tMono  = 10; /* mono 小字：状态/指纹/日期/步骤圆点 */
 
 /* ---- 间距 ---- */
 export const sp1 = 4;
