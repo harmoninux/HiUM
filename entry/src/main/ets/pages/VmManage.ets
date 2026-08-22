@@ -1,8 +1,10 @@
-// 单台虚拟机的管理页（per-VM）：系统盘信息 / 扩容 / 移除。
-// 快照、时光机入口后续（Phase 1）加在这里 —— 快照归属单台 VM，不进跨 VM 的库。
-// 从列表卡片正文进入（卡片点击只进管理，不启动；启动仍走「启动」按钮）。
+// 单台虚拟机的管理页（per-VM）：分区滚动 —— 概览 chips + 系统盘 / 快照·时光机 / 网络 / 高级。
+// 快照归属单台 VM，不进跨 VM 的库；临时会话打点/回滚见 lib/tempSession。
+// 从列表侧栏点行进（Navigation replace 渲染到 content/detail 区）；成功反馈走右下角 snackbar。
 import { promptAction } from '@kit.ArkUI';
 import { fileIo as fs } from '@kit.CoreFileKit';
+import { common } from '@kit.AbilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
@@ -10,6 +12,13 @@ import {
   VmSnapshotEntry, snapshotCreate, snapshotApply, snapshotDelete, parseSnapshots,
 } from '../lib/vmsnapshot';
 import { isTempSnapshot } from '../lib/tempSession';
+import { WizardParam } from './VmWizard';
+import {
+  cPrimary, cDanger, cRunning, cText, cSub, cWeak,
+  cCard, cBlock, cChip,
+  tPage, tCard, tLabel, tBody, tSub,
+  sp1, sp2, sp3, sp4, sp5, rElem, rBadge,
+} from '../lib/uiTokens';
 
 interface DiskNapi {
   diskInfo: (path: string) => string;
@@ -28,6 +37,7 @@ export struct VmManage {
 
   @State name: string = '';
   @State arch: string = '';
+  @State running: boolean = false;
   @State diskPath: string = '';
   @State diskFmt: string = '?';
   @State diskVirtualGB: number = 0;
@@ -38,6 +48,7 @@ export struct VmManage {
   @State snapNameText: string = '';
   @State snapCreateMode: boolean = false;
   @State tempSession: boolean = false;
+  @State snack: string = '';
 
   aboutToAppear(): void {
     const p = this.profile;
@@ -46,10 +57,21 @@ export struct VmManage {
     }
     this.name = p.name;
     this.arch = p.machine.arch;
+    this.running = vmIsRunning(p.id);
     this.diskPath = p.media.diskPath;
     this.tempSession = p.temporarySession;
     this.refreshDisk();
     this.refreshSnapshot();
+  }
+
+  /* 右下角 snackbar：成功类反馈走这里，错误类保留 toast */
+  private showSnack(msg: string): void {
+    this.snack = msg;
+    setTimeout(() => {
+      if (this.snack === msg) {
+        this.snack = '';
+      }
+    }, 2000);
   }
 
   private refreshDisk(): void {
@@ -134,7 +156,7 @@ export struct VmManage {
     this.snapCreateMode = false;
     this.snapNameText = '';
     this.refreshSnapshot();
-    promptAction.showToast({ message: `已创建快照「${name}」` });
+    this.showSnack(`已创建快照「${name}」`);
   }
 
   private doSnapshotApply(s: VmSnapshotEntry): void {
@@ -156,7 +178,7 @@ export struct VmManage {
           }
           this.refreshDisk();
           this.refreshSnapshot();
-          promptAction.showToast({ message: `已恢复到「${s.name}」` });
+          this.showSnack(`已恢复到「${s.name}」`);
         },
       },
     });
@@ -173,7 +195,7 @@ export struct VmManage {
       primaryButton: { value: '取消', action: () => {} },
       secondaryButton: {
         value: '删除',
-        fontColor: Color.Red,
+        fontColor: cDanger,
         action: () => {
           const ret = snapshotDelete(this.diskPath, s.name);
           if (ret !== 0) {
@@ -181,7 +203,7 @@ export struct VmManage {
             return;
           }
           this.refreshSnapshot();
-          promptAction.showToast({ message: '已删除快照' });
+          this.showSnack('已删除快照');
         },
       },
     });
@@ -210,6 +232,12 @@ export struct VmManage {
       `${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
+  private showDiskInfo(): void {
+    promptAction.showToast({
+      message: `${this.diskFmt} · 虚拟${this.diskVirtualGB.toFixed(1)}G · 实占${this.diskActualGB.toFixed(1)}G`,
+    });
+  }
+
   /* qcow2 只能扩大：目标须大于当前 virtual-size；运行中不能动 backing 盘 */
   private doExpand(): void {
     if (!this.diskPath) {
@@ -236,7 +264,7 @@ export struct VmManage {
     this.expandMode = false;
     this.newGBText = '';
     this.refreshDisk();
-    promptAction.showToast({ message: `已扩容到 ${gbNum} GB` });
+    this.showSnack(`已扩容到 ${gbNum} GB`);
   }
 
   private confirmRemove(): void {
@@ -253,7 +281,7 @@ export struct VmManage {
       primaryButton: { value: '取消', action: () => {} },
       secondaryButton: {
         value: '移除',
-        fontColor: Color.Red,
+        fontColor: cDanger,
         action: () => {
           const p = this.profile;
           if (!p) {
@@ -271,150 +299,308 @@ export struct VmManage {
           this.diskPath = '';
           this.vmListVersion++;
           this.refreshDisk();
-          promptAction.showToast({ message: '已移除系统盘' });
+          this.showSnack('已移除系统盘');
         },
       },
     });
   }
 
-  build() {
+  /* ================= 顶部操作：进入 console 窗口 / 编辑 / 删除虚拟机 ================= */
+
+  private openConsole(): void {
+    const p = this.profile;
+    if (!p) {
+      return;
+    }
+    /* 拉起（或复用并置前）该 VM 的独立 console 窗口；VM 未运行则由窗口页自启 */
+    const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    ctx.startAbility({
+      bundleName: ctx.abilityInfo.bundleName,
+      abilityName: 'VmConsoleAbility',
+      parameters: { vmId: p.id, vmName: p.name },
+    }).catch((err: BusinessError) => {
+      promptAction.showToast({ message: '打开窗口失败: ' + err.code });
+    });
+  }
+
+  private openEdit(): void {
+    const p = this.profile;
+    if (!p) {
+      return;
+    }
+    const prm: WizardParam = { mode: 'edit', profile: p };
+    this.navStack.pushPath({ name: 'wizard', param: prm });
+  }
+
+  private confirmDeleteVm(): void {
+    const p = this.profile;
+    if (!p) {
+      return;
+    }
+    if (vmIsRunning(p.id)) {
+      promptAction.showToast({ message: '运行中的虚拟机不能删除' });
+      return;
+    }
+    AlertDialog.show({
+      title: '删除虚拟机',
+      message: `将删除「${p.name}」的配置、封面及本应用内创建的磁盘镜像，确认？`,
+      primaryButton: { value: '取消', action: () => {} },
+      secondaryButton: {
+        value: '删除',
+        fontColor: cDanger,
+        action: () => {
+          const cur = this.profile;
+          if (cur) {
+            new VmStore(this.filesDir).remove(cur);
+            this.vmListVersion++;
+            this.navStack.pop();
+          }
+        },
+      },
+    });
+  }
+
+  /* ================= chips 概览 helper ================= */
+
+  private memLabel(): string {
+    return this.profile ? '内存 ' + Math.round(this.profile.runtime.memoryMB / 1024) + 'G' : '';
+  }
+
+  private cpuLabel(): string {
+    return this.profile ? '核 ' + this.profile.runtime.cpus : '';
+  }
+
+  private boardLabel(): string {
+    return this.profile ? this.profile.machine.machine : '';
+  }
+
+  /* ================= 分区 ================= */
+
+  @Builder
+  secHead(t: string) {
+    Text(t).fontSize(tSub).fontColor(cWeak).fontWeight(FontWeight.Bold).letterSpacing(0.5)
+      .padding({ top: sp3, bottom: sp1 }).width('100%')
+  }
+
+  @Builder
+  secSystemDisk() {
+    this.secHead('系统盘')
+    if (!this.diskPath) {
+      Text('未配置系统盘，可到配置页添加').fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp1 })
+    } else {
+      Column() {
+        Row() {
+          Text(`${this.diskFmt} · 虚拟 ${this.diskVirtualGB.toFixed(1)}G`).fontSize(tSub).fontColor(cSub)
+          Blank()
+          Text(`实占 ${this.diskActualGB.toFixed(1)}G`).fontSize(tSub).fontColor(cSub)
+        }.width('100%')
+        /* 实占/虚拟 进度条 */
+        Stack({ alignContent: Alignment.Start }) {
+          Row().width('100%').height(6).backgroundColor(cBlock).borderRadius(rElem)
+          Row().width((Math.min(100, (this.diskActualGB / Math.max(0.1, this.diskVirtualGB)) * 100)).toString() + '%')
+            .height(6).backgroundColor(cPrimary).borderRadius(rElem)
+        }.width('100%').margin({ top: sp1, bottom: sp1 })
+        Row({ space: sp2 }) {
+          Button('信息').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cSub)
+            .onClick(() => this.showDiskInfo())
+          Button('扩容').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cSub)
+            .onClick(() => {
+              this.newGBText = this.diskVirtualGB > 0 ? String(Math.ceil(this.diskVirtualGB)) : '';
+              this.expandMode = !this.expandMode;
+            })
+          Button('移除').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cDanger)
+            .onClick(() => this.confirmRemove())
+        }
+        if (this.expandMode) {
+          Row({ space: sp2 }) {
+            Text('新大小(GB)').fontSize(tSub).fontColor(cSub)
+            TextInput({ text: this.newGBText }).type(InputType.Number).layoutWeight(1).fontSize(tSub)
+              .onChange((v: string) => this.newGBText = v)
+            Button('确定').focusable(false).fontSize(tSub).backgroundColor(cPrimary).fontColor(Color.White)
+              .onClick(() => this.doExpand())
+            Button('取消').focusable(false).fontSize(tSub).backgroundColor(Color.Transparent).fontColor(cSub)
+              .onClick(() => this.expandMode = false)
+          }.margin({ top: sp2 })
+        }
+      }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp2 })
+    }
+  }
+
+  @Builder
+  secSnapshot() {
+    this.secHead('快照 · 时光机')
     Column() {
       Row() {
-        Button('返回').focusable(false).fontSize(14).backgroundColor(Color.Transparent)
-          .fontColor('#ff007dff')
-          .onClick(() => this.navStack.pop())
-        Blank()
-        Text('虚拟机管理').fontSize(18).fontWeight(FontWeight.Medium)
-        Blank()
-        Text(this.arch).fontSize(13).fontColor('#ff666666')
+        Column({ space: 1 }) {
+          Text('临时会话（启动即回滚）').fontSize(tLabel)
+          Text('开机打起点快照，关机自动丢弃本次改动').fontSize(tSub).fontColor(cSub)
+        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.tempSession })
+          .onChange((v: boolean) => this.doSetTemp(v))
+      }.width('100%').padding({ top: sp1, bottom: sp2 })
+
+      if (this.canSnapshot()) {
+        Row({ space: sp2 }) {
+          Button('新建快照').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+            .onClick(() => this.snapCreateMode = !this.snapCreateMode)
+          Button('刷新').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cSub)
+            .onClick(() => this.refreshSnapshot())
+        }.width('100%')
+        if (this.snapCreateMode) {
+          Row({ space: sp2 }) {
+            TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tBody)
+              .onChange((v: string) => this.snapNameText = v)
+            Button('创建').focusable(false).fontSize(tSub).backgroundColor(cPrimary).fontColor(Color.White)
+              .onClick(() => this.doSnapshotCreate())
+            Button('取消').focusable(false).fontSize(tSub).backgroundColor(Color.Transparent).fontColor(cSub)
+              .onClick(() => this.snapCreateMode = false)
+          }.margin({ top: sp1, bottom: sp1 })
+        }
+      } else {
+        Text(this.snapStatus()).fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp2 })
+      }
+
+      /* 时间线（历史快照 + 当前） */
+      Column() {
+        ForEach(this.snapshots, (s: VmSnapshotEntry) => {
+          Row() {
+            Column().width(9).height(9).borderRadius(5).backgroundColor(cCard)
+              .border({ width: 2, color: cPrimary }).margin({ right: sp2 })
+            Column({ space: 1 }) {
+              Text(s.name).fontSize(tLabel)
+              Text(this.dateStr(s.dateSec)).fontSize(10).fontColor(cWeak)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            Button('恢复').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+              .onClick(() => this.doSnapshotApply(s))
+            Button('删除').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cDanger)
+              .onClick(() => this.doSnapshotDelete(s))
+          }.width('100%').padding({ top: sp1, bottom: sp1 })
+        }, (s: VmSnapshotEntry) => s.id + ':' + s.name)
+        Row() {
+          Column().width(9).height(9).borderRadius(5).backgroundColor(cPrimary).margin({ right: sp2 })
+          Column({ space: 1 }) {
+            Text('当前').fontSize(tLabel)
+            Text(this.dateStr(Math.floor(Date.now() / 1000))).fontSize(10).fontColor(cWeak)
+          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        }.width('100%').padding({ top: sp1, bottom: sp1 })
+        if (this.snapshots.length === 0 && this.canSnapshot()) {
+          Text('暂无快照').fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp1 })
+        }
+      }.width('100%').padding({ left: sp2 })
+    }.alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  secNet() {
+    this.secHead('网络')
+    Column() {
+      Row() {
+        Column({ space: 1 }) {
+          Text('已启用').fontSize(tLabel)
+          Text(`端口转发 ${(this.profile && this.profile.net.portForwards.length > 0) ? this.profile.net.portForwards : '无'} · 9p 共享${(this.profile && this.profile.net.sharedFolder) ? '开' : '关'}`)
+            .fontSize(tSub).fontColor(cSub)
+        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.profile ? this.profile.net.enabled : false })
+          .onChange((v: boolean) => {
+            if (this.profile) {
+              this.profile.net.enabled = v;
+              this.saveTiny();
+            }
+          })
+      }.width('100%').padding({ top: sp1, bottom: sp2 })
+    }.alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  secAdvanced() {
+    this.secHead('高级')
+    Text('TCG 多线程 · tb-size · 自定义参数（到配置页编辑）').fontSize(tSub).fontColor(cSub)
+      .padding({ top: sp1, bottom: sp2 })
+  }
+
+  private saveTiny(): void {
+    if (this.profile) {
+      new VmStore(this.filesDir).save(this.profile);
+      this.vmListVersion++;
+    }
+  }
+
+  build() {
+    Stack() {
+      Column() {
+        /* 顶部行：返回 / 名称+运行徽标+arch / 进入·编辑·删除 */
+        Row({ space: sp2 }) {
+          Button('返回').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+            .onClick(() => this.navStack.pop())
+          Column({ space: 1 }) {
+            Row({ space: sp1 }) {
+              Text(this.name).fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cText)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              if (this.running) {
+                Text('运行').fontSize(tSub).fontColor(cRunning).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp1, right: sp1 })
+              }
+            }.alignItems(VerticalAlign.Center)
+            Text(this.arch).fontSize(tSub).fontColor(cSub)
+          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Button(this.running ? '进入' : '启动').focusable(false).fontSize(tBody)
+            .backgroundColor(cPrimary).fontColor(Color.White)
+            .onClick(() => this.openConsole())
+          Button('编辑').focusable(false).fontSize(tBody).backgroundColor(cBlock).fontColor(cPrimary)
+            .onClick(() => this.openEdit())
+          Button('删除').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cDanger)
+            .onClick(() => this.confirmDeleteVm())
+        }
+        .width('100%')
+        .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
+        .alignItems(VerticalAlign.Center)
+
+        Scroll() {
+          Column() {
+            /* 概览 chips 一行 */
+            Row({ space: sp2 }) {
+              if (this.memLabel().length > 0) {
+                Text(this.memLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
+              if (this.cpuLabel().length > 0) {
+                Text(this.cpuLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
+              if (this.boardLabel().length > 0) {
+                Text(this.boardLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
+            }
+            .width('100%')
+            .padding({ top: sp2, bottom: sp2 })
+
+            this.secSystemDisk()
+            this.secSnapshot()
+            this.secNet()
+            this.secAdvanced()
+          }
+          .width('100%')
+          .padding({ left: sp3, right: sp3, bottom: sp5 })
+        }
+        .layoutWeight(1)
+        .scrollBar(BarState.Off)
       }
       .width('100%')
-      .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+      .height('100%')
+      .backgroundColor(cCard)
 
-      List({ space: 1 }) {
-        ListItem() {
-          Row() {
-            Text('名称').fontSize(14).width(72)
-            Text(this.name).fontSize(15).layoutWeight(1)
-          }.padding(12)
+      if (this.snack.length > 0) {
+        Row() {
+          Text('✓ ').fontSize(tBody).fontColor('#ff34d399')
+          Text(this.snack).fontSize(tBody).fontColor(Color.White)
         }
-
-        ListItem() {
-          Column({ space: 8 }) {
-            Row() {
-              Text('系统盘').fontSize(16).fontWeight(FontWeight.Medium)
-              Blank()
-              if (this.diskPath) {
-                Text(this.baseName(this.diskPath)).fontSize(13).fontColor('#ff666666')
-              }
-            }
-            if (this.diskPath) {
-              Text(`${this.diskFmt} · 虚拟${this.diskVirtualGB.toFixed(1)}G · 实占${this.diskActualGB.toFixed(1)}G`)
-                .fontSize(13)
-                .fontColor('#ff666666')
-              Row({ space: 8 }) {
-                Button('信息').focusable(false).fontSize(13)
-                  .onClick(() => {
-                    promptAction.showToast({
-                      message: `${this.diskFmt} · 虚拟${this.diskVirtualGB.toFixed(1)}G · 实占${this.diskActualGB.toFixed(1)}G`,
-                    });
-                  })
-                Button('扩容').focusable(false).fontSize(13)
-                  .onClick(() => {
-                    this.newGBText = this.diskVirtualGB > 0 ? String(Math.ceil(this.diskVirtualGB)) : '';
-                    this.expandMode = !this.expandMode;
-                  })
-                Button('移除').focusable(false).fontSize(13).fontColor(Color.Red)
-                  .onClick(() => this.confirmRemove())
-              }
-              if (this.expandMode) {
-                Row({ space: 8 }) {
-                  Text('新大小(GB)').fontSize(13).fontColor('#ff666666')
-                  TextInput({ text: this.newGBText })
-                    .type(InputType.Number)
-                    .layoutWeight(1)
-                    .onChange((v: string) => this.newGBText = v)
-                  Button('确定').focusable(false).fontSize(13)
-                    .onClick(() => this.doExpand())
-                  Button('取消').focusable(false).fontSize(13).fontColor('#ff666666')
-                    .onClick(() => this.expandMode = false)
-                }
-              }
-            } else {
-              Text('未配置系统盘，可到配置页添加').fontSize(13).fontColor('#ff999999')
-            }
-          }.alignItems(HorizontalAlign.Start).padding(12)
-        }
-
-        ListItem() {
-          Column({ space: 8 }) {
-            Row() {
-              Text('快照 / 时光机').fontSize(16).fontWeight(FontWeight.Medium)
-              Blank()
-              Text(this.snapStatus()).fontSize(12).fontColor(
-                this.canSnapshot() ? '#ff2e7d32' : '#ff999999')
-            }
-            Row() {
-              Text('临时会话（启动即回滚）').fontSize(14).layoutWeight(1)
-              Toggle({ type: ToggleType.Switch, isOn: this.tempSession })
-                .onChange((v: boolean) => this.doSetTemp(v))
-            }
-            Text('以临时会话启动：开机前打一个起点快照，关机自动回滚并丢弃本次改动（需 qcow2 系统盘）')
-              .fontSize(11).fontColor('#ff999999')
-            if (this.hasQcow()) {
-              if (this.canSnapshot()) {
-                Row({ space: 8 }) {
-                  Button('新建快照').focusable(false).fontSize(13)
-                    .onClick(() => this.snapCreateMode = !this.snapCreateMode)
-                  Button('刷新').focusable(false).fontSize(13).fontColor('#ff666666')
-                    .onClick(() => this.refreshSnapshot())
-                }
-                if (this.snapCreateMode) {
-                  Row({ space: 8 }) {
-                    TextInput({ text: this.snapNameText, placeholder: '快照名' })
-                      .layoutWeight(1)
-                      .fontSize(13)
-                      .onChange((v: string) => this.snapNameText = v)
-                    Button('创建').focusable(false).fontSize(13)
-                      .onClick(() => this.doSnapshotCreate())
-                    Button('取消').focusable(false).fontSize(13).fontColor('#ff666666')
-                      .onClick(() => this.snapCreateMode = false)
-                  }
-                }
-                if (this.snapshots.length === 0) {
-                  Text('暂无快照').fontSize(12).fontColor('#ff999999')
-                } else {
-                  ForEach(this.snapshots, (s: VmSnapshotEntry) => {
-                    Row({ space: 8 }) {
-                      Column({ space: 2 }) {
-                        Text(s.name).fontSize(14)
-                        Text(this.dateStr(s.dateSec)).fontSize(11).fontColor('#ff999999')
-                      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-                      Button('恢复').focusable(false).fontSize(12)
-                        .onClick(() => this.doSnapshotApply(s))
-                      Button('删除').focusable(false).fontSize(12).fontColor(Color.Red)
-                        .onClick(() => this.doSnapshotDelete(s))
-                    }.padding({ top: 4, bottom: 4 })
-                  }, (s: VmSnapshotEntry) => s.id + ':' + s.name)
-                }
-              } else {
-                Text('停机后可创建快照').fontSize(12).fontColor('#ff999999')
-              }
-            }
-          }.alignItems(HorizontalAlign.Start).padding(12)
-        }
+        .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
+        .backgroundColor(cText).borderRadius(rElem)
+        .position({ right: sp4, bottom: sp4 })
       }
-      .layoutWeight(1)
-      .divider({ strokeWidth: 1, color: '#11000000' })
-      .backgroundColor(Color.White)
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#fff2f3f5')
-  }
-
-  private baseName(path: string): string {
-    const i = path.lastIndexOf('/');
-    return i >= 0 ? path.substring(i + 1) : path;
   }
 }
