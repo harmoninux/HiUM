@@ -9,7 +9,7 @@ import { VmManage } from './VmManage';
 import { StorageOverview } from './StorageOverview';
 import { VmWizard, WizardParam } from './VmWizard';
 import { VmProfile } from '../lib/vmprofile';
-import { tBody, cSub, cCard, rCard } from '../lib/uiTokens';
+import { tBody, cSub, cCard, cBorder, rCard, bw } from '../lib/uiTokens';
 
 @Entry
 @Component
@@ -58,7 +58,9 @@ struct Index {
     Column() {
       Column() { this.wizardCover() }
         .width('88%').constraintSize({ maxWidth: 640 })
-        .backgroundColor(cCard).borderRadius(rCard)
+        .backgroundColor(cCard)
+        .border({ width: bw, color: cBorder })
+        .borderRadius(rCard)
     }
     .width('100%').height('100%')
     .justifyContent(FlexAlign.Center)
@@ -72,6 +74,6 @@ struct Index {
     .navBarWidth(300)
     .navDestination(this.pageMap)
     .hideTitleBar(true)
-    .bindContentCover($$this.showWizard, this.coverBuilder)
+    .bindContentCover($$this.showWizard, this.coverBuilder, { enableSafeArea: true })
   }
 }
