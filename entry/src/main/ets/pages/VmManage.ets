@@ -16,7 +16,7 @@ import { WizardParam } from './VmWizard';
 import {
   cPrimary, cDanger, cRunning, cText, cSub, cWeak,
   cCard, cBlock, cChip,
-  tPage, tCard, tLabel, tBody, tSub,
+  tCard, tLabel, tBody, tSub,
   sp1, sp2, sp3, sp4, sp5, rElem, rBadge,
 } from '../lib/uiTokens';
 
@@ -48,6 +48,7 @@ export struct VmManage {
   @State snapNameText: string = '';
   @State snapCreateMode: boolean = false;
   @State tempSession: boolean = false;
+  @State netEnabled: boolean = false;
   @State snack: string = '';
 
   aboutToAppear(): void {
@@ -60,6 +61,7 @@ export struct VmManage {
     this.running = vmIsRunning(p.id);
     this.diskPath = p.media.diskPath;
     this.tempSession = p.temporarySession;
+    this.netEnabled = p.net.enabled;
     this.refreshDisk();
     this.refreshSnapshot();
   }
@@ -500,8 +502,9 @@ export struct VmManage {
           Text(`端口转发 ${(this.profile && this.profile.net.portForwards.length > 0) ? this.profile.net.portForwards : '无'} · 9p 共享${(this.profile && this.profile.net.sharedFolder) ? '开' : '关'}`)
             .fontSize(tSub).fontColor(cSub)
         }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.profile ? this.profile.net.enabled : false })
+        Toggle({ type: ToggleType.Switch, isOn: this.netEnabled })
           .onChange((v: boolean) => {
+            this.netEnabled = v;
             if (this.profile) {
               this.profile.net.enabled = v;
               this.saveTiny();
