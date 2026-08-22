@@ -35,11 +35,11 @@ export const OS_TEMPLATES: OsTemplate[] = [
     arch: 'x86_64',
     desc: '内置 ISO 引导 + 8G 系统盘，开箱即起',
     imageNeeded: false,
-    imageLabel: '内置 alpine-virt.iso',
+    imageLabel: '内置 alpine-virt (x86_64)',
     diskMB: 8192,
     board: 'pc', firmware: 'seabios', vga: 'std',
     memoryMB: 1024, cpus: 2, mttcg: true, tbSize: 1024,
-    bootFromCdrom: true, isoName: 'alpine-virt.iso', kernelBoot: false,
+    bootFromCdrom: true, isoName: 'alpine-virt-x86_64.iso', kernelBoot: false,
   },
   {
     id: 'android-x86',

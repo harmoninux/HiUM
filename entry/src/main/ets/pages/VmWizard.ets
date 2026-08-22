@@ -4,10 +4,12 @@
 import { promptAction } from '@kit.ArkUI';
 import { pathExists } from '../lib/fsutil';
 import napiModule from 'libentry.so';
+import { common } from '@kit.AbilityKit';
 import {
   VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType,
-  blankProfile, newProfileId, fitBoard, buildArgs, sharedDir, SCHEMA_VERSION,
+  blankProfile, newProfileId, fitBoard, buildArgs, sharedDir, SCHEMA_VERSION, builtinIsoFor,
 } from '../lib/vmprofile';
+import { ensureBuiltinIso } from '../lib/isoDl';
 import { OsTemplate, OS_TEMPLATES } from '../lib/osTemplates';
 import {
   cPrimary, cSub, cWeak, cText, cCard, cBorder, cRunning, cWarn, cBg, cBlock,
@@ -64,6 +66,8 @@ export struct VmWizard {
   @State portForwards: string = '';
   @State sharedFolder: boolean = false;
   @State name: string = '';
+  @State ensureIsoLoading: boolean = false; /* 内置 Alpine ISO 下载中 */
+  @State isoPct: number = 0;
 
   aboutToAppear(): void {
     const pm = this.param;
@@ -132,6 +136,29 @@ export struct VmWizard {
     this.cdromPath = t.isoName.length > 0 ? `${this.vmDataDir}/${t.isoName}` : '';
     this.bootFromCdrom = t.bootFromCdrom;
     this.kernelBoot = t.kernelBoot;
+  }
+
+  /* 「内置 Alpine」按钮：按当前架构确保内置 iso 就绪（缺失则按需下载），完成后挂到光驱 */
+  private pickBuiltinIso(): void {
+    const name = builtinIsoFor(this.arch);
+    if (name.length === 0) {
+      promptAction.showToast({ message: '该架构无内置 ISO' });
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    this.ensureIsoLoading = true;
+    this.isoPct = 0;
+    ensureBuiltinIso(ctx, this.vmDataDir, this.arch, (pct: number) => {
+      this.isoPct = pct;
+    }).then((ok: boolean) => {
+      this.ensureIsoLoading = false;
+      if (ok) {
+        this.cdromPath = this.vmDataDir + '/' + name;
+        this.bootFromCdrom = true;
+      } else {
+        promptAction.showToast({ message: '内置 ISO 下载失败' });
+      }
+    });
   }
 
   private isEdit(): boolean {
@@ -453,14 +480,11 @@ export struct VmWizard {
             .layoutWeight(1).fontSize(tBody)
             .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
             .onChange((v: string) => this.cdromPath = v)
-          Button('内置 Alpine').focusable(false).fontSize(tBody)
+          Button(this.ensureIsoLoading ? `下载 ${this.isoPct}%` : `内置 Alpine (${this.archLabel(this.arch)})`)
+            .focusable(false).fontSize(tBody)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-            .onClick(() => {
-              const iso = this.vmDataDir + '/alpine-virt.iso';
-              if (pathExists(iso)) { this.cdromPath = iso; } else {
-                promptAction.showToast({ message: '内置 ISO 不存在（需 make deps）' });
-              }
-            })
+            .enabled(!this.ensureIsoLoading)
+            .onClick(() => this.pickBuiltinIso())
         }
       }
       Row() {

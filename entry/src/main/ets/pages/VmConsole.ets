@@ -9,7 +9,9 @@ import { promptAction } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
-import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir } from '../lib/vmprofile';
+import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir, builtinIsoFor } from '../lib/vmprofile';
+import { ensureBuiltinIso } from '../lib/isoDl';
+import { pathExists } from '../lib/fsutil';
 import { prepareStart } from '../lib/tempSession';
 import { takePendingVmId } from '../lib/vmwindows';
 import { VirtualKeyboard } from '../lib/VirtualKeyboard';
@@ -188,6 +190,30 @@ struct VmConsole {
     }
     if (this.xcController.surfaceId === 0n) {
       this.startPending = true;
+      return;
+    }
+    /* 若引导光盘是内置 Alpine ISO 且未下载：先按需下载，成功后继续启动 */
+    const cd = this.profile.media.cdromPath;
+    const builtin = this.vmDataDir + '/' + builtinIsoFor(this.profile.machine.arch);
+    if (cd.length > 0 && cd === builtin && !pathExists(cd)) {
+      this.status = '下载系统盘...';
+      const ctx = getContext(this) as common.UIAbilityContext;
+      ensureBuiltinIso(ctx, this.vmDataDir, this.profile.machine.arch, (pct: number) => {
+        this.status = `下载系统盘 ${pct}%`;
+      }).then((ok: boolean) => {
+        if (!ok) {
+          this.status = '系统盘下载失败';
+          return;
+        }
+        this.doStart();
+      });
+      return;
+    }
+    this.doStart();
+  }
+
+  private doStart(): void {
+    if (!this.profile) {
       return;
     }
     let share = '';

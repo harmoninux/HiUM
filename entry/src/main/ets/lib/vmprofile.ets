@@ -34,6 +34,21 @@ export function fitBoard(arch: VmArch, board: string): VmBoard {
   return allowed.indexOf(board) >= 0 ? board as VmBoard : defaultBoard(arch);
 }
 
+/* 内置 Alpine ISO 的「文件名 ↔ 架构」映射（vmDataDir 下的文件名，按需下载）。
+ * 官方 alpine-virt 精简版仅 4 架构；loongarch64/riscv64 只有 alpine-standard。
+ * 文件名用镜像目录名（armv7/x86 而非 arm/i386），见 isoDl.ets 的下载 URL。 */
+export function builtinIsoFor(arch: VmArch): string {
+  switch (arch) {
+    case 'x86_64': return 'alpine-virt-x86_64.iso';
+    case 'i386': return 'alpine-virt-x86.iso';
+    case 'aarch64': return 'alpine-virt-aarch64.iso';
+    case 'arm': return 'alpine-virt-armv7.iso';
+    case 'loongarch64': return 'alpine-standard-loongarch64.iso';
+    case 'riscv64': return 'alpine-standard-riscv64.iso';
+    default: return '';
+  }
+}
+
 /* 运行时层：可被 JIT 性能预设覆盖（memory/cpus/accel） */
 export interface VmRuntime {
   memoryMB: number;
@@ -84,15 +99,6 @@ export function blankProfile(id: string): VmProfile {
     temporarySession: false,
     extraArgs: '',
   };
-}
-
-/* 内置 Alpine ISO 的快捷预设 */
-export function alpineProfile(id: string, vmDataDir: string): VmProfile {
-  const p = blankProfile(id);
-  p.name = 'Alpine Linux (x86_64)';
-  p.media.cdromPath = vmDataDir + '/alpine-virt.iso';
-  p.media.bootFromCdrom = true;
-  return p;
 }
 
 /* ========================= 迁移框架（所有读取的唯一入口） ========================= */

@@ -75,7 +75,6 @@ function unpackFirmware(ctx: common.UIAbilityContext): boolean {
     ok = tryWriteRaw(resMgr, 'vm/firmware/' + name, vmDir + '/' + name) && ok;
   }
   ok = tryWriteRaw(resMgr, 'vm/keymaps/en-us', vmDir + '/keymaps/en-us') && ok;
-  ok = tryWriteRaw(resMgr, 'vm/alpine-virt.iso', vmDir + '/alpine-virt.iso') && ok;
   hilog.info(DOMAIN, TAG, 'firmware unpacked to %{public}s, ok=%{public}s', vmDir, String(ok));
   return ok;
 }

@@ -19,15 +19,6 @@ PKGS=zstd \
     libqemu
 STAMP=$(patsubst %,%/.stamp,$(PKGS))
 
-# 内置 Alpine virt ISO（Linux 模板的启动光盘）：官方镜像站，按 OHOS_ARCH 选架构。
-# 下载到 output/（与其他 deps 产物一致），copy 阶段一并拷进 rawfile/vm/。
-ALPINE_VER  := 3.21.3
-# 镜像站目录用 major.minor（/alpine/v3.21/），不是 /3.21.3/；注释放单独行避免空格进变量值
-ALPINE_REL  := 3.21
-ALPINE_ARCH := $(OHOS_ARCH)
-ALPINE_ISO  := output/alpine-virt-$(ALPINE_VER)-$(ALPINE_ARCH).iso
-ALPINE_URL  := https://dl-cdn.alpinelinux.org/alpine/v$(ALPINE_REL)/releases/$(ALPINE_ARCH)/alpine-virt-$(ALPINE_VER)-$(ALPINE_ARCH).iso
-
 # Default target
 all: copy
 
@@ -45,7 +36,7 @@ clean_libqemu:
 
 copy: output/.stamp
 
-output/.stamp: $(STAMP) $(ALPINE_ISO) Makefile
+output/.stamp: $(STAMP) Makefile
 	cp buildroot/lib/libpcre2-8.so.0 output/
 	cp buildroot/lib/libz.so.1 output/libz.so
 	mkdir -p ../entry/libs/$(OHOS_ABI)
@@ -58,21 +49,11 @@ output/.stamp: $(STAMP) $(ALPINE_ISO) Makefile
 	for fw in bios-256k.bin bios.bin kvmvapic.bin linuxboot.bin linuxboot_dma.bin \
 		vgabios-stdvga.bin vgabios-virtio.bin vgabios-ramfb.bin \
 		efi-virtio.rom edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd; do cp output/$$fw ../entry/src/main/resources/rawfile/vm/firmware/ 2>/dev/null || true; done
-	# Alpine ISO 拷进 rawfile/vm/（bootstrap 运行时解包给内置模板）
-	cp $(ALPINE_ISO) ../entry/src/main/resources/rawfile/vm/alpine-virt.iso
 	touch output/.stamp
 
 %/.stamp: %/Makefile
 	make -C $(patsubst %/.stamp,%,$@) OHOS_ARCH=$(OHOS_ARCH) OHOS_ABI=$(OHOS_ABI)
 	touch $@
-
-# Alpine 虚机 ISO：单独下载（不触发 qemu 重编译），copy 阶段自动消费。
-.PHONY: alpine
-alpine: $(ALPINE_ISO)
-
-$(ALPINE_ISO):
-	@mkdir -p output
-	cd output && wget --retry-connrefused --read-timeout=20 --timeout=15 -O $(notdir $(ALPINE_ISO)).part $(ALPINE_URL) && mv $(notdir $(ALPINE_ISO)).part $(notdir $(ALPINE_ISO))
 
 clean:
 	rm -f $(STAMP)
