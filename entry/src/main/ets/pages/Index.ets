@@ -52,28 +52,26 @@ struct Index {
     VmWizard({ param: this.wizardParam, onClose: () => this.closeWizard() })
   }
 
-  build() {
-    Stack() {
-      Navigation(this.navStack) {
-        VmList()
-      }
-      .mode(NavigationMode.Auto)
-      .navBarWidth(300)
-      .navDestination(this.pageMap)
-      .hideTitleBar(true)
-
-      if (this.showWizard) {
-        Row() {
-          Column() { this.wizardCover() }
-            .width(720).height('100%')
-            .constraintSize({ maxHeight: 680 })
-            .backgroundColor(cCard).borderRadius(rCard)
-        }
-        .width('100%').height('100%').backgroundColor('#52000000')
-        .justifyContent(FlexAlign.Center)
-        .hitTestBehavior(HitTestMode.Block) /* 遮罩+卡片整体消费命中，阻断下层侧栏/列表点击 */
-      }
+  @Builder
+  coverBuilder() {
+    /* bindContentCover 自带半透明遮罩 / 点外部关闭 / 返回键 / 转场；这里只放居中卡片 */
+    Column() {
+      Column() { this.wizardCover() }
+        .width('88%').constraintSize({ maxWidth: 640 })
+        .backgroundColor(cCard).borderRadius(rCard)
     }
     .width('100%').height('100%')
+    .justifyContent(FlexAlign.Center)
+  }
+
+  build() {
+    Navigation(this.navStack) {
+      VmList()
+    }
+    .mode(NavigationMode.Auto)
+    .navBarWidth(300)
+    .navDestination(this.pageMap)
+    .hideTitleBar(true)
+    .bindContentCover($$this.showWizard, this.coverBuilder)
   }
 }

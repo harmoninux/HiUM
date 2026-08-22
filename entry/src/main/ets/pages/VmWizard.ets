@@ -247,19 +247,18 @@ export struct VmWizard {
         Button('×').backgroundColor(Color.Transparent).fontColor(cWeak)
           .onClick(() => { if (this.onClose) this.onClose(); })
       }.width('100%').padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
-      Row() {
+      Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
         ForEach(OS_TEMPLATES, (t: OsTemplate) => {
           Column() {
-            Text(t.icon ?? '💿').fontSize(20)
+            Text(t.icon ?? '💿').fontSize(26)
             Text(t.name).fontSize(tCard).fontWeight(FontWeight.Medium).margin({ top: sp1 })
             Text(t.arch).fontSize(10).fontColor(cSub).fontFamily('monospace')
             Text(t.imageNeeded ? '需自备' : '内置镜像').fontSize(10)
               .fontColor(t.imageNeeded ? cWarn : cRunning)
           }
-          .layoutWeight(1).padding(sp3)
+          .width('48%').margin({ bottom: sp2 }).padding(sp3)
           .backgroundColor(cCard).borderRadius(rCard)
           .border({ width: bw, color: cBorder })
-          .margin({ right: sp2 })
           .onClick(() => { this.loadTemplate(t); this.step = 0; this.showTiles = false; })
         }, (t: OsTemplate) => t.id)
       }.width('100%')
