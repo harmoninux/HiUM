@@ -32,13 +32,14 @@ export struct VmManage {
   @Consume('navStack') navStack: NavPathStack;
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmDataDir') vmDataDir: string = '';
-  @StorageLink('vmListVersion') vmListVersion: number = 0;
+  @StorageLink('vmListVersion') @Watch('onVmListChanged') vmListVersion: number = 0;
 
   @State name: string = '';
   @State arch: string = '';
   @State running: boolean = false;
   @State diskPath: string = '';
   @State cdromPath: string = '';
+  @State bootFromCdrom: boolean = false;
   @State diskFmt: string = '?';
   @State diskVirtualGB: number = 0;
   @State diskActualGB: number = 0;
@@ -49,19 +50,35 @@ export struct VmManage {
   @State isWide: boolean = false; /* 宽屏(Split)下隐藏返回；getWindowSize 判宽 */
 
   aboutToAppear(): void {
-    const p = this.profile;
-    if (!p) {
+    this.refreshProfile();
+  }
+
+  /* 重读 profile 刷新本页状态。编辑页保存会 bump vmListVersion，@Watch 触发这里：
+   * 必须从磁盘 load 最新版（详情页 this.profile 是导航传入的旧引用，编辑页写的是
+   * 它自己构建的对象，读引用拿不到新值），让启动盘徽标、磁盘/光盘/网络等跟着更新。 */
+  private refreshProfile(): void {
+    const nav = this.profile;
+    if (!nav) {
       return;
     }
+    const fresh = new VmStore(this.filesDir).load(nav.id);
+    const p = fresh ?? nav;
+    this.profile = p; /* 让后续 isTempSnapshot/canSnapshot 也用最新对象 */
     this.name = p.name;
     this.arch = p.machine.arch;
     this.running = vmIsRunning(p.id);
     this.diskPath = p.media.diskPath;
     this.cdromPath = p.media.cdromPath;
+    this.bootFromCdrom = p.media.bootFromCdrom;
     this.netEnabled = p.net.enabled;
     this.refreshDisk();
     this.refreshSnapshot();
     this.nowSec = Math.floor(Date.now() / 1000);
+  }
+
+  /* 编辑页/存储页保存后 vmListVersion +1：重新读取 profile */
+  private onVmListChanged(): void {
+    this.refreshProfile();
   }
 
   /* 右下角 snackbar：成功类反馈走这里，错误类保留 toast */
@@ -114,6 +131,32 @@ export struct VmManage {
   /* 光盘概览（未引用 → 未引用） */
   private cdromName(): string {
     return this.cdromPath.length > 0 ? this.baseName(this.cdromPath) : '未引用';
+  }
+
+  /* 当前优先引导设备：-boot d(光驱)/c(硬盘)。仅标「启动」于实际引导的那个介质。
+   * 边界：无系统盘时只能光盘；bootFromCdrom 但无光盘时 qemu 回退硬盘。 */
+  private bootDevice(): 'cdrom' | 'disk' | 'none' {
+    if (this.cdromPath.length > 0 && this.bootFromCdrom) {
+      return 'cdrom';
+    }
+    if (this.diskPath.length > 0) {
+      return 'disk';
+    }
+    if (this.cdromPath.length > 0) {
+      return 'cdrom';
+    }
+    return 'none';
+  }
+
+  /* 「启动」徽标：高亮描边 pill，仅挂在当前启动盘行 */
+  @Builder
+  bootBadge() {
+    Text('启动')
+      .fontSize(10).fontColor(cPrimary)
+      .padding({ left: sp2, right: sp2, top: 1, bottom: 1 })
+      .borderRadius(rBadge)
+      .backgroundColor(cBlock)
+      .border({ width: 1, color: cPrimary })
   }
 
   /* ================= 快照 / 时光机（Phase 1，离线 qcow2 内部快照） ================= */
@@ -314,12 +357,22 @@ export struct VmManage {
     this.secHead('存储')
     Row() {
       Column({ space: sp1 }) {
-        Text(`系统盘 ${this.diskSummary()}`)
-          .fontSize(tSub).fontColor(cSub).maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(`光盘 ${this.cdromName()}`)
-          .fontSize(tSub).fontColor(cSub).maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Row({ space: sp2 }) {
+          Text(`系统盘 ${this.diskSummary()}`)
+            .fontSize(tSub).fontColor(cSub).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.bootDevice() === 'disk') {
+            this.bootBadge()
+          }
+        }.width('100%')
+        Row({ space: sp2 }) {
+          Text(`光盘 ${this.cdromName()}`)
+            .fontSize(tSub).fontColor(cSub).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.bootDevice() === 'cdrom') {
+            this.bootBadge()
+          }
+        }.width('100%')
       }.alignItems(HorizontalAlign.Start).layoutWeight(1)
       Button('存储管理').focusable(false).fontSize(tBody)
         .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
