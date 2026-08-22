@@ -32,6 +32,12 @@ interface QmpNapi {
 }
 const qmpNapi = napiModule as QmpNapi;
 
+/* 磁盘信息（侧栏显示虚拟大小；diskInfo 返回 qemu-img info JSON 串） */
+interface DiskNapi {
+  diskInfo: (path: string) => string;
+}
+const napi = napiModule as DiskNapi;
+
 @Component
 export struct VmList {
   @Consume('navStack') navStack: NavPathStack;
@@ -98,20 +104,24 @@ export struct VmList {
     let list = store.list();
     this.profiles = list;
     this.thumbTick++;
-    /* 磁盘实占用量（stat 元数据，快；不 fork qemu-img） */
+    /* 磁盘虚拟大小（qemu-img info 的 virtual-size，而非文件实占；VM 量少可接受） */
     const usage: Record<string, number> = {};
     for (const p of list) {
-      let bytes = 0;
+      let vsize = 0;
       if (p.media.diskPath.length > 0) {
         try {
           if (fs.accessSync(p.media.diskPath)) {
-            bytes = fs.statSync(p.media.diskPath).size;
+            const s = napi.diskInfo(p.media.diskPath);
+            if (s.length > 0) {
+              const j = JSON.parse(s) as Record<string, number | string>;
+              vsize = typeof j['virtual-size'] === 'number' ? j['virtual-size'] as number : 0;
+            }
           }
         } catch {
-          bytes = 0;
+          vsize = 0;
         }
       }
-      usage[p.id] = bytes;
+      usage[p.id] = vsize;
     }
     this.diskUsage = usage;
     this.pollTick();
@@ -299,30 +309,10 @@ export struct VmList {
   @Builder
   sideRow(p: VmProfile) {
     Row({ space: sp3 }) {
-      if (pathExists(this.store().thumbPath(p.id))) {
-        Image('file://' + this.store().thumbPath(p.id))
-          .width(40)
-          .height(26)
-          .objectFit(ImageFit.Cover)
-          .borderRadius(rElem)
-      } else {
-        Column() {
-          Text(p.machine.arch)
-            .fontSize(tSub)
-            .fontColor(cText)
-        }
-        .height(26)
-        .constraintSize({ minWidth: 40 })
-        .padding({ left: sp2, right: sp2 })
-        .justifyContent(FlexAlign.Center)
-        .backgroundColor(cBlock)
-        .borderRadius(rElem)
-      }
-
       Column({ space: sp1 }) {
         Row({ space: sp1 }) {
           Text(p.name)
-            .fontSize(tCard)
+            .fontSize(13)
             .fontWeight(FontWeight.Medium)
             .fontColor(cText)
             .maxLines(1)
@@ -348,8 +338,7 @@ export struct VmList {
         .width('100%')
         .alignItems(VerticalAlign.Center)
 
-        Text(`${p.machine.arch} · ${p.runtime.memoryMB}MB · ${p.runtime.cpus}核` +
-          (p.media.cdromPath ? ' · 光盘' : '') + this.diskUsed(p))
+        Text(`${p.machine.arch} · ${p.runtime.memoryMB}MB · ${p.runtime.cpus}核` + this.diskUsed(p))
           .fontSize(tSub)
           .fontColor(cSub)
           .maxLines(1)
@@ -358,13 +347,6 @@ export struct VmList {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
-      Button(this.isRunning(p) ? '进入' : '启动')
-        .focusable(false)
-        .fontSize(tBody)
-        .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
-        .backgroundColor(this.isRunning(p) ? cPrimary : Color.Transparent)
-        .fontColor(this.isRunning(p) ? Color.White : cPrimary)
-        .onClick(() => this.openConsole(p))
     }
     .width('100%')
     .padding(sp3)

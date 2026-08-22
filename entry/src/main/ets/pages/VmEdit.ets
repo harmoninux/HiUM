@@ -4,7 +4,7 @@ import { promptAction } from '@kit.ArkUI';
 import { pathExists } from '../lib/fsutil';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore, VmArch, VgaType, SCHEMA_VERSION, fitBoard } from '../lib/vmprofile';
-import { cPrimary, cRunning, cWarn, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, rBtn, btnSh } from '../lib/uiTokens';
+import { cPrimary, cRunning, cWarn, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -186,6 +186,8 @@ export struct VmEdit {
             Text('名称').fontSize(tLabel).width(72)
             TextInput({ text: this.name })
               .layoutWeight(1)
+              .fontSize(tBody)
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
               .onChange((v: string) => this.name = v)
           }.padding(12)
         }
@@ -198,6 +200,8 @@ export struct VmEdit {
             }))
               .value(this.arch)
               .selected(ARCH_OPTIONS.indexOf(this.arch))
+              .font({ size: tBody })
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg)
               .onSelect((index: number) => {
                 this.arch = ARCH_OPTIONS[index];
               })
@@ -291,6 +295,8 @@ export struct VmEdit {
               Row({ space: 8 }) {
                 TextInput({ placeholder: 'ISO 完整路径', text: this.cdromPath })
                   .layoutWeight(1)
+                  .fontSize(tBody)
+                  .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                   .onChange((v: string) => this.cdromPath = v)
                 Button('内置 Alpine').focusable(false).fontSize(tBody)
                   .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
@@ -323,6 +329,8 @@ export struct VmEdit {
             }))
               .value(this.vga)
               .selected(VGA_OPTIONS.indexOf(this.vga))
+              .font({ size: tBody })
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg)
               .onSelect((index: number) => {
                 this.vga = VGA_OPTIONS[index];
               })
@@ -342,6 +350,8 @@ export struct VmEdit {
             Column({ space: 4 }) {
               Text('端口转发（宿主端口:客机端口，逗号分隔）').fontSize(tSub).fontColor(cSub)
               TextInput({ placeholder: '如 2222:22,8080:80', text: this.portForwards })
+                .fontSize(tBody)
+                .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.portForwards = v)
             }.alignItems(HorizontalAlign.Start).padding(12)
           }
@@ -381,6 +391,8 @@ export struct VmEdit {
               Text('tb-size').fontSize(tLabel).width(96)
               TextInput({ text: this.tbSizeText })
                 .layoutWeight(1)
+                .fontSize(tBody)
+                .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.tbSizeText = v)
             }.padding(12)
           }
@@ -388,6 +400,8 @@ export struct VmEdit {
             Column({ space: 4 }) {
               Text('自定义 qemu 参数（追加到命令行末尾）').fontSize(tSub).fontColor(cSub)
               TextArea({ placeholder: '如 -device usb-kbd', text: this.extraArgs })
+                .fontSize(tBody)
+                .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.extraArgs = v)
             }.alignItems(HorizontalAlign.Start).padding(12)
           }

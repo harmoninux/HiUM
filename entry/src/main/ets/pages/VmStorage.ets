@@ -12,6 +12,7 @@ import {
   cCard, cBlock, cChip, cBorder,
   tCard, tLabel, tBody, tSub,
   sp1, sp2, sp3, sp4, sp5, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
+  inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
 interface DiskNapi {
@@ -225,7 +226,8 @@ export struct VmStorage {
         if (this.expandMode) {
           Row({ space: sp2 }) {
             Text('新大小(GB)').fontSize(tSub).fontColor(cSub)
-            TextInput({ text: this.newGBText }).type(InputType.Number).layoutWeight(1).fontSize(tSub)
+            TextInput({ text: this.newGBText }).type(InputType.Number).layoutWeight(1).fontSize(tBody)
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
               .onChange((v: string) => this.newGBText = v)
             Button('确定').focusable(false).fontSize(tSub)
               .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })

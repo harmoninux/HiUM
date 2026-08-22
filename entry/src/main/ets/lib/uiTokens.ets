@@ -18,28 +18,34 @@ export const cSel      = '#ffdbe9ff'; /* 选中描边/浅底 */
 export const cSelBg    = '#ffeef4ff'; /* 选中浅底 */
 
 /* ---- 字号 (size / weight) ---- */
-export const tPage  = 16; /* 页面/窗口标题 700 */
-export const tCard  = 13; /* 卡片/行标题 600 */
-export const tLabel = 13; /* 设置行标签 400 */
-export const tBody  = 12; /* 正文/按钮 400 */
-export const tSub   = 11; /* 次级说明 400 */
-export const tMono  = 10; /* mono 小字：状态/指纹/日期/步骤圆点 */
+export const tPage  = 18; /* 页面/窗口标题 700 */
+export const tCard  = 14; /* 卡片/行标题 600 */
+export const tLabel = 14; /* 设置行标签 400 */
+export const tBody  = 14; /* 正文/按钮 400 */
+export const tSub   = 12; /* 次级说明 400 */
+export const tMono  = 11; /* mono 小字：状态/指纹/日期/步骤圆点 */
 
 /* ---- 间距 ---- */
-export const sp1 = 4;
-export const sp2 = 8;
-export const sp3 = 12;
-export const sp4 = 16;
-export const sp5 = 24;
+export const sp1 = 6;
+export const sp2 = 10;
+export const sp3 = 16;
+export const sp4 = 22;
+export const sp5 = 32;
 
 /* ---- 圆角 / 边框 ---- */
-export const rCard = 8;   /* 卡/按钮 */
-export const rElem = 6;   /* 小元素 */
-export const rBadge = 3;  /* 徽标 */
+export const rCard = 10;  /* 卡/按钮 */
+export const rElem = 8;   /* 小元素 */
+export const rBadge = 4;  /* 徽标 */
 export const bw = 1;
 
 /* ---- 按钮尺寸（对齐设计稿：小圆角矩形，而非系统默认胶囊） ---- */
-export const rBtn = 6;    /* 按钮外圆角（设计稿 radius:6） */
-export const btnH = 32;   /* 主/标准按钮高 */
-export const btnSh = 26;  /* 小/文字式动作按钮高 */
-export const btnPadX = 12;/* 按钮水平内边距（紧凑） */
+export const rBtn = 8;    /* 按钮外圆角 */
+export const btnH = 40;   /* 主/标准按钮高 */
+export const btnSh = 32;  /* 小/文字式动作按钮高 */
+export const btnPadX = 16;/* 按钮水平内边距 */
+
+/* ---- 文本输入框（统一外观，不再依赖系统默认高度/圆角/底色） ---- */
+export const inpH = 44;      /* 标准输入框高 */
+export const inpBg = cBlock; /* 输入框底，浅灰块 */
+export const inpRadius = 8;  /* 输入框圆角 */
+export const inpPadX = 16;   /* 输入框左右内边距 */

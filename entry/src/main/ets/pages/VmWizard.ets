@@ -13,6 +13,7 @@ import {
   cPrimary, cSub, cWeak, cText, cCard, cBorder, cRunning, cWarn, cBg, cBlock,
   tPage, tCard, tBody, tSub, tLabel, tMono,
   sp1, sp2, sp3, sp4, rCard, bw, rBtn, btnH, btnSh, btnPadX,
+  inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
 interface DiskNapi {
@@ -338,7 +339,8 @@ export struct VmWizard {
 
       Text('CPU 机型（留空 = 自动；aarch64 默认 max，x86 用板卡默认）').fontSize(tSub).fontColor(cWeak)
       TextInput({ text: this.cpuModel, placeholder: '如 cortex-a57 / max / host' })
-        .fontSize(tLabel)
+        .fontSize(tBody)
+        .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
         .onChange((v: string) => this.cpuModel = v)
 
       if (this.firmware === 'ovmf') {
@@ -368,7 +370,8 @@ export struct VmWizard {
         Text('tb-size').fontSize(tLabel).width(90)
         TextInput({ text: this.tbSizeText })
           .layoutWeight(1)
-          .fontSize(tLabel)
+          .fontSize(tBody)
+          .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
           .onChange((v: string) => this.tbSizeText = v)
       }
     }
@@ -417,7 +420,8 @@ export struct VmWizard {
       if (this.cdromPath.length === 0 && !this.kernelBoot) {
         Row({ space: 8 }) {
           TextInput({ placeholder: 'ISO 完整路径', text: this.cdromPath })
-            .layoutWeight(1).fontSize(tLabel)
+            .layoutWeight(1).fontSize(tBody)
+            .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
             .onChange((v: string) => this.cdromPath = v)
           Button('内置 Alpine').focusable(false).fontSize(tBody)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
@@ -444,11 +448,17 @@ export struct VmWizard {
       }
       if (this.kernelBoot) {
         TextInput({ placeholder: 'kernel 路径，如 /data/.../kernel_aarch64', text: this.kernelPath })
-          .fontSize(tLabel).onChange((v: string) => this.kernelPath = v)
+          .fontSize(tBody)
+          .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+          .onChange((v: string) => this.kernelPath = v)
         TextInput({ placeholder: 'initrd 路径（可空）', text: this.initrdPath })
-          .fontSize(tLabel).onChange((v: string) => this.initrdPath = v)
+          .fontSize(tBody)
+          .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+          .onChange((v: string) => this.initrdPath = v)
         TextInput({ placeholder: '内核参数（可为空），如 console=ttyS0', text: this.kernelArgs })
-          .fontSize(tLabel).onChange((v: string) => this.kernelArgs = v)
+          .fontSize(tBody)
+          .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+          .onChange((v: string) => this.kernelArgs = v)
       }
     }
     .alignItems(HorizontalAlign.Start)
@@ -466,7 +476,9 @@ export struct VmWizard {
       if (this.netEnabled) {
         Text('端口转发（宿主端口:客机端口，逗号分隔）').fontSize(tSub).fontColor(cSub)
         TextInput({ placeholder: '如 2222:22,8080:80', text: this.portForwards })
-          .fontSize(tLabel).onChange((v: string) => this.portForwards = v)
+          .fontSize(tBody)
+          .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+          .onChange((v: string) => this.portForwards = v)
         Row() {
           Text('9p 共享目录').fontSize(tLabel).layoutWeight(1)
           Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
@@ -487,6 +499,8 @@ export struct VmWizard {
       Text('名称').fontSize(tLabel).width(72)
       TextInput({ text: this.name })
         .layoutWeight(1)
+        .fontSize(tBody)
+        .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
         .onChange((v: string) => this.name = v)
       Row() {
         Text('qemu 参数预览').fontSize(tSub).fontColor(cSub)

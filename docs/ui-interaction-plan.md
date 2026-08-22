@@ -381,7 +381,7 @@ git commit -m "UI(2/6) 主窗口 Navigation Auto + 侧栏列表/搜索/汇总/�
 
   @Builder
   secSnapshot() {
-    this.secHead('快照 · 时光机')
+    this.secHead('快照')
     Column() {
       Row() {
         Column({ space: 1 }) {

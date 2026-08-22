@@ -16,6 +16,7 @@ import {
   cCard, cBlock, cChip, cBorder,
   tCard, tLabel, tBody, tSub,
   sp1, sp2, sp3, sp4, sp5, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
+  inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
 interface DiskNapi {
@@ -42,7 +43,6 @@ export struct VmManage {
   @State snapshots: VmSnapshotEntry[] = [];
   @State snapNameText: string = '';
   @State snapCreateMode: boolean = false;
-  @State tempSession: boolean = false;
   @State netEnabled: boolean = false;
   @State snack: string = '';
   @State nowSec: number = 0; /* 进入页面时的时间基准，供「当前」快照节点稳定展示 */
@@ -57,7 +57,6 @@ export struct VmManage {
     this.arch = p.machine.arch;
     this.running = vmIsRunning(p.id);
     this.diskPath = p.media.diskPath;
-    this.tempSession = p.temporarySession;
     this.netEnabled = p.net.enabled;
     this.refreshDisk();
     this.refreshSnapshot();
@@ -209,19 +208,6 @@ export struct VmManage {
     });
   }
 
-  /* 切换「临时会话启动模式」：开机前打会话起点内部快照，停机自动回滚丢弃本次改动 */
-  private doSetTemp(v: boolean): void {
-    const p = this.profile;
-    if (!p) {
-      return;
-    }
-    p.temporarySession = v;
-    new VmStore(this.filesDir).save(p);
-    this.tempSession = v;
-    this.vmListVersion++;
-    promptAction.showToast({ message: v ? '已开启临时会话（启动后改动将被丢弃）' : '已关闭临时会话' });
-  }
-
   private dateStr(sec: number): string {
     if (sec <= 0) {
       return '';
@@ -349,17 +335,8 @@ export struct VmManage {
 
   @Builder
   secSnapshot() {
-    this.secHead('快照 · 时光机')
+    this.secHead('快照')
     Column() {
-      Row() {
-        Column({ space: 1 }) {
-          Text('临时会话（启动即回滚）').fontSize(tLabel)
-          Text('开机打起点快照，关机自动丢弃本次改动').fontSize(tSub).fontColor(cSub)
-        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.tempSession })
-          .onChange((v: boolean) => this.doSetTemp(v))
-      }.width('100%').padding({ top: sp1, bottom: sp2 })
-
       if (this.canSnapshot()) {
         Row({ space: sp2 }) {
           Button('新建快照').focusable(false).fontSize(tBody)
@@ -374,6 +351,7 @@ export struct VmManage {
         if (this.snapCreateMode) {
           Row({ space: sp2 }) {
             TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tBody)
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
               .onChange((v: string) => this.snapNameText = v)
             Button('创建').focusable(false).fontSize(tSub)
               .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
@@ -416,9 +394,6 @@ export struct VmManage {
             Text(this.dateStr(this.nowSec)).fontSize(10).fontColor(cWeak)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
         }.width('100%').padding({ top: sp1, bottom: sp1 })
-        if (this.snapshots.length === 0 && this.canSnapshot()) {
-          Text('暂无快照').fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp1 })
-        }
       }.width('100%').padding({ left: sp2 })
     }.alignItems(HorizontalAlign.Start)
   }
