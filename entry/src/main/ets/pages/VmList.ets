@@ -1,6 +1,8 @@
-// 虚拟机列表页（首页）：卡片 + 新建/编辑/删除/启动。
+// 虚拟机列表页（首页，Navigation 侧栏）：搜索 + 运行汇总 + 紧凑行 + 选中态 + 空态。
+// 宽屏下作为 Index 的 sideBar 常驻左侧，点行 push 'manage' 在右侧渲染详情；
 // 多实例：每台 VM 独立子进程，可同时运行多台（受内存约束）；
 // console 为每台 VM 一个 VmConsoleAbility 独立窗口（specified 模式按 vmId 归并）。
+// 工坊（wizard）仍走 NavDestination，Task4 再迁成模态，此处原样保留。
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
@@ -16,6 +18,12 @@ import {
   initVmRegistry, refreshRunningMap, vmIsRunning,
   subscribeVmLifecycle, unsubscribeVmLifecycle, VmLifecycleEvent,
 } from '../lib/vmregistry';
+import {
+  cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
+  cBg, cCard, cBorder, cBlock, cChip, cSel, cSelBg,
+  tPage, tCard, tLabel, tBody, tSub,
+  sp1, sp2, sp3, sp4, sp5, rCard, rElem, rBadge, bw,
+} from '../lib/uiTokens';
 
 /* 只用于「运行中 VM 安全关机/断电」的一次性 QMP 调用（连接是 per-vm 单例，无抢占） */
 interface QmpNapi {
@@ -36,6 +44,8 @@ export struct VmList {
   @State runningIds: Record<string, boolean> = {};
   @State diskUsage: Record<string, number> = {}; /* vmId → 磁盘实占字节数 */
   @State showPicker: boolean = false; /* 「+ 新建」模板选择面板 */
+  @State filter: string = ''; /* 搜索关键词（名称/架构） */
+  @State selectedId: string = ''; /* 当前选中行（详情区正在展示的 VM） */
   private pollTimer: number = -1;
   private lifecycleCb: ((e: VmLifecycleEvent) => void) | null = null;
 
@@ -153,7 +163,7 @@ export struct VmList {
       primaryButton: { value: '取消', action: () => {} },
       secondaryButton: {
         value: label,
-        fontColor: force ? Color.Red : Color.Black,
+        fontColor: force ? cDanger : cPrimary,
         action: () => this.powerOff(p, force),
       },
     });
@@ -214,7 +224,7 @@ export struct VmList {
       },
       secondaryButton: {
         value: '删除',
-        fontColor: Color.Red,
+        fontColor: cDanger,
         action: () => {
           this.store().remove(p);
           this.reload();
@@ -223,26 +233,25 @@ export struct VmList {
     });
   }
 
-  @Builder
-  thumb(p: VmProfile) {
-    if (fs.accessSync(this.store().thumbPath(p.id))) {
-      Image('file://' + this.store().thumbPath(p.id))
-        .width(96)
-        .height(60)
-        .objectFit(ImageFit.Cover)
-        .borderRadius(4)
-    } else {
-      Column() {
-        Text(p.machine.arch)
-          .fontSize(11)
-          .fontColor(Color.White)
-      }
-      .width(96)
-      .height(60)
-      .justifyContent(FlexAlign.Center)
-      .backgroundColor('#ff334455')
-      .borderRadius(4)
+  /* 搜索过滤：关键词命中名称或架构 */
+  private filtered(): VmProfile[] {
+    if (this.filter.length === 0) {
+      return this.profiles;
     }
+    const f = this.filter.toLowerCase();
+    return this.profiles.filter((p: VmProfile) =>
+      p.name.toLowerCase().indexOf(f) >= 0 ||
+      p.machine.arch.toLowerCase().indexOf(f) >= 0);
+  }
+
+  /* 点行：记选中态 + 在 content 区渲染该 VM 详情 */
+  private select(p: VmProfile): void {
+    this.selectedId = p.id;
+    this.navStack.pushPath({ name: 'manage', param: p });
+  }
+
+  private runningCount(): number {
+    return this.profiles.filter((p: VmProfile) => this.isRunning(p)).length;
   }
 
   /* 「+ 新建」模板选择面板：点模板一键创建；点「从零开始」进手工配置 */
@@ -250,113 +259,188 @@ export struct VmList {
   templatePicker() {
     Column() {
       Row() {
-        Text('从模板新建').fontSize(18).fontWeight(FontWeight.Bold)
+        Text('从模板新建').fontSize(tCard).fontWeight(FontWeight.Bold)
         Blank()
-        Button('×').focusable(false).fontSize(20).backgroundColor(Color.Transparent)
-          .fontColor('#888888')
+        Button('×').focusable(false).fontSize(tPage).backgroundColor(Color.Transparent)
+          .fontColor(cWeak)
           .onClick(() => this.showPicker = false)
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 16, bottom: 8 })
+      .padding({ left: sp4, right: sp4, top: sp4, bottom: sp2 })
 
       Scroll() {
-        Column({ space: 10 }) {
+        Column({ space: sp2 }) {
           ForEach(OS_TEMPLATES, (t: OsTemplate) => {
-            Column({ space: 4 }) {
-              Row({ space: 8 }) {
-                Text(t.name).fontSize(16).fontWeight(FontWeight.Medium)
-                Text(t.arch).fontSize(12).fontColor('#ff666666')
+            Column({ space: sp1 }) {
+              Row({ space: sp2 }) {
+                Text(t.name).fontSize(tCard).fontWeight(FontWeight.Medium)
+                Text(t.arch).fontSize(tSub).fontColor(cSub)
                 Blank()
                 Text(t.imageNeeded ? '需自备镜像' : '内置镜像')
-                  .fontSize(11)
-                  .fontColor(t.imageNeeded ? '#ff9900' : '#ff2e7d32')
+                  .fontSize(tSub)
+                  .fontColor(t.imageNeeded ? cWarn : cRunning)
               }
-              Text(t.desc).fontSize(12).fontColor('#ff666666')
-              Text(t.imageLabel).fontSize(11).fontColor('#ff999999')
+              Text(t.desc).fontSize(tBody).fontColor(cSub)
+              Text(t.imageLabel).fontSize(tSub).fontColor(cWeak)
             }
             .alignItems(HorizontalAlign.Start)
             .width('100%')
-            .padding(12)
-            .backgroundColor(Color.White)
-            .borderRadius(8)
+            .padding(sp3)
+            .backgroundColor(cCard)
+            .borderRadius(rCard)
             .onClick(() => this.openWizardNew(t))
           }, (t: OsTemplate) => t.id)
 
-          Column({ space: 4 }) {
-            Text('从零开始').fontSize(16).fontWeight(FontWeight.Medium)
-            Text('自定义架构/板卡/固件/介质（手工向导）').fontSize(12).fontColor('#ff999999')
+          Column({ space: sp1 }) {
+            Text('从零开始').fontSize(tCard).fontWeight(FontWeight.Medium)
+            Text('自定义架构/板卡/固件/介质（手工向导）').fontSize(tBody).fontColor(cWeak)
           }
           .alignItems(HorizontalAlign.Start)
           .width('100%')
-          .padding(12)
-          .backgroundColor(Color.White)
-          .borderRadius(8)
+          .padding(sp3)
+          .backgroundColor(cCard)
+          .borderRadius(rCard)
           .onClick(() => this.openWizardNew(null))
         }
         .width('100%')
-        .padding({ left: 16, right: 16, bottom: 24 })
+        .padding({ left: sp4, right: sp4, bottom: sp5 })
       }
       .layoutWeight(1)
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#ffffff')
+    .backgroundColor(cCard)
   }
 
   @Builder
   cardMenu(p: VmProfile) {
-    Column({ space: 4 }) {
+    Column({ space: sp1 }) {
       if (this.isRunning(p)) {
         Button('安全关机 (ACPI)').focusable(false).width('100%')
           .onClick(() => this.confirmPowerOff(p, false))
         Button('强制断电').focusable(false).width('100%')
-          .fontColor(Color.Red)
+          .fontColor(cDanger)
           .onClick(() => this.confirmPowerOff(p, true))
       }
       Button('编辑').focusable(false).width('100%')
         .onClick(() => this.openWizardEdit(p))
       Button('删除').focusable(false).width('100%')
-        .fontColor(Color.Red)
+        .fontColor(cDanger)
         .onClick(() => this.confirmDelete(p))
     }
     .width(120)
-    .padding(8)
-    .backgroundColor(Color.White)
-    .borderRadius(8)
+    .padding(sp2)
+    .backgroundColor(cCard)
+    .borderRadius(rCard)
   }
 
+  /* 空态：无 VM（或搜索无命中）时居中提示 + 两个创建入口 */
   @Builder
-  vmCard(p: VmProfile) {
-    Row({ space: 10 }) {
-      this.thumb(p)
-      Column({ space: 4 }) {
-        Row({ space: 6 }) {
-          Text(p.name).fontSize(16).fontWeight(FontWeight.Medium)
+  emptySide() {
+    Column({ space: sp3 }) {
+      Text('🖥').fontSize(44)
+      Text(this.filter.length > 0 ? '没有匹配的虚拟机' : '还没有虚拟机')
+        .fontSize(tLabel)
+        .fontColor(cSub)
+      Text(this.filter.length > 0 ? '换个关键词试试' : '点下方按钮创建你的第一台虚拟机')
+        .fontSize(tSub)
+        .fontColor(cWeak)
+      Row({ space: sp2 }) {
+        Button('＋ 新建')
+          .focusable(false)
+          .fontSize(tBody)
+          .backgroundColor(cPrimary)
+          .onClick(() => {
+            this.showPicker = true;
+          })
+        Button('从零开始')
+          .focusable(false)
+          .fontSize(tBody)
+          .backgroundColor(cBlock)
+          .fontColor(cPrimary)
+          .onClick(() => this.openWizardNew(null))
+      }
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
+  }
+
+  /* 侧栏紧凑行：封面/架构 tag + 名称(运行/缺媒体徽标) + 规格行 + 进入/启动 */
+  @Builder
+  sideRow(p: VmProfile) {
+    Row({ space: sp3 }) {
+      if (fs.accessSync(this.store().thumbPath(p.id))) {
+        Image('file://' + this.store().thumbPath(p.id))
+          .width(40)
+          .height(26)
+          .objectFit(ImageFit.Cover)
+          .borderRadius(rElem)
+      } else {
+        Column() {
+          Text(p.machine.arch)
+            .fontSize(tSub)
+            .fontColor(cText)
+        }
+        .height(26)
+        .constraintSize({ minWidth: 40 })
+        .padding({ left: sp2, right: sp2 })
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor(cBlock)
+        .borderRadius(rElem)
+      }
+
+      Column({ space: sp1 }) {
+        Row({ space: sp1 }) {
+          Text(p.name)
+            .fontSize(tCard)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(cText)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
           if (this.isRunning(p)) {
-            Text('运行中').fontSize(11).fontColor('#ff2e7d32')
+            Text('运行')
+              .fontSize(tSub)
+              .fontColor(cRunning)
+              .backgroundColor(cChip)
+              .borderRadius(rBadge)
+              .padding({ left: sp1, right: sp1 })
           }
           if (this.mediaIssue(p).length > 0) {
-            Text('⚠ 媒体失效').fontSize(11).fontColor(Color.Red)
+            Text('⚠ 缺媒体')
+              .fontSize(tSub)
+              .fontColor(cWarn)
+              .backgroundColor(cChip)
+              .borderRadius(rBadge)
+              .padding({ left: sp1, right: sp1 })
           }
         }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
         Text(`${p.machine.arch} · ${p.runtime.memoryMB}MB · ${p.runtime.cpus}核` +
           (p.media.cdromPath ? ' · 光盘' : '') + this.diskUsed(p))
-          .fontSize(12)
-          .fontColor('#ff666666')
+          .fontSize(tSub)
+          .fontColor(cSub)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
       Button(this.isRunning(p) ? '进入' : '启动')
         .focusable(false)
-        .fontSize(13)
+        .fontSize(tBody)
+        .backgroundColor(cPrimary)
         .onClick(() => this.openConsole(p))
     }
     .width('100%')
-    .padding(10)
-    .backgroundColor(Color.White)
-    .borderRadius(8)
-    .onClick(() => this.navStack.pushPath({ name: 'manage', param: p }))
+    .padding(sp3)
+    .backgroundColor(this.selectedId === p.id ? cSelBg : cCard)
+    .border({ width: bw, color: this.selectedId === p.id ? cSel : cBorder })
+    .borderRadius(rCard)
+    .onClick(() => this.select(p))
     .bindContextMenu(this.cardMenu(p), ResponseType.LongPress)
   }
 
@@ -364,44 +448,57 @@ export struct VmList {
     Stack() {
     Column() {
       Row() {
-        Text('虚拟机').fontSize(24).fontWeight(FontWeight.Bold)
-        Blank()
-        Button('存储')
+        Text('虚拟机').fontSize(tPage).fontWeight(FontWeight.Bold).layoutWeight(1)
+        Button('＋ 新建')
           .focusable(false)
-          .fontSize(14)
-          .fontColor('#ff007dff')
-          .margin({ right: 12 })
-          .onClick(() => this.navStack.pushPath({ name: 'storage' }))
-        Button('+ 新建')
-          .focusable(false)
-          .fontSize(14)
+          .fontSize(tBody)
+          .backgroundColor(cPrimary)
           .onClick(() => {
             this.showPicker = true;
           })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
+
+      TextInput({ text: this.filter, placeholder: '搜索名称/架构' })
+        .fontSize(tLabel)
+        .height(32)
+        .backgroundColor(cBlock)
+        .borderRadius(rElem)
+        .onChange((v: string) => this.filter = v)
+        .margin({ left: sp4, right: sp4, bottom: sp2 })
+
+      Row({ space: sp2 }) {
+        Text(`● ${this.runningCount()} 运行`).fontSize(tSub).fontColor(cRunning)
+        Text(`${this.profiles.length - this.runningCount()} 已停`).fontSize(tSub).fontColor(cSub)
+      }
+      .width('100%')
+      .padding({ left: sp4, right: sp4, top: sp1, bottom: sp2 })
 
       if (!this.firmwareReady) {
         Text('固件未就绪（需先 make deps 并重新打包）')
-          .fontSize(13)
-          .fontColor(Color.Red)
-          .padding(16)
+          .fontSize(tSub)
+          .fontColor(cDanger)
+          .padding(sp4)
       }
 
-      List({ space: 10 }) {
-        ForEach(this.profiles, (p: VmProfile) => {
-          ListItem() {
-            this.vmCard(p)
-          }
-        }, (p: VmProfile) => p.id + ':' + this.thumbTick)
+      if (this.filtered().length === 0) {
+        this.emptySide()
+      } else {
+        List({ space: sp2 }) {
+          ForEach(this.filtered(), (p: VmProfile) => {
+            ListItem() {
+              this.sideRow(p)
+            }
+          }, (p: VmProfile) => p.id + ':' + this.thumbTick)
+        }
+        .layoutWeight(1)
+        .padding({ left: sp3, right: sp3, bottom: sp2 })
       }
-      .layoutWeight(1)
-      .padding({ left: 16, right: 16 })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#fff2f3f5')
+    .backgroundColor(cBg)
 
     if (this.showPicker) {
       this.templatePicker()
