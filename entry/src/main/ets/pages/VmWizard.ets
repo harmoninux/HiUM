@@ -276,11 +276,14 @@ export struct VmWizard {
   stepArch() {
     Column({ space: 12 }) {
       Text('选择 CPU 架构（决定可用板卡与固件）').fontSize(tSub).fontColor(cSub)
+      if (this.isEdit()) {
+        Text('架构在创建后不可更改').fontSize(tSub).fontColor(cWarn)
+      }
       Row({ space: 10 }) {
         ForEach(ARCH_OPTIONS, (a: VmArch) => {
           Column() {
             Text(a).fontSize(tCard).fontWeight(FontWeight.Medium)
-              .fontColor(this.arch === a ? Color.White : cText)
+              .fontColor(this.arch === a ? Color.White : (this.isEdit() ? cWeak : cText))
             if (a === 'aarch64') { Text('arm64').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
             if (a === 'x86_64') { Text('现代 x86').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
             if (a === 'i386') { Text('复古 x86').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
@@ -290,8 +293,10 @@ export struct VmWizard {
           .backgroundColor(this.arch === a ? cPrimary : Color.White)
           .borderRadius(8)
           .onClick(() => {
-            this.arch = a;
-            this.board = fitBoard(a, this.board);
+            if (!this.isEdit()) {
+              this.arch = a;
+              this.board = fitBoard(a, this.board);
+            }
           })
         }, (a: VmArch) => a)
       }

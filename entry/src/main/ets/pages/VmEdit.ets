@@ -13,7 +13,6 @@ interface DiskNapi {
 
 const napi = napiModule as DiskNapi;
 
-const ARCH_OPTIONS: VmArch[] = ['x86_64', 'i386', 'aarch64'];
 const VGA_OPTIONS: VgaType[] = ['std', 'virtio'];
 /* 系统盘容量档位（GB）：指数翻倍进档，1→256 覆盖三个数量级。
  * Slider 滑的是索引（线性），显示的是档位值（指数），见磁盘块。 */
@@ -203,16 +202,12 @@ export struct VmEdit {
         ListItem() {
           Row() {
             Text('架构').fontSize(tLabel).width(72)
-            Select(ARCH_OPTIONS.map((a: VmArch): SelectOption => {
-              return { value: a };
-            }))
-              .value(this.arch)
-              .selected(ARCH_OPTIONS.indexOf(this.arch))
-              .font({ size: tBody })
+            Text(this.arch)
+              .fontSize(tBody)
+              .fontColor(cSub)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).layoutWeight(1)
-              .onSelect((index: number) => {
-                this.arch = ARCH_OPTIONS[index];
-              })
+              .padding({ left: inpPadX, right: inpPadX })
+              .textAlign(TextAlign.Start)
           }.padding(12)
         }
 
