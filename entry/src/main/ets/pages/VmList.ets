@@ -1,4 +1,4 @@
-// 虚拟机列表页（首页，Navigation 侧栏）：搜索 + 运行汇总 + 紧凑行 + 选中态 + 空态。
+// 虚拟机列表页（首页，Navigation 侧栏）：运行汇总 + 紧凑行 + 选中态 + 空态。
 // 宽屏下作为 Index 的 sideBar 常驻左侧，点行 push 'manage' 在右侧渲染详情；
 // 多实例：每台 VM 独立子进程，可同时运行多台（受内存约束）；
 // console 为每台 VM 一个 VmConsoleAbility 独立窗口（specified 模式按 vmId 归并）。
@@ -45,7 +45,6 @@ export struct VmList {
   @State diskUsage: Record<string, number> = {}; /* vmId → 磁盘实占字节数 */
   @Consume('showWizard') showWizard: boolean; /* 全窗口工坊模态开关（Index @Provide） */
   @Consume('wizardParam') wizardParam: WizardParam; /* 工坊参数（新建/编辑） */
-  @State filter: string = ''; /* 搜索关键词（名称/架构） */
   @State selectedId: string = ''; /* 当前选中行（详情区正在展示的 VM） */
   private pollTimer: number = -1;
   private lifecycleCb: ((e: VmLifecycleEvent) => void) | null = null;
@@ -232,17 +231,6 @@ export struct VmList {
     });
   }
 
-  /* 搜索过滤：关键词命中名称或架构 */
-  private filtered(): VmProfile[] {
-    if (this.filter.length === 0) {
-      return this.profiles;
-    }
-    const f = this.filter.toLowerCase();
-    return this.profiles.filter((p: VmProfile) =>
-      p.name.toLowerCase().indexOf(f) >= 0 ||
-      p.machine.arch.toLowerCase().indexOf(f) >= 0);
-  }
-
   /* 点行：记选中态 + 在 content 区替换该 VM 详情（不叠历史栈，返回键直接退出详情） */
   private select(p: VmProfile): void {
     this.selectedId = p.id;
@@ -275,15 +263,15 @@ export struct VmList {
     .borderRadius(rCard)
   }
 
-  /* 空态：无 VM（或搜索无命中）时居中提示 + 两个创建入口 */
+  /* 空态：无 VM 时居中提示 + 两个创建入口 */
   @Builder
   emptySide() {
     Column({ space: sp3 }) {
       Text('🖥').fontSize(44)
-      Text(this.filter.length > 0 ? '没有匹配的虚拟机' : '还没有虚拟机')
+      Text('还没有虚拟机')
         .fontSize(tLabel)
         .fontColor(cSub)
-      Text(this.filter.length > 0 ? '换个关键词试试' : '点下方按钮创建你的第一台虚拟机')
+      Text('点下方按钮创建你的第一台虚拟机')
         .fontSize(tSub)
         .fontColor(cWeak)
       Row({ space: sp2 }) {
@@ -402,14 +390,6 @@ export struct VmList {
       .width('100%')
       .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
 
-      TextInput({ text: this.filter, placeholder: '搜索名称/架构' })
-        .fontSize(tLabel)
-        .height(32)
-        .backgroundColor(cBlock)
-        .borderRadius(rElem)
-        .onChange((v: string) => this.filter = v)
-        .margin({ left: sp4, right: sp4, bottom: sp2 })
-
       Row({ space: sp2 }) {
         Text(`● ${this.runningCount()} 运行`).fontSize(tSub).fontColor(cRunning)
         Text(`${this.profiles.length - this.runningCount()} 已停`).fontSize(tSub).fontColor(cSub)
@@ -424,11 +404,11 @@ export struct VmList {
           .padding(sp4)
       }
 
-      if (this.filtered().length === 0) {
+      if (this.profiles.length === 0) {
         this.emptySide()
       } else {
         List({ space: sp2 }) {
-          ForEach(this.filtered(), (p: VmProfile) => {
+          ForEach(this.profiles, (p: VmProfile) => {
             ListItem() {
               this.sideRow(p)
             }

@@ -261,7 +261,7 @@ export struct VmWizard {
           .border({ width: bw, color: cBorder })
           .onClick(() => { this.loadTemplate(t); this.step = 0; this.showTiles = false; })
         }, (t: OsTemplate) => t.id)
-      }.width('100%')
+      }.width('100%').padding({ left: sp4, right: sp4 })
       Row() {
         Text('都不合适？').fontSize(tSub).fontColor(cSub)
         Blank()
