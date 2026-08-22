@@ -241,13 +241,19 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
   ];
   /* 板卡/固件/CPU：默认 pc(x86)/virt(arm64) 与旧行为一致（qemu 默认即 pc）；
    * 新板卡 q35/raspi2 走对应 -machine。aarch64 默认给 -cpu max，virt 挂 virtio-gpu。
-   * firmware=ovmf 暂未接 pflash（需 OVMF_CODE/VARS 固件，make deps 未产出），缺件回落 seabios。 */
+   * aarch64 virt 现已接入 edk2-aarch64-code.fd（-bios）；x86 的 firmware=ovmf
+   * 仍未接 pflash（需 OVMF_CODE/VARS 固件），缺件回落 seabios。 */
   const board = fitBoard(p.machine.arch, p.machine.machine);
   if (board === 'virt' || board === 'raspi2') {
     args.push('-machine', board);
     args.push('-cpu', p.machine.cpuModel.length > 0 ? p.machine.cpuModel : 'max');
     if (board === 'virt') {
       args.push('-device', 'virtio-gpu-pci');
+      /* aarch64 的 virt 机器必须提供 UEFI 固件才能引导客户机：edk2-aarch64-code.fd
+       * 由 make deps 产出、bootstrap 解到 vmDir，qemu 经 -bios(绝对路径) 载入 flash0。 */
+      if (p.machine.arch === 'aarch64') {
+        args.push('-bios', vmDataDir + '/edk2-aarch64-code.fd');
+      }
     }
   } else {
     args.push('-machine', board);

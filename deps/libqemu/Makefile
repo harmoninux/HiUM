@@ -41,7 +41,12 @@ all: download/qemu
 	for lib in $(QEMU_LIBS); do cp temp/qemu/build/$$lib ./build/; done
 	cp temp/qemu/build/subprojects/slirp/libslirp.so.0.4.0 ./build/libslirp.so.0
 	for fw in $(FIRMWARE); do cp temp/qemu/pc-bios/$$fw ./build/ || exit 1; done
-	for fw in $(FIRMWARE_OPT); do cp temp/qemu/pc-bios/$$fw ./build/ 2>/dev/null || true; done
+	for fw in $(FIRMWARE_OPT); do \
+	  if [ -f temp/qemu/pc-bios/$$fw.bz2 ]; then \
+	    bzip2 -dc temp/qemu/pc-bios/$$fw.bz2 > ./build/$$fw; \
+	  elif [ -f temp/qemu/pc-bios/$$fw ]; then \
+	    cp temp/qemu/pc-bios/$$fw ./build/; \
+	  fi; done
 	mkdir -p ../output
 	cp -rv ./build/* ../output
 

@@ -20,6 +20,7 @@ const FIRMWARE_FILES: string[] = [
   'vgabios-virtio.bin',
   'vgabios-ramfb.bin',
   'efi-virtio.rom',
+  'edk2-aarch64-code.fd', /* aarch64 客户机 UEFI 固件（virt 机器经 -bios 加载） */
 ];
 
 function writeRaw(resMgr: resourceManager.ResourceManager, rawPath: string, dst: string): void {
