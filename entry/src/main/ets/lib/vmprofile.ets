@@ -263,6 +263,11 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     args.push('-machine', board);
     args.push('-cpu', p.machine.cpuModel.length > 0 ? p.machine.cpuModel : 'max');
     args.push('-device', 'virtio-gpu-pci');
+    /* virt 机器无 i8042 PS/2 控制器且默认不带 USB 控制器（pc/q35 才有 PS/2）。
+     * 裸挂 usb-kbd 会因找不到 USB 总线而 qemu abort；须显式挂 USB EHCI 主机
+     * 控制器再挂 USB 键盘，否则 aarch64/arm/loongarch64/riscv64 收不到按键。 */
+    args.push('-device', 'usb-ehci,id=usb');
+    args.push('-device', 'usb-kbd,bus=usb.0');
     /* aarch64 的 virt 机器必须提供 UEFI 固件才能引导客户机：edk2-aarch64-code.fd
      * 由 make deps 产出、bootstrap 解到 vmDir，qemu 经 -bios(绝对路径) 载入 flash0。
      * loongarch64/arm(32位) 同理，对应各自 edk2-*.fd。 */
