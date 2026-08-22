@@ -264,11 +264,9 @@ export struct VmWizard {
         }, (t: OsTemplate) => t.id)
       }.width('100%').padding({ left: sp4, right: sp4 })
       Row() {
-        Text('都不合适？').fontSize(tSub).fontColor(cSub)
-        Blank()
         Button('从零开始（手工向导）').fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
           .onClick(() => { this.step = 0; this.showTiles = false; })
-      }.width('100%').padding({ left: sp4, right: sp4, top: sp3, bottom: sp4 })
+      }.width('100%').justifyContent(FlexAlign.End).padding({ left: sp4, right: sp4, top: sp3, bottom: sp4 })
     }.width('100%').backgroundColor(cCard).borderRadius(rCard)
   }
 
