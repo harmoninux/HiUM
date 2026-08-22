@@ -495,6 +495,7 @@ export struct VmManage {
           .padding({ left: sp3, right: sp3, bottom: sp5 })
         }
         .layoutWeight(1)
+        .align(Alignment.Top)
         .scrollBar(BarState.Off)
       }
       .width('100%')
