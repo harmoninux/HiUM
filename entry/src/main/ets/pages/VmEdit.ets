@@ -4,6 +4,7 @@ import { promptAction } from '@kit.ArkUI';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore, VmArch, VgaType, SCHEMA_VERSION, fitBoard } from '../lib/vmprofile';
+import { cPrimary, cRunning, cWarn, cSub, cWeak, cBg, cBorder } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -163,13 +164,13 @@ export struct VmEdit {
     Column() {
       Row() {
         Button('取消').focusable(false).fontSize(14).backgroundColor(Color.Transparent)
-          .fontColor('#ff007dff')
+          .fontColor(cPrimary)
           .onClick(() => this.navStack.pop())
         Blank()
         Text('虚拟机配置').fontSize(18).fontWeight(FontWeight.Medium)
         Blank()
         Button('保存').focusable(false).fontSize(14).backgroundColor(Color.Transparent)
-          .fontColor('#ff007dff')
+          .fontColor(cPrimary)
           .onClick(() => this.save())
       }
       .width('100%')
@@ -221,7 +222,7 @@ export struct VmEdit {
               Text('系统盘').fontSize(14).width(72)
               Text(this.diskPath ? this.baseName(this.diskPath) : '无')
                 .fontSize(13)
-                .fontColor('#ff666666')
+                .fontColor(cSub)
                 .layoutWeight(1)
               if (this.diskPath) {
                 Button('信息').focusable(false).fontSize(12)
@@ -238,12 +239,12 @@ export struct VmEdit {
             }
             if (!this.diskPath && this.diskCreate) {
               Row({ space: 8 }) {
-                Text('分配方式').fontSize(13).fontColor('#ff666666')
+                Text('分配方式').fontSize(13).fontColor(cSub)
                 Text('动态分配').fontSize(13)
-                  .fontColor(this.diskAlloc === 'dynamic' ? '#ff007dff' : Color.Black)
+                  .fontColor(this.diskAlloc === 'dynamic' ? cPrimary : Color.Black)
                   .onClick(() => this.diskAlloc = 'dynamic')
                 Text('固定大小').fontSize(13)
-                  .fontColor(this.diskAlloc === 'fixed' ? '#ff007dff' : Color.Black)
+                  .fontColor(this.diskAlloc === 'fixed' ? cPrimary : Color.Black)
                   .onClick(() => this.diskAlloc = 'fixed')
               }
               Row({ space: 8 }) {
@@ -256,11 +257,11 @@ export struct VmEdit {
               Text('保存时创建 ' + Math.round(this.diskGB) + 'GB ' +
                 (this.diskAlloc === 'fixed' ? '固定大小' : '动态分配') + ' 系统盘')
                 .fontSize(12)
-                .fontColor('#ff2e7d32')
+                .fontColor(cRunning)
               if (this.diskAlloc === 'fixed') {
                 Text('固定大小：保存时立即预留整块空间，大容量请优先动态分配')
                   .fontSize(12)
-                  .fontColor('#ff9900')
+                  .fontColor(cWarn)
               }
             }
           }.alignItems(HorizontalAlign.Start).padding(12)
@@ -272,7 +273,7 @@ export struct VmEdit {
               Text('光盘 ISO').fontSize(14).width(72)
               Text(this.cdromPath ? this.baseName(this.cdromPath) : '无')
                 .fontSize(13)
-                .fontColor('#ff666666')
+                .fontColor(cSub)
                 .layoutWeight(1)
               if (this.cdromPath) {
                 Button('移除').focusable(false).fontSize(12)
@@ -331,7 +332,7 @@ export struct VmEdit {
         if (this.netEnabled) {
           ListItem() {
             Column({ space: 4 }) {
-              Text('端口转发（宿主端口:客机端口，逗号分隔）').fontSize(13).fontColor('#ff666666')
+              Text('端口转发（宿主端口:客机端口，逗号分隔）').fontSize(13).fontColor(cSub)
               TextInput({ placeholder: '如 2222:22,8080:80', text: this.portForwards })
                 .onChange((v: string) => this.portForwards = v)
             }.alignItems(HorizontalAlign.Start).padding(12)
@@ -343,7 +344,7 @@ export struct VmEdit {
                 Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
                   .onChange((v: boolean) => this.sharedFolder = v)
               }.padding({ left: 0, right: 0 })
-              Text('挂载宿主应用数据下 shared/ 到客机 /shared（9p）').fontSize(12).fontColor('#ff999999')
+              Text('挂载宿主应用数据下 shared/ 到客机 /shared（9p）').fontSize(12).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).padding({ left: 12, right: 12, bottom: 12 })
           }
         }
@@ -352,7 +353,7 @@ export struct VmEdit {
           Row() {
             Text(this.showAdvanced ? '▲ 高级选项' : '▼ 高级选项')
               .fontSize(14)
-              .fontColor('#ff007dff')
+              .fontColor(cPrimary)
               .layoutWeight(1)
           }
           .padding(12)
@@ -377,7 +378,7 @@ export struct VmEdit {
           }
           ListItem() {
             Column({ space: 4 }) {
-              Text('自定义 qemu 参数（追加到命令行末尾）').fontSize(13).fontColor('#ff666666')
+              Text('自定义 qemu 参数（追加到命令行末尾）').fontSize(13).fontColor(cSub)
               TextArea({ placeholder: '如 -device usb-kbd', text: this.extraArgs })
                 .onChange((v: string) => this.extraArgs = v)
             }.alignItems(HorizontalAlign.Start).padding(12)
@@ -385,11 +386,11 @@ export struct VmEdit {
         }
       }
       .layoutWeight(1)
-      .divider({ strokeWidth: 1, color: '#11000000' })
+      .divider({ strokeWidth: 1, color: cBorder })
       .backgroundColor(Color.White)
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#fff2f3f5')
+    .backgroundColor(cBg)
   }
 }

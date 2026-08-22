@@ -12,6 +12,7 @@ import { HOS_TO_QKEYCODE } from '../lib/keymap';
 import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir } from '../lib/vmprofile';
 import { prepareStart } from '../lib/tempSession';
 import { getConsoleWindow, takePendingVmId } from '../lib/vmwindows';
+import { cDanger } from '../lib/uiTokens';
 
 interface ScreenShotBuf {
   width: number;
@@ -495,7 +496,7 @@ struct VmConsole {
       Button('重启').focusable(false).width('100%')
         .onClick(() => this.qmp('system_reset'))
       Button('强制断电').focusable(false).width('100%')
-        .fontColor(Color.Red)
+        .fontColor(cDanger)
         .onClick(() => this.qmp('quit'))
     }
     .width(140)

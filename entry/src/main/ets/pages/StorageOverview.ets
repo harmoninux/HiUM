@@ -5,6 +5,7 @@
 import { fileIo as fs } from '@kit.CoreFileKit';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore } from '../lib/vmprofile';
+import { cPrimary, cDanger, cSub, cWeak, cBg } from '../lib/uiTokens';
 
 interface DiskNapi {
   diskInfo: (path: string) => string;
@@ -162,12 +163,12 @@ export struct StorageOverview {
     Column() {
       Row() {
         Button('返回').focusable(false).fontSize(14).backgroundColor(Color.Transparent)
-          .fontColor('#ff007dff')
+          .fontColor(cPrimary)
           .onClick(() => this.navStack.pop())
         Blank()
         Text('存储概览').fontSize(18).fontWeight(FontWeight.Medium)
         Blank()
-        Text(`${this.vms.length} 台 VM`).fontSize(13).fontColor('#ff666666')
+        Text(`${this.vms.length} 台 VM`).fontSize(13).fontColor(cSub)
       }
       .width('100%')
       .padding({ left: 8, right: 8, top: 8, bottom: 8 })
@@ -179,7 +180,7 @@ export struct StorageOverview {
             Text('配额').fontSize(16).fontWeight(FontWeight.Medium)
             Text(`实占 ${this.totalActualGB.toFixed(2)} GB · 虚拟 ${this.totalVirtualGB.toFixed(2)} GB`)
               .fontSize(13)
-              .fontColor('#ff666666')
+              .fontColor(cSub)
           }
           .alignItems(HorizontalAlign.Start)
           .padding(12)
@@ -191,13 +192,13 @@ export struct StorageOverview {
           Column({ space: 4 }) {
             Text('基础镜像（共享 ISO）').fontSize(16).fontWeight(FontWeight.Medium)
             if (this.isos.length === 0) {
-              Text('vm 目录下暂无 ISO').fontSize(12).fontColor('#ff999999')
+              Text('vm 目录下暂无 ISO').fontSize(12).fontColor(cWeak)
             } else {
               ForEach(this.isos, (i: IsoEntry) => {
                 Row({ space: 8 }) {
                   Column({ space: 2 }) {
                     Text(i.name).fontSize(13)
-                    Text(`${i.sizeMB.toFixed(1)} MB · ${i.refs} 台引用`).fontSize(11).fontColor('#ff999999')
+                    Text(`${i.sizeMB.toFixed(1)} MB · ${i.refs} 台引用`).fontSize(11).fontColor(cWeak)
                   }.alignItems(HorizontalAlign.Start).layoutWeight(1)
                 }.padding({ top: 4, bottom: 4 })
               }, (i: IsoEntry) => i.name)
@@ -213,7 +214,7 @@ export struct StorageOverview {
           Column({ space: 4 }) {
             Text('媒体体检').fontSize(16).fontWeight(FontWeight.Medium)
             if (this.vms.length === 0) {
-              Text('暂无虚拟机').fontSize(12).fontColor('#ff999999')
+              Text('暂无虚拟机').fontSize(12).fontColor(cWeak)
             } else {
               ForEach(this.vms, (v: MediaStat) => {
                 Row({ space: 8 }) {
@@ -221,10 +222,10 @@ export struct StorageOverview {
                     Row({ space: 6 }) {
                       Text(v.name).fontSize(14)
                       if (v.missing.length > 0) {
-                        Text('⚠ ' + v.missing).fontSize(11).fontColor(Color.Red)
+                        Text('⚠ ' + v.missing).fontSize(11).fontColor(cDanger)
                       }
                     }
-                    Text(this.mediaDesc(v)).fontSize(11).fontColor('#ff999999')
+                    Text(this.mediaDesc(v)).fontSize(11).fontColor(cWeak)
                   }.alignItems(HorizontalAlign.Start).layoutWeight(1)
                 }.padding({ top: 5, bottom: 5 })
               }, (v: MediaStat) => v.id)
@@ -244,6 +245,6 @@ export struct StorageOverview {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#fff2f3f5')
+    .backgroundColor(cBg)
   }
 }
