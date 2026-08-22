@@ -5,14 +5,22 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
+import napiModule from 'libentry.so';
 import {
   VmProfile, VmStore,
-  newProfileId, blankProfile, alpineProfile,
+  newProfileId, blankProfile, alpineProfile, qmpSockPath,
 } from '../lib/vmprofile';
 import {
   initVmRegistry, refreshRunningMap, vmIsRunning,
   subscribeVmLifecycle, unsubscribeVmLifecycle, VmLifecycleEvent,
 } from '../lib/vmregistry';
+
+/* 只用于「运行中 VM 安全关机/断电」的一次性 QMP 调用（连接是 per-vm 单例，无抢占） */
+interface QmpNapi {
+  qmpConnect: (vmId: string, sockPath: string) => number;
+  qmpCommand: (vmId: string, cmd: string) => string;
+}
+const qmpNapi = napiModule as QmpNapi;
 
 @Component
 export struct VmList {
@@ -24,6 +32,7 @@ export struct VmList {
   @State profiles: VmProfile[] = [];
   @State thumbTick: number = 0;
   @State runningIds: Record<string, boolean> = {};
+  @State diskUsage: Record<string, number> = {}; /* vmId → 磁盘实占字节数 */
   private pollTimer: number = -1;
   private lifecycleCb: ((e: VmLifecycleEvent) => void) | null = null;
 
@@ -82,6 +91,22 @@ export struct VmList {
     }
     this.profiles = list;
     this.thumbTick++;
+    /* 磁盘实占用量（stat 元数据，快；不 fork qemu-img） */
+    const usage: Record<string, number> = {};
+    for (const p of list) {
+      let bytes = 0;
+      if (p.media.diskPath.length > 0) {
+        try {
+          if (fs.accessSync(p.media.diskPath)) {
+            bytes = fs.statSync(p.media.diskPath).size;
+          }
+        } catch {
+          bytes = 0;
+        }
+      }
+      usage[p.id] = bytes;
+    }
+    this.diskUsage = usage;
     this.pollTick();
   }
 
@@ -99,6 +124,52 @@ export struct VmList {
       bad.push('光盘');
     }
     return bad.join('、');
+  }
+
+  /* 卡片上的磁盘用量表述（无盘/读不到 → 空串） */
+  private diskUsed(p: VmProfile): string {
+    if (p.media.diskPath.length === 0) {
+      return '';
+    }
+    const bytes = this.diskUsage[p.id] ?? 0;
+    if (this.mediaIssue(p).indexOf('系统盘') >= 0) {
+      return ' · 磁盘缺失';
+    }
+    return ` · 磁盘${(bytes / 1024 / 1024 / 1024).toFixed(1)}G`;
+  }
+
+  /* 运行中 VM 安全关机(ACPI)/断电：走 QMP（连接是 per-vm 单例，无抢占）。 */
+  private confirmPowerOff(p: VmProfile, force: boolean): void {
+    const label = force ? '强制断电' : '安全关机(ACPI)';
+    const message = force
+      ? `将立即结束「${p.name}」的虚拟机进程，未保存的数据可能丢失。确认？`
+      : `向「${p.name}」发送 ACPI 关机信号（客机保存后自行退出）。确认？`;
+    AlertDialog.show({
+      title: label,
+      message: message,
+      primaryButton: { value: '取消', action: () => {} },
+      secondaryButton: {
+        value: label,
+        fontColor: force ? Color.Red : Color.Black,
+        action: () => this.powerOff(p, force),
+      },
+    });
+  }
+
+  private powerOff(p: VmProfile, force: boolean): void {
+    try {
+      qmpNapi.qmpConnect(p.id, qmpSockPath(p, this.vmDataDir));
+      const cmd = force ? '{"execute":"quit"}' : '{"execute":"system_powerdown"}';
+      /* 连接线程异步就绪，等一小下再发，避免 socket 未连上白发。
+       * 不 disconnect：连接是 per-vm 单例，可能被打开中的 console 复用；
+       * 停掉后 socket 自然消亡，reader 线程随之退出。 */
+      setTimeout(() => {
+        qmpNapi.qmpCommand(p.id, cmd);
+        this.pollTick(); /* 立刻刷一次运行态 */
+      }, 150);
+    } catch {
+      promptAction.showToast({ message: '操作失败' });
+    }
   }
 
   private openConsole(p: VmProfile): void {
@@ -161,6 +232,13 @@ export struct VmList {
   @Builder
   cardMenu(p: VmProfile) {
     Column({ space: 4 }) {
+      if (this.isRunning(p)) {
+        Button('安全关机 (ACPI)').focusable(false).width('100%')
+          .onClick(() => this.confirmPowerOff(p, false))
+        Button('强制断电').focusable(false).width('100%')
+          .fontColor(Color.Red)
+          .onClick(() => this.confirmPowerOff(p, true))
+      }
       Button('编辑').focusable(false).width('100%')
         .onClick(() => this.navStack.pushPath({ name: 'edit', param: p }))
       Button('删除').focusable(false).width('100%')
@@ -188,7 +266,7 @@ export struct VmList {
           }
         }
         Text(`${p.machine.arch} · ${p.runtime.memoryMB}MB · ${p.runtime.cpus}核` +
-          (p.media.cdromPath ? ' · 光盘' : '') + (p.media.diskPath ? ' · 磁盘' : ''))
+          (p.media.cdromPath ? ' · 光盘' : '') + this.diskUsed(p))
           .fontSize(12)
           .fontColor('#ff666666')
       }
