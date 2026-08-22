@@ -12,8 +12,8 @@ import {
   VmProfile, VmStore,
   newProfileId, alpineProfile, qmpSockPath,
 } from '../lib/vmprofile';
-import { OS_TEMPLATES, OsTemplate } from '../lib/osTemplates';
-import { VmWizard, WizardParam } from './VmWizard';
+import { OsTemplate } from '../lib/osTemplates';
+import { WizardParam } from './VmWizard';
 import {
   initVmRegistry, refreshRunningMap, vmIsRunning,
   subscribeVmLifecycle, unsubscribeVmLifecycle, VmLifecycleEvent,
@@ -43,9 +43,8 @@ export struct VmList {
   @State thumbTick: number = 0;
   @State runningIds: Record<string, boolean> = {};
   @State diskUsage: Record<string, number> = {}; /* vmId → 磁盘实占字节数 */
-  @State showPicker: boolean = false; /* 「+ 新建」模板选择面板 */
-  @State showWizard: boolean = false; /* 机器工坊模态浮层开关 */
-  @State wizardParam: WizardParam = { mode: 'new' }; /* 工坊参数（新建/编辑） */
+  @Consume('showWizard') showWizard: boolean; /* 全窗口工坊模态开关（Index @Provide） */
+  @Consume('wizardParam') wizardParam: WizardParam; /* 工坊参数（新建/编辑） */
   @State filter: string = ''; /* 搜索关键词（名称/架构） */
   @State selectedId: string = ''; /* 当前选中行（详情区正在展示的 VM） */
   private pollTimer: number = -1;
@@ -189,26 +188,13 @@ export struct VmList {
 
   /* 模板 → 机器工坊（模态浮层，预填可逐步改）；从零 → 规格化默认 */
   private openWizardNew(tpl: OsTemplate | null): void {
-    this.showPicker = false;
     this.wizardParam = tpl ? { mode: 'new', template: tpl } : { mode: 'new' };
     this.showWizard = true;
   }
 
   private openWizardEdit(p: VmProfile): void {
-    this.showPicker = false;
     this.wizardParam = { mode: 'edit', profile: p };
     this.showWizard = true;
-  }
-
-  /* 工坊关闭：收起浮层并刷新列表（保存/取消都会走到这里） */
-  private closeWizard(): void {
-    this.showWizard = false;
-    this.vmListVersion++;
-  }
-
-  @Builder
-  wizardCover() {
-    VmWizard({ param: this.wizardParam, onClose: () => this.closeWizard() })
   }
 
   private openConsole(p: VmProfile): void {
@@ -267,64 +253,6 @@ export struct VmList {
     return this.profiles.filter((p: VmProfile) => this.isRunning(p)).length;
   }
 
-  /* 「+ 新建」模板选择面板：点模板一键创建；点「从零开始」进手工配置 */
-  @Builder
-  templatePicker() {
-    Column() {
-      Row() {
-        Text('从模板新建').fontSize(tCard).fontWeight(FontWeight.Bold)
-        Blank()
-        Button('×').focusable(false).fontSize(tPage).backgroundColor(Color.Transparent)
-          .fontColor(cWeak)
-          .onClick(() => this.showPicker = false)
-      }
-      .width('100%')
-      .padding({ left: sp4, right: sp4, top: sp4, bottom: sp2 })
-
-      Scroll() {
-        Column({ space: sp2 }) {
-          ForEach(OS_TEMPLATES, (t: OsTemplate) => {
-            Column({ space: sp1 }) {
-              Row({ space: sp2 }) {
-                Text(t.name).fontSize(tCard).fontWeight(FontWeight.Medium)
-                Text(t.arch).fontSize(tSub).fontColor(cSub)
-                Blank()
-                Text(t.imageNeeded ? '需自备镜像' : '内置镜像')
-                  .fontSize(tSub)
-                  .fontColor(t.imageNeeded ? cWarn : cRunning)
-              }
-              Text(t.desc).fontSize(tBody).fontColor(cSub)
-              Text(t.imageLabel).fontSize(tSub).fontColor(cWeak)
-            }
-            .alignItems(HorizontalAlign.Start)
-            .width('100%')
-            .padding(sp3)
-            .backgroundColor(cCard)
-            .borderRadius(rCard)
-            .onClick(() => this.openWizardNew(t))
-          }, (t: OsTemplate) => t.id)
-
-          Column({ space: sp1 }) {
-            Text('从零开始').fontSize(tCard).fontWeight(FontWeight.Medium)
-            Text('自定义架构/板卡/固件/介质（手工向导）').fontSize(tBody).fontColor(cWeak)
-          }
-          .alignItems(HorizontalAlign.Start)
-          .width('100%')
-          .padding(sp3)
-          .backgroundColor(cCard)
-          .borderRadius(rCard)
-          .onClick(() => this.openWizardNew(null))
-        }
-        .width('100%')
-        .padding({ left: sp4, right: sp4, bottom: sp5 })
-      }
-      .layoutWeight(1)
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(cCard)
-  }
-
   @Builder
   cardMenu(p: VmProfile) {
     Column({ space: sp1 }) {
@@ -364,7 +292,7 @@ export struct VmList {
           .fontSize(tBody)
           .backgroundColor(cPrimary)
           .onClick(() => {
-            this.showPicker = true;
+            this.openWizardNew(null);
           })
         Button('从零开始')
           .focusable(false)
@@ -445,7 +373,8 @@ export struct VmList {
       Button(this.isRunning(p) ? '进入' : '启动')
         .focusable(false)
         .fontSize(tBody)
-        .backgroundColor(cPrimary)
+        .backgroundColor(this.isRunning(p) ? cPrimary : Color.Transparent)
+        .fontColor(this.isRunning(p) ? Color.White : cPrimary)
         .onClick(() => this.openConsole(p))
     }
     .width('100%')
@@ -467,7 +396,7 @@ export struct VmList {
           .fontSize(tBody)
           .backgroundColor(cPrimary)
           .onClick(() => {
-            this.showPicker = true;
+            this.openWizardNew(null);
           })
       }
       .width('100%')
@@ -513,21 +442,6 @@ export struct VmList {
     .height('100%')
     .backgroundColor(cBg)
 
-    if (this.showPicker) {
-      this.templatePicker()
-    }
-
-    if (this.showWizard) {
-      Row() {
-        Column() { this.wizardCover() }
-          .width(720).height('100%')
-          .constraintSize({ maxHeight: 680 })
-          .backgroundColor(cCard).borderRadius(rCard)
-      }
-      .width('100%').height('100%').backgroundColor('#52000000')
-      .justifyContent(FlexAlign.Center)
-      .hitTestBehavior(HitTestMode.Block) /* 遮罩+卡片整体消费命中，阻断下层侧栏点击 */
-    }
     }
     .width('100%')
     .height('100%')

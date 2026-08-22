@@ -32,7 +32,7 @@ const DISK_SIZES: number[] = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 
 @Component
 export struct VmWizard {
-  param: WizardParam = { mode: 'new' };
+  @Prop param: WizardParam = { mode: 'new' };
   onClose: (() => void) | null = null; /* 模态关闭回调（宿主 Stack 置 false）；非响应式，够用 */
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmDataDir') vmDataDir: string = '';
