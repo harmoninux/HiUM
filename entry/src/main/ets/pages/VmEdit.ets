@@ -4,7 +4,7 @@ import { promptAction } from '@kit.ArkUI';
 import { pathExists } from '../lib/fsutil';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore, VmArch, VgaType, SCHEMA_VERSION, fitBoard } from '../lib/vmprofile';
-import { cPrimary, cRunning, cWarn, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX } from '../lib/uiTokens';
+import { cPrimary, cDanger, cRunning, cWarn, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp2 } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -18,6 +18,7 @@ const VGA_OPTIONS: VgaType[] = ['std', 'virtio'];
 /* 系统盘容量档位（GB）：指数翻倍进档，1→256 覆盖三个数量级。
  * Slider 滑的是索引（线性），显示的是档位值（指数），见磁盘块。 */
 const DISK_SIZES: number[] = [1, 2, 4, 8, 16, 32, 64, 128, 256];
+const GB = 1024 * 1024 * 1024;
 
 @Component
 export struct VmEdit {
@@ -45,6 +46,10 @@ export struct VmEdit {
   @State tbSizeText: string = '1024';
   @State extraArgs: string = '';
   @State showAdvanced: boolean = false;
+  /* 已建系统盘的元信息（qemu-img info），直接在「系统盘」行内展示 */
+  @State diskFmt: string = '?';
+  @State diskVirtualGB: number = 0;
+  @State diskActualGB: number = 0;
 
   aboutToAppear(): void {
     const p = this.profile;
@@ -65,6 +70,7 @@ export struct VmEdit {
     this.mttcg = p.runtime.mttcg;
     this.tbSizeText = String(p.runtime.tbSize);
     this.extraArgs = p.extraArgs;
+    this.readDiskMeta();
   }
 
   private baseName(path: string): string {
@@ -85,31 +91,33 @@ export struct VmEdit {
       return false;
     }
     this.diskPath = path;
+    this.readDiskMeta();
     return true;
   }
 
-  /* 显示已建磁盘的格式/虚拟大小/实占大小（qemu-img info） */
-  private showDiskInfo(): void {
+  /* 读取已建磁盘的格式/虚拟大小/实占大小（qemu-img info），供「系统盘」行直接展示 */
+  private readDiskMeta(): void {
+    this.diskFmt = '?';
+    this.diskVirtualGB = 0;
+    this.diskActualGB = 0;
     if (!this.diskPath) {
       return;
     }
     const s = napi.diskInfo(this.diskPath);
     if (s.length === 0) {
-      promptAction.showToast({ message: '无法读取磁盘信息' });
       return;
     }
     try {
       /* ArkTS 禁对接口字段下标访问（arkts-no-props-by-index），用 Record 字典式解析 */
       const j = JSON.parse(s) as Record<string, number | string>;
-      const gb = (n: number): string => (n / 1024 / 1024 / 1024).toFixed(1);
-      const vsize = typeof j['virtual-size'] === 'number' ? j['virtual-size'] : 0;
-      const actual = typeof j['actual-size'] === 'number' ? j['actual-size'] : 0;
-      const fmt = typeof j['format'] === 'string' ? j['format'] : '?';
-      promptAction.showToast({
-        message: `${fmt} · 虚拟${gb(vsize)}G · 实占${gb(actual)}G`,
-      });
-    } catch (err) {
-      promptAction.showToast({ message: s.substring(0, 120) });
+      const vsize = typeof j['virtual-size'] === 'number' ? j['virtual-size'] as number : 0;
+      const actual = typeof j['actual-size'] === 'number' ? j['actual-size'] as number : 0;
+      const fmt = typeof j['format'] === 'string' ? j['format'] as string : '?';
+      this.diskFmt = fmt;
+      this.diskVirtualGB = vsize / GB;
+      this.diskActualGB = actual / GB;
+    } catch {
+      /* 解析失败保持默认 */
     }
   }
 
@@ -201,7 +209,7 @@ export struct VmEdit {
               .value(this.arch)
               .selected(ARCH_OPTIONS.indexOf(this.arch))
               .font({ size: tBody })
-              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg)
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).layoutWeight(1)
               .onSelect((index: number) => {
                 this.arch = ARCH_OPTIONS[index];
               })
@@ -228,21 +236,31 @@ export struct VmEdit {
           Column({ space: 6 }) {
             Row() {
               Text('系统盘').fontSize(tLabel).width(72)
-              Text(this.diskPath ? this.baseName(this.diskPath) : '无')
-                .fontSize(tSub)
-                .fontColor(cSub)
-                .layoutWeight(1)
               if (this.diskPath) {
-                Button('信息').focusable(false).fontSize(tBody)
-                  .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
-                  .onClick(() => this.showDiskInfo())
+                Column({ space: 2 }) {
+                  Text(this.baseName(this.diskPath))
+                    .fontSize(tSub)
+                    .fontColor(cSub)
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(`${this.diskFmt} · 虚拟${this.diskVirtualGB.toFixed(1)}G · 实占${this.diskActualGB.toFixed(1)}G`)
+                    .fontSize(tMono)
+                    .fontColor(cWeak)
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
                 Button('移除').focusable(false).fontSize(tBody)
                   .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
+                  .backgroundColor(Color.Transparent).fontColor(cDanger)
                   .onClick(() => {
                     this.diskPath = '';
                     this.diskCreate = false;
+                    this.diskFmt = '?';
+                    this.diskVirtualGB = 0;
+                    this.diskActualGB = 0;
                   })
               } else {
+                Text('无').fontSize(tSub).fontColor(cSub).layoutWeight(1)
                 Toggle({ type: ToggleType.Switch, isOn: this.diskCreate })
                   .onChange((v: boolean) => this.diskCreate = v)
               }
@@ -288,6 +306,7 @@ export struct VmEdit {
               if (this.cdromPath) {
                 Button('移除').focusable(false).fontSize(tBody)
                   .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
+                  .backgroundColor(Color.Transparent).fontColor(cDanger)
                   .onClick(() => this.cdromPath = '')
               }
             }
@@ -330,7 +349,7 @@ export struct VmEdit {
               .value(this.vga)
               .selected(VGA_OPTIONS.indexOf(this.vga))
               .font({ size: tBody })
-              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg)
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).layoutWeight(1)
               .onSelect((index: number) => {
                 this.vga = VGA_OPTIONS[index];
               })
