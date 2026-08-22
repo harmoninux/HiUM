@@ -13,7 +13,7 @@ import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir, builtinIsoFor } 
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { pathExists } from '../lib/fsutil';
 import { prepareStart } from '../lib/tempSession';
-import { takePendingVmId } from '../lib/vmwindows';
+import { takePendingVmId, isPadOrPhone } from '../lib/vmwindows';
 import { VirtualKeyboard } from '../lib/VirtualKeyboard';
 import {
   cDanger, cPrimary,
@@ -658,13 +658,13 @@ struct VmConsole {
 
       /* 虚拟键盘 overlay：VM 画面之上、悬浮按钮之下。面板空白处透传给画面，
        * 键帽/把手消费触摸（见 VirtualKeyboard 组件 hitTest 说明） */
-      if (this.showKbd) {
+      if (isPadOrPhone() &&this.showKbd) {
         VirtualKeyboard({ vmId: this.vmId, showKbd: this.$showKbd })
       }
 
       /* 面板展开时：点面板外的空白区收起面板（透明 catcher，盖在 VM 之上）。
        * 用 Stack 全屏透明层拦截触摸，避免点穿透到客机输入 */
-      if (this.menuOpen) {
+      if (isPadOrPhone() &&this.menuOpen) {
         Column()
           .width('100%').height('100%')
           .backgroundColor('#0a000000')
@@ -675,7 +675,7 @@ struct VmConsole {
 
       /* 悬浮操作面板：停在按钮正上方、右缘与按钮对齐。用固定高度的定位盒 +
        * Blank 撑底，让面板内容自底部向上生长（分组标题/多按钮往上扩，不剪裁）。 */
-      if (this.menuOpen && this.fabX >= 0) {
+      if (isPadOrPhone() &&this.menuOpen && this.fabX >= 0) {
         Column() {
           Blank()
           Column() {
@@ -693,7 +693,7 @@ struct VmConsole {
       }
 
       /* 半透明可拖拽悬浮圆钮（替代顶部工具条）：点击展开/收起面板，拖动移动 */
-      if (this.fabX >= 0) {
+      if (isPadOrPhone() &&this.fabX >= 0) {
         Stack() {
           Text('≡').fontSize(22).fontColor(Color.White).fontWeight(FontWeight.Bold)
         }

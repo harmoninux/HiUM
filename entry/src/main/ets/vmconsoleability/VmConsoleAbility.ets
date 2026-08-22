@@ -6,7 +6,7 @@ import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { ensureAppBootstrap } from '../lib/bootstrap';
-import { setConsoleWindow, removeConsoleWindow, pushPendingVmId } from '../lib/vmwindows';
+import { setConsoleWindow, removeConsoleWindow, pushPendingVmId, isPadOrPhone } from '../lib/vmwindows';
 
 const DOMAIN = 0x0002;
 const TAG = 'QemuUI';
@@ -38,12 +38,15 @@ export default class VmConsoleAbility extends UIAbility {
         setConsoleWindow(vmId, win);
         /* 沉浸式：内容铺满窗口并隐藏状态栏/导航条；2in1 自由窗口下标题栏
          * 仍在，顺带把标题设成 VM 名（平板全屏窗口无标题栏，失败忽略） */
-        win.setWindowLayoutFullScreen(true)
-          .catch((e: Object) => hilog.warn(DOMAIN, TAG, 'layoutFullScreen: %{public}s', JSON.stringify(e)));
-        win.setSpecificSystemBarEnabled('status', false)
-          .catch((e: Object) => hilog.warn(DOMAIN, TAG, 'hide status bar: %{public}s', JSON.stringify(e)));
-        win.setSpecificSystemBarEnabled('navigationIndicator', false)
-          .catch((e: Object) => hilog.warn(DOMAIN, TAG, 'hide navi bar: %{public}s', JSON.stringify(e)));
+        /* 沉浸窗口仅触屏设备（平板/手机）；PC(2in1) 保留标题栏/系统栏（真实键鼠） */
+        if (isPadOrPhone()) {
+          win.setWindowLayoutFullScreen(true)
+            .catch((e: Object) => hilog.warn(DOMAIN, TAG, 'layoutFullScreen: %{public}s', JSON.stringify(e)));
+          win.setSpecificSystemBarEnabled('status', false)
+            .catch((e: Object) => hilog.warn(DOMAIN, TAG, 'hide status bar: %{public}s', JSON.stringify(e)));
+          win.setSpecificSystemBarEnabled('navigationIndicator', false)
+            .catch((e: Object) => hilog.warn(DOMAIN, TAG, 'hide navi bar: %{public}s', JSON.stringify(e)));
+        }
         win.setWindowTitle(vmName.length > 0 ? vmName : '虚拟机')
           .catch((e: Object) => hilog.warn(DOMAIN, TAG, 'setWindowTitle: %{public}s', JSON.stringify(e)));
       }).catch((e: Object) => hilog.error(DOMAIN, TAG, 'getMainWindow: %{public}s', JSON.stringify(e)));
