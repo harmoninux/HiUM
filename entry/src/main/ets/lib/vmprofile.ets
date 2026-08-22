@@ -224,9 +224,11 @@ export function qmpSockPath(p: VmProfile, vmDataDir: string): string {
   return `${vmDataDir}/qmp-${p.id}.sock`;
 }
 
-/* 9p 共享宿主目录（app 数据目录下，guest 挂载为 /shared；须先 mkdir 再跑 VM） */
+/* 9p 共享宿主目录：启动时经 picker 取到的 Download 目录（唯一可共享目录），guest 挂载为 /shared。
+ * 读到 AppStorage（EntryAbility prepareSharedFolder 写入）；未取到则回退 app 数据目录下 shared/。 */
 export function sharedDir(filesDir: string): string {
-  return filesDir + '/shared';
+  const host = AppStorage.get<string>('sharedHost');
+  return (host && host.length > 0) ? host : filesDir + '/shared';
 }
 
 export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = ''): string[] {

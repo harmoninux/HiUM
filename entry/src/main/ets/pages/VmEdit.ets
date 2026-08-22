@@ -376,7 +376,7 @@ export struct VmEdit {
                 Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
                   .onChange((v: boolean) => this.sharedFolder = v)
               }.padding({ left: 0, right: 0 })
-              Text('挂载宿主应用数据下 shared/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
+              Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).padding({ left: 12, right: 12, bottom: 12 })
           }
         }

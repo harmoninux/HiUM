@@ -8,7 +8,7 @@ import napiModule from 'libentry.so';
 import { VmProfile, VmStore } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
 import {
-  VmSnapshotEntry, snapshotCreate, snapshotApply, snapshotDelete, parseSnapshots,
+  VmSnapshotEntry, snapshotApply, snapshotDelete, parseSnapshots,
 } from '../lib/vmsnapshot';
 import { isTempSnapshot } from '../lib/tempSession';
 import {
@@ -41,8 +41,6 @@ export struct VmManage {
   @State diskVirtualGB: number = 0;
   @State diskActualGB: number = 0;
   @State snapshots: VmSnapshotEntry[] = [];
-  @State snapNameText: string = '';
-  @State snapCreateMode: boolean = false;
   @State netEnabled: boolean = false;
   @State snack: string = '';
   @State nowSec: number = 0; /* 进入页面时的时间基准，供「当前」快照节点稳定展示 */
@@ -135,27 +133,6 @@ export struct VmManage {
     if (this.snapshots.length > 0) {
       this.snapshots.sort((a, b) => b.dateSec - a.dateSec);
     }
-  }
-
-  private doSnapshotCreate(): void {
-    if (!this.canSnapshot()) {
-      promptAction.showToast({ message: this.snapStatus() });
-      return;
-    }
-    const name = this.snapNameText.trim();
-    if (name.length === 0) {
-      promptAction.showToast({ message: '请输入快照名' });
-      return;
-    }
-    const ret = snapshotCreate(this.diskPath, name);
-    if (ret !== 0) {
-      promptAction.showToast({ message: '创建快照失败' });
-      return;
-    }
-    this.snapCreateMode = false;
-    this.snapNameText = '';
-    this.refreshSnapshot();
-    this.showSnack(`已创建快照「${name}」`);
   }
 
   private doSnapshotApply(s: VmSnapshotEntry): void {
@@ -337,33 +314,7 @@ export struct VmManage {
   secSnapshot() {
     this.secHead('快照')
     Column() {
-      if (this.canSnapshot()) {
-        Row({ space: sp2 }) {
-          Button('新建快照').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-            .backgroundColor(Color.Transparent).fontColor(cPrimary)
-            .onClick(() => this.snapCreateMode = !this.snapCreateMode)
-          Button('刷新').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-            .backgroundColor(Color.Transparent).fontColor(cSub)
-            .onClick(() => this.refreshSnapshot())
-        }.width('100%')
-        if (this.snapCreateMode) {
-          Row({ space: sp2 }) {
-            TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tBody)
-              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-              .onChange((v: string) => this.snapNameText = v)
-            Button('创建').focusable(false).fontSize(tSub)
-              .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
-              .backgroundColor(cPrimary).fontColor(Color.White)
-              .onClick(() => this.doSnapshotCreate())
-            Button('取消').focusable(false).fontSize(tSub)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-              .backgroundColor(Color.Transparent).fontColor(cSub)
-              .onClick(() => this.snapCreateMode = false)
-          }.margin({ top: sp1, bottom: sp1 })
-        }
-      } else {
+      if (!this.canSnapshot()) {
         Text(this.snapStatus()).fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp2 })
       }
 
@@ -506,8 +457,8 @@ export struct VmManage {
             .padding({ top: sp2, bottom: sp2 })
 
             this.secSystemDisk()
-            this.secSnapshot()
             this.secNet()
+            this.secSnapshot()
             this.secAdvanced()
           }
           .width('100%')

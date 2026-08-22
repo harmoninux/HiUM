@@ -490,7 +490,7 @@ export struct VmWizard {
             .onChange((v: boolean) => this.sharedFolder = v)
         }
         if (this.sharedFolder) {
-          Text('挂载宿主 filesDir/shared 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
+          Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
         }
       }
     }
