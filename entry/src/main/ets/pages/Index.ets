@@ -6,7 +6,7 @@
 import { VmList } from './VmList';
 import { VmEdit } from './VmEdit';
 import { VmManage } from './VmManage';
-import { StorageOverview } from './StorageOverview';
+import { VmStorage } from './VmStorage';
 import { VmWizard, WizardParam } from './VmWizard';
 import { VmProfile } from '../lib/vmprofile';
 import { tBody, cSub, cCard, cBorder, rCard, bw } from '../lib/uiTokens';
@@ -28,7 +28,7 @@ struct Index {
       } else if (name === 'edit') {
         VmEdit({ profile: param as VmProfile })
       } else if (name === 'storage') {
-        StorageOverview()
+        VmStorage({ profile: param as VmProfile })
       } else if (name === 'idle') {
         Text('从左侧选择一台虚拟机').fontSize(tBody).fontColor(cSub)
       }
@@ -58,6 +58,7 @@ struct Index {
     Column() {
       Column() { this.wizardCover() }
         .width('88%').constraintSize({ maxWidth: 640 })
+        .height(500)
         .backgroundColor(cCard)
         .border({ width: bw, color: cBorder })
         .borderRadius(rCard)

@@ -279,9 +279,10 @@ export struct VmWizard {
         ForEach(ARCH_OPTIONS, (a: VmArch) => {
           Column() {
             Text(a).fontSize(tCard).fontWeight(FontWeight.Medium)
-            if (a === 'aarch64') { Text('arm64').fontSize(tSub).fontColor(cWeak) }
-            if (a === 'x86_64') { Text('现代 x86').fontSize(tSub).fontColor(cWeak) }
-            if (a === 'i386') { Text('复古 x86').fontSize(tSub).fontColor(cWeak) }
+              .fontColor(this.arch === a ? Color.White : cText)
+            if (a === 'aarch64') { Text('arm64').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
+            if (a === 'x86_64') { Text('现代 x86').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
+            if (a === 'i386') { Text('复古 x86').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
           }
           .layoutWeight(1)
           .padding(12)
@@ -307,7 +308,8 @@ export struct VmWizard {
         ForEach(this.boards(), (b: string) => {
           Column() {
             Text(b).fontSize(tCard).fontWeight(FontWeight.Medium)
-            Text(this.boardName(b)).fontSize(tMono).fontColor(cWeak)
+              .fontColor(this.board === b ? Color.White : cText)
+            Text(this.boardName(b)).fontSize(tMono).fontColor(this.board === b ? Color.White : cWeak)
           }
           .layoutWeight(1)
           .padding(12)
@@ -322,13 +324,13 @@ export struct VmWizard {
         Column() {
           Text('固件').fontSize(tSub).fontColor(cSub)
           Text('SeaBIOS').fontSize(tLabel)
-            .fontColor(this.firmware === 'seabios' ? cPrimary : Color.Black)
+            .fontColor(this.firmware === 'seabios' ? cPrimary : cText)
             .onClick(() => this.firmware = 'seabios')
         }.layoutWeight(1)
         Column() {
           Text('OVMF (UEFI)').fontSize(tSub).fontColor(cSub)
           Text('OVMF').fontSize(tLabel)
-            .fontColor(this.firmware === 'ovmf' ? cPrimary : Color.Black)
+            .fontColor(this.firmware === 'ovmf' ? cPrimary : cText)
             .onClick(() => this.firmware = 'ovmf')
         }.layoutWeight(1)
       }
@@ -394,10 +396,10 @@ export struct VmWizard {
         }
         Row({ space: 8 }) {
           Text('动态分配').fontSize(tLabel)
-            .fontColor(this.diskAlloc === 'dynamic' ? cPrimary : Color.Black)
+            .fontColor(this.diskAlloc === 'dynamic' ? cPrimary : cText)
             .onClick(() => this.diskAlloc = 'dynamic')
           Text('固定大小').fontSize(tLabel)
-            .fontColor(this.diskAlloc === 'fixed' ? cPrimary : Color.Black)
+            .fontColor(this.diskAlloc === 'fixed' ? cPrimary : cText)
             .onClick(() => this.diskAlloc = 'fixed')
         }
       }
@@ -512,50 +514,60 @@ export struct VmWizard {
         /* 新建：先展示磁贴模板；点磁贴/「从零开始」才进表单 */
         this.templateTiles()
       } else {
-        Row() {
-          Button('取消').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
-            .fontColor(cPrimary)
-            .onClick(() => { if (this.onClose) this.onClose(); })
-          Blank()
-          Text('机器工坊').fontSize(tPage).fontWeight(FontWeight.Medium)
-          Blank()
-          Button(this.step === STEPS.length - 1 ? '完成' : '下一步')
-            .focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
-            .fontColor(cPrimary)
-            .onClick(() => {
-              if (this.step < STEPS.length - 1) {
-                this.step++;
-              } else {
-                this.finish();
-              }
-            })
-        }
-        .width('100%')
-        .padding({ left: sp2, right: sp2, top: sp2, bottom: sp2 })
-
-        this.stepHeader()
-
-        Scroll() {
-          Column() {
-            if (this.step === 0) { this.stepArch() }
-            else if (this.step === 1) { this.stepBoard() }
-            else if (this.step === 2) { this.stepCpuMem() }
-            else if (this.step === 3) { this.stepMedia() }
-            else if (this.step === 4) { this.stepNet() }
-            else if (this.step === 5) { this.stepPreview() }
-            if (this.step < STEPS.length - 1) {
-              Button('上一步').focusable(false).fontSize(tBody)
-                .backgroundColor(Color.Black)
-                .fontColor(cSub)
-                .margin({ top: 16 })
-                .onClick(() => { if (this.step > 0) this.step--; })
-            }
+        Column() {
+          Row({ space: sp2 }) {
+            Button('上一步').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
+              .fontColor(this.step > 0 ? cPrimary : cWeak)
+              .enabled(this.step > 0)
+              .onClick(() => { if (this.step > 0) { this.step--; } })
+            Blank()
+            Text('创建虚拟机').fontSize(tPage).fontWeight(FontWeight.Medium)
+            Blank()
+            Button('关闭').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
+              .fontColor(cSub)
+              .onClick(() => { if (this.onClose) this.onClose(); })
           }
           .width('100%')
-          .padding({ bottom: 24 })
+          .padding({ left: sp2, right: sp2, top: sp2, bottom: sp2 })
+
+          this.stepHeader()
+
+          Scroll() {
+            Column() {
+              if (this.step === 0) { this.stepArch() }
+              else if (this.step === 1) { this.stepBoard() }
+              else if (this.step === 2) { this.stepCpuMem() }
+              else if (this.step === 3) { this.stepMedia() }
+              else if (this.step === 4) { this.stepNet() }
+              else if (this.step === 5) { this.stepPreview() }
+            }
+            .width('100%')
+            .padding({ bottom: 24 })
+          }
+          .layoutWeight(1)
+          .align(Alignment.Top)
+
+          /* 内容下方：下一步 / 完成（固定不随滚动） */
+          Row() {
+            Blank()
+            Button(this.step === STEPS.length - 1 ? '完成' : '下一步')
+              .focusable(false).fontSize(tBody).backgroundColor(Color.Transparent)
+              .fontColor(cPrimary)
+              .onClick(() => {
+                if (this.step < STEPS.length - 1) {
+                  this.step++;
+                } else {
+                  this.finish();
+                }
+              })
+            Blank()
+          }
+          .width('100%')
+          .padding({ left: sp2, right: sp2, top: sp2, bottom: sp2 })
+          .backgroundColor(cBg)
         }
-        .layoutWeight(1)
-        .align(Alignment.Top)
+        .width('100%')
+        .height('100%')
       }
     }
     .width('100%')

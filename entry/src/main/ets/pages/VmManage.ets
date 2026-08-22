@@ -2,7 +2,6 @@
 // 快照归属单台 VM，不进跨 VM 的库；临时会话打点/回滚见 lib/tempSession。
 // 从列表侧栏点行进（Navigation replace 渲染到 content/detail 区）；成功反馈走右下角 snackbar。
 import { promptAction } from '@kit.ArkUI';
-import { fileIo as fs } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import napiModule from 'libentry.so';
@@ -21,7 +20,6 @@ import {
 
 interface DiskNapi {
   diskInfo: (path: string) => string;
-  diskResize: (path: string, sizeMB: number) => number;
 }
 
 const napi = napiModule as DiskNapi;
@@ -41,8 +39,6 @@ export struct VmManage {
   @State diskFmt: string = '?';
   @State diskVirtualGB: number = 0;
   @State diskActualGB: number = 0;
-  @State expandMode: boolean = false;
-  @State newGBText: string = '';
   @State snapshots: VmSnapshotEntry[] = [];
   @State snapNameText: string = '';
   @State snapCreateMode: boolean = false;
@@ -50,6 +46,7 @@ export struct VmManage {
   @State netEnabled: boolean = false;
   @State snack: string = '';
   @State nowSec: number = 0; /* 进入页面时的时间基准，供「当前」快照节点稳定展示 */
+  @State isWide: boolean = false; /* 宽屏(Split)下隐藏返回；getWindowSize 判宽 */
 
   aboutToAppear(): void {
     const p = this.profile;
@@ -235,80 +232,7 @@ export struct VmManage {
       `${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
-  private showDiskInfo(): void {
-    promptAction.showToast({
-      message: `${this.diskFmt} · 虚拟${this.diskVirtualGB.toFixed(1)}G · 实占${this.diskActualGB.toFixed(1)}G`,
-    });
-  }
-
-  /* qcow2 只能扩大：目标须大于当前 virtual-size；运行中不能动 backing 盘 */
-  private doExpand(): void {
-    if (!this.diskPath) {
-      return;
-    }
-    if (this.profile && vmIsRunning(this.profile.id)) {
-      promptAction.showToast({ message: '运行中不能扩容系统盘' });
-      return;
-    }
-    const gbNum = Number(this.newGBText);
-    if (!Number.isInteger(gbNum) || gbNum <= 0) {
-      promptAction.showToast({ message: '请输入有效的大小（GB）' });
-      return;
-    }
-    if (gbNum * GB <= this.diskVirtualGB) {
-      promptAction.showToast({ message: '扩容目标须大于当前大小' });
-      return;
-    }
-    const ret = napi.diskResize(this.diskPath, gbNum * 1024);
-    if (ret !== 0) {
-      promptAction.showToast({ message: '扩容失败' });
-      return;
-    }
-    this.expandMode = false;
-    this.newGBText = '';
-    this.refreshDisk();
-    this.showSnack(`已扩容到 ${gbNum} GB`);
-  }
-
-  private confirmRemove(): void {
-    if (!this.profile) {
-      return;
-    }
-    if (vmIsRunning(this.profile.id)) {
-      promptAction.showToast({ message: '运行中不能移除系统盘' });
-      return;
-    }
-    AlertDialog.show({
-      title: '移除系统盘',
-      message: '移除后该虚拟机的系统盘文件将被删除，且不可恢复。确认？',
-      primaryButton: { value: '取消', action: () => {} },
-      secondaryButton: {
-        value: '移除',
-        fontColor: cDanger,
-        action: () => {
-          const p = this.profile;
-          if (!p) {
-            return;
-          }
-          try {
-            if (this.diskPath && fs.accessSync(this.diskPath)) {
-              fs.unlinkSync(this.diskPath);
-            }
-          } catch {
-            /* 删除失败不阻塞，仍清引用 */
-          }
-          p.media.diskPath = '';
-          new VmStore(this.filesDir).save(p);
-          this.diskPath = '';
-          this.vmListVersion++;
-          this.refreshDisk();
-          this.showSnack('已移除系统盘');
-        },
-      },
-    });
-  }
-
-  /* ================= 顶部操作：进入 console 窗口 / 编辑 / 删除虚拟机 ================= */
+  /* ================= 顶部操作：进入 console 窗口 / 编辑 / 存储 / 删除虚拟机 ================= */
 
   private openConsole(): void {
     const p = this.profile;
@@ -333,6 +257,14 @@ export struct VmManage {
     }
     /* 工坊已迁模态（VmList 侧栏长按「编辑」承载）；详情页编辑走扁平高级入口 VmEdit */
     this.navStack.pushPath({ name: 'edit', param: p });
+  }
+
+  /* 进入这台 VM 的「存储」页（per-VM 虚拟盘管理） */
+  private openStorage(): void {
+    const p = this.profile;
+    if (p) {
+      this.navStack.pushPath({ name: 'storage', param: p });
+    }
   }
 
   private confirmDeleteVm(): void {
@@ -391,41 +323,12 @@ export struct VmManage {
     if (!this.diskPath) {
       Text('未配置系统盘，可到配置页添加').fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp1 })
     } else {
-      Column() {
-        Row() {
-          Text(`${this.diskFmt} · 虚拟 ${this.diskVirtualGB.toFixed(1)}G`).fontSize(tSub).fontColor(cSub)
-          Blank()
-          Text(`实占 ${this.diskActualGB.toFixed(1)}G`).fontSize(tSub).fontColor(cSub)
-        }.width('100%')
-        /* 实占/虚拟 进度条 */
-        Stack({ alignContent: Alignment.Start }) {
-          Row().width('100%').height(6).backgroundColor(cBlock).borderRadius(rElem)
-          Row().width((Math.min(100, (this.diskActualGB / Math.max(0.1, this.diskVirtualGB)) * 100)).toString() + '%')
-            .height(6).backgroundColor(cPrimary).borderRadius(rElem)
-        }.width('100%').margin({ top: sp1, bottom: sp1 })
-        Row({ space: sp2 }) {
-          Button('信息').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cSub)
-            .onClick(() => this.showDiskInfo())
-          Button('扩容').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cSub)
-            .onClick(() => {
-              this.newGBText = this.diskVirtualGB > 0 ? String(Math.ceil(this.diskVirtualGB)) : '';
-              this.expandMode = !this.expandMode;
-            })
-          Button('移除').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cDanger)
-            .onClick(() => this.confirmRemove())
-        }
-        if (this.expandMode) {
-          Row({ space: sp2 }) {
-            Text('新大小(GB)').fontSize(tSub).fontColor(cSub)
-            TextInput({ text: this.newGBText }).type(InputType.Number).layoutWeight(1).fontSize(tSub)
-              .onChange((v: string) => this.newGBText = v)
-            Button('确定').focusable(false).fontSize(tSub).backgroundColor(cPrimary).fontColor(Color.White)
-              .onClick(() => this.doExpand())
-            Button('取消').focusable(false).fontSize(tSub).backgroundColor(Color.Transparent).fontColor(cSub)
-              .onClick(() => this.expandMode = false)
-          }.margin({ top: sp2 })
-        }
-      }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp2 })
+      Row() {
+        Text(`系统盘 ${this.diskFmt} · 虚拟 ${this.diskVirtualGB.toFixed(1)}G · 实占 ${this.diskActualGB.toFixed(1)}G`)
+          .fontSize(tSub).fontColor(cSub).layoutWeight(1)
+        Button('去存储页管理').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+          .onClick(() => this.openStorage())
+      }.width('100%').padding({ top: sp1, bottom: sp2 }).alignItems(VerticalAlign.Center)
     }
   }
 
@@ -534,8 +437,10 @@ export struct VmManage {
       Column() {
         /* 顶部行：返回 / 名称+运行徽标+arch / 进入·编辑·删除 */
         Row({ space: sp2 }) {
-          Button('返回').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
-            .onClick(() => this.navStack.pop())
+          if (!this.isWide) {
+            Button('返回').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+              .onClick(() => this.navStack.pop())
+          }
           Column({ space: 1 }) {
             Row({ space: sp1 }) {
               Text(this.name).fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cText)
@@ -553,7 +458,7 @@ export struct VmManage {
           Button('编辑').focusable(false).fontSize(tBody).backgroundColor(cBlock).fontColor(cPrimary)
             .onClick(() => this.openEdit())
           Button('存储').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
-            .onClick(() => this.navStack.pushPath({ name: 'storage' }))
+            .onClick(() => this.openStorage())
           Button('删除').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.confirmDeleteVm())
         }
@@ -608,5 +513,8 @@ export struct VmManage {
     }
     .width('100%')
     .height('100%')
+    .onAreaChange((oldValue: Area, newValue: Area) => {
+      this.isWide = newValue.width >= 600;
+    })
   }
 }
