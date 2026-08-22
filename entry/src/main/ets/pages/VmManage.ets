@@ -9,6 +9,7 @@ import { vmIsRunning } from '../lib/vmregistry';
 import {
   VmSnapshotEntry, snapshotCreate, snapshotApply, snapshotDelete, parseSnapshots,
 } from '../lib/vmsnapshot';
+import { isTempSnapshot } from '../lib/tempSession';
 
 interface DiskNapi {
   diskInfo: (path: string) => string;
@@ -36,6 +37,7 @@ export struct VmManage {
   @State snapshots: VmSnapshotEntry[] = [];
   @State snapNameText: string = '';
   @State snapCreateMode: boolean = false;
+  @State tempSession: boolean = false;
 
   aboutToAppear(): void {
     const p = this.profile;
@@ -45,6 +47,7 @@ export struct VmManage {
     this.name = p.name;
     this.arch = p.machine.arch;
     this.diskPath = p.media.diskPath;
+    this.tempSession = p.temporarySession;
     this.refreshDisk();
     this.refreshSnapshot();
   }
@@ -104,8 +107,10 @@ export struct VmManage {
       this.snapshots = [];
       return;
     }
-    /* 列表来自 qemu-img info --output=json 的 snapshots 数组（同 diskInfo 的原始 JSON） */
-    this.snapshots = parseSnapshots(napi.diskInfo(this.diskPath));
+    /* 列表来自 qemu-img info --output=json 的 snapshots 数组（同 diskInfo 的原始 JSON）；
+     * 临时会话的 `__temp__` 点是机制层产物，滤掉不打扰用户 */
+    this.snapshots = parseSnapshots(napi.diskInfo(this.diskPath))
+      .filter((s: VmSnapshotEntry) => !isTempSnapshot(s.name));
     if (this.snapshots.length > 0) {
       this.snapshots.sort((a, b) => b.dateSec - a.dateSec);
     }
@@ -180,6 +185,19 @@ export struct VmManage {
         },
       },
     });
+  }
+
+  /* 切换「临时会话启动模式」：开机前打会话起点内部快照，停机自动回滚丢弃本次改动 */
+  private doSetTemp(v: boolean): void {
+    const p = this.profile;
+    if (!p) {
+      return;
+    }
+    p.temporarySession = v;
+    new VmStore(this.filesDir).save(p);
+    this.tempSession = v;
+    this.vmListVersion++;
+    promptAction.showToast({ message: v ? '已开启临时会话（启动后改动将被丢弃）' : '已关闭临时会话' });
   }
 
   private dateStr(sec: number): string {
@@ -336,6 +354,13 @@ export struct VmManage {
               Text(this.snapStatus()).fontSize(12).fontColor(
                 this.canSnapshot() ? '#ff2e7d32' : '#ff999999')
             }
+            Row() {
+              Text('临时会话（启动即回滚）').fontSize(14).layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.tempSession })
+                .onChange((v: boolean) => this.doSetTemp(v))
+            }
+            Text('以临时会话启动：开机前打一个起点快照，关机自动回滚并丢弃本次改动（需 qcow2 系统盘）')
+              .fontSize(11).fontColor('#ff999999')
             if (this.hasQcow()) {
               if (this.canSnapshot()) {
                 Row({ space: 8 }) {

@@ -10,6 +10,7 @@ import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
 import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir } from '../lib/vmprofile';
+import { prepareStart } from '../lib/tempSession';
 import { getConsoleWindow, takePendingVmId } from '../lib/vmwindows';
 
 interface ScreenShotBuf {
@@ -181,6 +182,19 @@ struct VmConsole {
         /* 目录建不出来就不挂 9p，让 qemu 自行忽略 */
         share = '';
       }
+    }
+    /* 启动前的快照结算 + 临时会话打点：仅 qcow2 支持（raw 无内部快照）。
+     * 失败则拒启，避免"用户以为会回滚却没回滚"。 */
+    const disk = this.profile.media.diskPath;
+    if (this.profile.temporarySession &&
+      (disk.length === 0 || !disk.toLowerCase().endsWith('.qcow2'))) {
+      this.status = '临时会话需 qcow2 系统盘';
+      return;
+    }
+    const tr = prepareStart(this.profile.id, disk, this.profile.temporarySession);
+    if (tr !== 0) {
+      this.status = '临时会话打点失败: ' + tr;
+      return;
     }
     /* 每次启动都是一个新的 NCP 子进程；多实例按 vmId 各起各的 */
     const ret = napi.startVm(this.vmId, this.profile.machine.arch,

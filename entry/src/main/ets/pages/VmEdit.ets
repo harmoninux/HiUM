@@ -147,6 +147,7 @@ export struct VmEdit {
         portForwards: this.portForwards.trim(),
         sharedFolder: this.sharedFolder,
       },
+      temporarySession: this.profile.temporarySession,
       extraArgs: this.extraArgs.trim(),
     };
     new VmStore(this.filesDir).save(p);

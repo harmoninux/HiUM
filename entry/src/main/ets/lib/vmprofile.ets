@@ -46,6 +46,7 @@ export interface VmProfile {
   runtime: VmRuntime;
   media: VmMedia;
   net: VmNet;
+  temporarySession: boolean; /* 临时会话启动模式：开机前打会话起点内部快照，停机自动回滚丢弃 */
   extraArgs: string;  /* escape hatch：原样追加到 qemu 命令行 */
 }
 
@@ -62,6 +63,7 @@ export function blankProfile(id: string): VmProfile {
     runtime: { memoryMB: 1024, cpus: 2, mttcg: true, tbSize: 1024 },
     media: { diskPath: '', cdromPath: '', bootFromCdrom: false },
     net: { enabled: true, portForwards: '', sharedFolder: false },
+    temporarySession: false,
     extraArgs: '',
   };
 }
@@ -171,6 +173,7 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
     p.net.portForwards = jStr(n, 'portForwards');
     p.net.sharedFolder = jBool(n, 'sharedFolder', p.net.sharedFolder);
   }
+  p.temporarySession = jBool(o, 'temporarySession', false);
   p.extraArgs = jStr(o, 'extraArgs');
   return p;
 }
