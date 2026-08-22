@@ -299,10 +299,6 @@ export struct VmManage {
     return this.profile ? this.profile.machine.vga : '';
   }
 
-  private netLabel(): string {
-    return this.profile ? (this.profile.net.enabled ? '网络开' : '网络关') : '';
-  }
-
   /* ================= 分区 ================= */
 
   @Builder
@@ -467,10 +463,6 @@ export struct VmManage {
               }
               if (this.vgaLabel().length > 0) {
                 Text(this.vgaLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
-                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-              }
-              if (this.netLabel().length > 0) {
-                Text(this.netLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
             }
