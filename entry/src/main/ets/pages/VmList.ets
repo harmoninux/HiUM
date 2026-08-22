@@ -10,8 +10,7 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import napiModule from 'libentry.so';
 import {
-  VmProfile, VmStore,
-  newProfileId, alpineProfile, qmpSockPath,
+  VmProfile, VmStore, qmpSockPath,
 } from '../lib/vmprofile';
 import { OsTemplate } from '../lib/osTemplates';
 import { WizardParam } from './VmWizard';
@@ -97,12 +96,6 @@ export struct VmList {
   private reload(): void {
     const store = this.store();
     let list = store.list();
-    if (list.length === 0 && this.firmwareReady) {
-      /* 首次使用：内置 Alpine 预设，开箱即用 */
-      const seed = alpineProfile(newProfileId(), this.vmDataDir);
-      store.save(seed);
-      list = [seed];
-    }
     this.profiles = list;
     this.thumbTick++;
     /* 磁盘实占用量（stat 元数据，快；不 fork qemu-img） */
