@@ -10,7 +10,7 @@ import {
 } from '../lib/vmprofile';
 import { OsTemplate, OS_TEMPLATES } from '../lib/osTemplates';
 import {
-  cPrimary, cSub, cWeak, cCard, cBorder, cRunning, cWarn, cBg,
+  cPrimary, cSub, cWeak, cText, cCard, cBorder, cRunning, cWarn, cBg, cBlock,
   tPage, tCard, tBody, tSub,
   sp1, sp2, sp3, sp4, rCard, bw,
 } from '../lib/uiTokens';
@@ -275,18 +275,18 @@ export struct VmWizard {
   @Builder
   stepArch() {
     Column({ space: 12 }) {
-      Text('选择 CPU 架构（决定可用板卡与固件）').fontSize(13).fontColor('#ff666666')
+      Text('选择 CPU 架构（决定可用板卡与固件）').fontSize(13).fontColor(cSub)
       Row({ space: 10 }) {
         ForEach(ARCH_OPTIONS, (a: VmArch) => {
           Column() {
             Text(a).fontSize(15).fontWeight(FontWeight.Medium)
-            if (a === 'aarch64') { Text('arm64').fontSize(11).fontColor('#ff999999') }
-            if (a === 'x86_64') { Text('现代 x86').fontSize(11).fontColor('#ff999999') }
-            if (a === 'i386') { Text('复古 x86').fontSize(11).fontColor('#ff999999') }
+            if (a === 'aarch64') { Text('arm64').fontSize(11).fontColor(cWeak) }
+            if (a === 'x86_64') { Text('现代 x86').fontSize(11).fontColor(cWeak) }
+            if (a === 'i386') { Text('复古 x86').fontSize(11).fontColor(cWeak) }
           }
           .layoutWeight(1)
           .padding(12)
-          .backgroundColor(this.arch === a ? '#ff007dff' : Color.White)
+          .backgroundColor(this.arch === a ? cPrimary : Color.White)
           .borderRadius(8)
           .onClick(() => {
             this.arch = a;
@@ -303,16 +303,16 @@ export struct VmWizard {
   @Builder
   stepBoard() {
     Column({ space: 10 }) {
-      Text('板卡 + 固件（按架构过滤）').fontSize(13).fontColor('#ff666666')
+      Text('板卡 + 固件（按架构过滤）').fontSize(13).fontColor(cSub)
       Row({ space: 10 }) {
         ForEach(this.boards(), (b: string) => {
           Column() {
             Text(b).fontSize(15).fontWeight(FontWeight.Medium)
-            Text(this.boardName(b)).fontSize(10).fontColor('#ff999999')
+            Text(this.boardName(b)).fontSize(10).fontColor(cWeak)
           }
           .layoutWeight(1)
           .padding(12)
-          .backgroundColor(this.board === b ? '#ff007dff' : Color.White)
+          .backgroundColor(this.board === b ? cPrimary : Color.White)
           .borderRadius(8)
           .onClick(() => this.board = b as VmBoard)
         }, (b: string) => b)
@@ -321,28 +321,28 @@ export struct VmWizard {
 
       Row({ space: 10 }) {
         Column() {
-          Text('固件').fontSize(13).fontColor('#ff666666')
+          Text('固件').fontSize(13).fontColor(cSub)
           Text('SeaBIOS').fontSize(14)
-            .fontColor(this.firmware === 'seabios' ? '#ff007dff' : Color.Black)
+            .fontColor(this.firmware === 'seabios' ? cPrimary : Color.Black)
             .onClick(() => this.firmware = 'seabios')
         }.layoutWeight(1)
         Column() {
-          Text('OVMF (UEFI)').fontSize(13).fontColor('#ff666666')
+          Text('OVMF (UEFI)').fontSize(13).fontColor(cSub)
           Text('OVMF').fontSize(14)
-            .fontColor(this.firmware === 'ovmf' ? '#ff007dff' : Color.Black)
+            .fontColor(this.firmware === 'ovmf' ? cPrimary : Color.Black)
             .onClick(() => this.firmware = 'ovmf')
         }.layoutWeight(1)
       }
       .width('100%')
 
-      Text('CPU 机型（留空 = 自动；aarch64 默认 max，x86 用板卡默认）').fontSize(12).fontColor('#ff999999')
+      Text('CPU 机型（留空 = 自动；aarch64 默认 max，x86 用板卡默认）').fontSize(12).fontColor(cWeak)
       TextInput({ text: this.cpuModel, placeholder: '如 cortex-a57 / max / host' })
         .fontSize(13)
         .onChange((v: string) => this.cpuModel = v)
 
       if (this.firmware === 'ovmf') {
         Text('OVMF 需板卡支持 + OVMF_CODE/VARS 固件（make deps 尚未产出，暂回落 SeaBIOS）')
-          .fontSize(11).fontColor('#ff9900')
+          .fontSize(11).fontColor(cWarn)
       }
     }
     .alignItems(HorizontalAlign.Start)
@@ -385,7 +385,7 @@ export struct VmWizard {
       }
       if (this.diskEnabled) {
         Text(this.diskPath ? fs.accessSync(this.diskPath) ? '已有盘: ' + this.baseName(this.diskPath) : '新建: ' + this.baseName(this.diskPath) : '保存时创建')
-          .fontSize(12).fontColor('#ff666666')
+          .fontSize(12).fontColor(cSub)
         Row({ space: 8 }) {
           Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
             min: 0, max: DISK_SIZES.length - 1, step: 1 })
@@ -395,10 +395,10 @@ export struct VmWizard {
         }
         Row({ space: 8 }) {
           Text('动态分配').fontSize(13)
-            .fontColor(this.diskAlloc === 'dynamic' ? '#ff007dff' : Color.Black)
+            .fontColor(this.diskAlloc === 'dynamic' ? cPrimary : Color.Black)
             .onClick(() => this.diskAlloc = 'dynamic')
           Text('固定大小').fontSize(13)
-            .fontColor(this.diskAlloc === 'fixed' ? '#ff007dff' : Color.Black)
+            .fontColor(this.diskAlloc === 'fixed' ? cPrimary : Color.Black)
             .onClick(() => this.diskAlloc = 'fixed')
         }
       }
@@ -406,7 +406,7 @@ export struct VmWizard {
       Row() {
         Text('光盘 ISO').fontSize(14).width(72)
         Text(this.cdromPath ? this.baseName(this.cdromPath) : '无')
-          .fontSize(13).fontColor('#ff666666').layoutWeight(1)
+          .fontSize(13).fontColor(cSub).layoutWeight(1)
         if (this.cdromPath.length > 0) {
           Button('移除').focusable(false).fontSize(12)
             .onClick(() => this.cdromPath = '')
@@ -432,7 +432,7 @@ export struct VmWizard {
           .onChange((v: boolean) => this.bootFromCdrom = v)
       }
 
-      Text('直启内核（-kernel/-initrd/-append，教学/实验室）').fontSize(13).fontColor('#ff666666')
+      Text('直启内核（-kernel/-initrd/-append，教学/实验室）').fontSize(13).fontColor(cSub)
         .margin({ top: 4 })
       Row() {
         Text('直启内核').fontSize(14).layoutWeight(1)
@@ -461,7 +461,7 @@ export struct VmWizard {
           .onChange((v: boolean) => this.netEnabled = v)
       }
       if (this.netEnabled) {
-        Text('端口转发（宿主端口:客机端口，逗号分隔）').fontSize(12).fontColor('#ff666666')
+        Text('端口转发（宿主端口:客机端口，逗号分隔）').fontSize(12).fontColor(cSub)
         TextInput({ placeholder: '如 2222:22,8080:80', text: this.portForwards })
           .fontSize(13).onChange((v: string) => this.portForwards = v)
         Row() {
@@ -470,7 +470,7 @@ export struct VmWizard {
             .onChange((v: boolean) => this.sharedFolder = v)
         }
         if (this.sharedFolder) {
-          Text('挂载宿主 filesDir/shared 到客机 /shared（9p）').fontSize(11).fontColor('#ff999999')
+          Text('挂载宿主 filesDir/shared 到客机 /shared（9p）').fontSize(11).fontColor(cWeak)
         }
       }
     }
@@ -486,16 +486,16 @@ export struct VmWizard {
         .layoutWeight(1)
         .onChange((v: string) => this.name = v)
       Row() {
-        Text('qemu 参数预览').fontSize(13).fontColor('#ff666666')
+        Text('qemu 参数预览').fontSize(13).fontColor(cSub)
         Blank()
-        Text('只读').fontSize(11).fontColor('#ff999999')
+        Text('只读').fontSize(11).fontColor(cWeak)
       }
       Text(buildArgs(this.assemble(newProfileId()), this.vmDataDir, sharedDir(this.filesDir)).join(' '))
         .fontSize(10)
-        .fontColor('#ff444444')
+        .fontColor(cText)
         .padding(8)
         .width('100%')
-        .backgroundColor('#fff5f5f5')
+        .backgroundColor(cBlock)
         .borderRadius(6)
     }
     .alignItems(HorizontalAlign.Start)
@@ -546,8 +546,8 @@ export struct VmWizard {
             else if (this.step === 5) { this.stepPreview() }
             if (this.step < STEPS.length - 1) {
               Button('上一步').focusable(false).fontSize(14)
-                .backgroundColor('#ff000000')
-                .fontColor('#ff666666')
+                .backgroundColor(Color.Black)
+                .fontColor(cSub)
                 .margin({ top: 16 })
                 .onClick(() => { if (this.step > 0) this.step--; })
             }
