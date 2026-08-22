@@ -97,12 +97,6 @@ export struct VmStorage {
     }
   }
 
-  private showDiskInfo(): void {
-    promptAction.showToast({
-      message: `${this.diskFmt} · 虚拟${this.diskVirtualGB.toFixed(1)}G · 实占${this.diskActualGB.toFixed(1)}G`,
-    });
-  }
-
   /* 快照需 qcow2 且 VM 停机（运行中盘被 qemu 锁死，改了会丢） */
   private canSnapshot(): boolean {
     return this.diskFmt === 'qcow2' && this.profile !== null && !vmIsRunning(this.profile.id);
@@ -216,7 +210,7 @@ export struct VmStorage {
       .padding({ top: sp1, bottom: sp1 }).width('100%')
   }
 
-  /* 系统盘：信息 / 扩容 / 移除（从 VmManage 平移到 per-VM 存储页） */
+  /* 系统盘：扩磎 / 移除 / 创建快照（从 VmManage 平移到 per-VM 存储页） */
   @Builder
   secSystemDisk() {
     this.secHead('系统盘')
@@ -236,10 +230,6 @@ export struct VmStorage {
             .height(6).backgroundColor(cPrimary).borderRadius(rElem)
         }.width('100%').margin({ top: sp1, bottom: sp1 })
         Row({ space: sp2 }) {
-          Button('信息').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-            .backgroundColor(Color.Transparent).fontColor(cSub)
-            .onClick(() => this.showDiskInfo())
           Button('扩容').focusable(false).fontSize(tBody)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
             .backgroundColor(Color.Transparent).fontColor(cSub)
