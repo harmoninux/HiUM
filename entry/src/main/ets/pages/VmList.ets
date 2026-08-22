@@ -244,10 +244,10 @@ export struct VmList {
       p.machine.arch.toLowerCase().indexOf(f) >= 0);
   }
 
-  /* 点行：记选中态 + 在 content 区渲染该 VM 详情 */
+  /* 点行：记选中态 + 在 content 区替换该 VM 详情（不叠历史栈，返回键直接退出详情） */
   private select(p: VmProfile): void {
     this.selectedId = p.id;
-    this.navStack.pushPath({ name: 'manage', param: p });
+    this.navStack.replacePath({ name: 'manage', param: p });
   }
 
   private runningCount(): number {
