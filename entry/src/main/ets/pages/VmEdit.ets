@@ -34,7 +34,6 @@ export struct VmEdit {
   @State diskPath: string = '';
   @State diskGB: number = 8;
   @State diskAlloc: string = 'dynamic'; /* dynamic|fixed → qemu-img preallocation=off|falloc */
-  @State diskCreate: boolean = false; /* 「启用系统盘」开关：开 = 保存时建盘，关 = 仅光盘/不加盘 */
   @State cdromPath: string = '';
   @State bootFromCdrom: boolean = false;
   @State vga: VgaType = 'std';
@@ -124,8 +123,8 @@ export struct VmEdit {
     if (!this.profile) {
       return;
     }
-    /* 用户启用系统盘：保存时才真正建盘（建失败不保存，避免半成品配置） */
-    if (this.diskCreate && !this.diskPath) {
+    /* 系统盘必配：无盘时保存即建盘（建失败不保存，避免半成品配置）。 */
+    if (!this.diskPath) {
       if (!this.createDiskNow()) {
         return;
       }
@@ -244,23 +243,12 @@ export struct VmEdit {
                 }
                 .alignItems(HorizontalAlign.Start)
                 .layoutWeight(1)
-                Button('移除').focusable(false).fontSize(tBody)
-                  .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
-                  .backgroundColor(Color.Transparent).fontColor(cDanger)
-                  .onClick(() => {
-                    this.diskPath = '';
-                    this.diskCreate = false;
-                    this.diskFmt = '?';
-                    this.diskVirtualGB = 0;
-                    this.diskActualGB = 0;
-                  })
+                Text('扩容 / 重建在存储页').fontSize(tBody).fontColor(cWeak)
               } else {
-                Text('无').fontSize(tSub).fontColor(cSub).layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.diskCreate })
-                  .onChange((v: boolean) => this.diskCreate = v)
+                Text('保存时创建').fontSize(tSub).fontColor(cSub).layoutWeight(1)
               }
             }
-            if (!this.diskPath && this.diskCreate) {
+            if (!this.diskPath) {
               Row({ space: 8 }) {
                 Text('分配方式').fontSize(tSub).fontColor(cSub)
                 Text('动态分配').fontSize(tLabel)

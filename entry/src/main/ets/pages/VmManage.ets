@@ -48,6 +48,8 @@ export struct VmManage {
   @State snack: string = '';
   @State nowSec: number = 0; /* 进入页面时的时间基准，供「当前」快照节点稳定展示 */
   @State isWide: boolean = false; /* 宽屏(Split)下隐藏返回；getWindowSize 判宽 */
+  @Consume('showStorage') showStorage: boolean; /* 存储弹窗开关（Index 全窗口遮罩层） */
+  @Consume('storageParam') storageParam: VmProfile | null; /* 当前打开的存储弹窗所属 VM */
 
   aboutToAppear(): void {
     this.refreshProfile();
@@ -285,11 +287,13 @@ export struct VmManage {
     this.navStack.pushPath({ name: 'edit', param: p });
   }
 
-  /* 进入这台 VM 的「存储」页（per-VM 虚拟盘管理） */
+  /* 打开这台 VM 的「存储」弹窗：由 Index 层以全窗口遮罩承载（铺满主界面，含侧栏），
+   * 与机器工坊同款；这里只置参数并开开关。 */
   private openStorage(): void {
     const p = this.profile;
     if (p) {
-      this.navStack.pushPath({ name: 'storage', param: p });
+      this.storageParam = p;
+      this.showStorage = true;
     }
   }
 
@@ -509,10 +513,6 @@ export struct VmManage {
             .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
             .backgroundColor(cBlock).fontColor(cPrimary)
             .onClick(() => this.openEdit())
-          Button('存储').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-            .backgroundColor(Color.Transparent).fontColor(cPrimary)
-            .onClick(() => this.openStorage())
           Button('删除').focusable(false).fontSize(tBody)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
             .backgroundColor(Color.Transparent).fontColor(cDanger)
@@ -571,6 +571,7 @@ export struct VmManage {
         .backgroundColor(cText).borderRadius(rElem)
         .position({ right: sp4, bottom: sp4 })
       }
+
     }
     .width('100%')
     .height('100%')

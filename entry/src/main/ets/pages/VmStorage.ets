@@ -1,6 +1,6 @@
-// 单台虚拟机的「存储」页（per-VM 虚拟盘管理）：系统盘 信息/扩容/移除 + 光盘 ISO 引用。
-// 系统盘是这台 VM 自己的资产，维护操作只发生在 per-VM 页；跨 VM 集中总览已弃用。
-// 由 VmManage（详情）顶部「存储」按钮带参进入（pushPath { name:'storage', param }）。
+// 单台虚拟机的「存储」弹窗（per-VM 虚拟盘管理）：系统盘 扩容/重建 + 光盘 ISO 引用。
+// 系统盘是这台 VM 自己的资产，维护操作只发生在 per-VM 弹窗；跨 VM 集中总览已弃用。
+// 由 VmManage（详情）顶部「存储」按钮以内容弹窗（bindContentCover）承载，onClose 关闭。
 // 快照依赖系统盘存在，但快照本身留在详情页（VmManage.secSnapshot），此处不做。
 import { promptAction } from '@kit.ArkUI';
 import { fileIo as fs } from '@kit.CoreFileKit';
@@ -19,6 +19,7 @@ import {
 interface DiskNapi {
   diskInfo: (path: string) => string;
   diskResize: (path: string, sizeMB: number) => number;
+  createDisk: (path: string, sizeMB: number, alloc: string) => number;
 }
 
 const napi = napiModule as DiskNapi;
@@ -26,8 +27,8 @@ const GB = 1024 * 1024 * 1024;
 
 @Component
 export struct VmStorage {
-  profile: VmProfile | null = null; /* 由导航参数传入 */
-  @Consume('navStack') navStack: NavPathStack;
+  @Prop profile: VmProfile | null = null; /* 由 Index 全窗口弹窗传入（@Provide → @Prop） */
+  onClose: (() => void) | null = null; /* 关闭回调；宿主通过它把内容弹窗关掉 */
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmListVersion') vmListVersion: number = 0;
 
@@ -43,7 +44,6 @@ export struct VmStorage {
   @State snapCreateMode: boolean = false;
   @State cdromPath: string = '';
   @State snack: string = '';
-  @State isWide: boolean = false; /* 宽屏(Split)下隐藏返回；getWindowSize 判宽 */
 
   aboutToAppear(): void {
     const p = this.profile;
@@ -152,39 +152,59 @@ export struct VmStorage {
     this.showSnack(`已扩容到 ${gbNum} GB`);
   }
 
-  private confirmRemove(): void {
-    if (!this.profile) {
+  /* 重建系统盘：删除现有镜像并在同路径创建全新的空盘。这是唯一允许的破坏性磁盘操作
+   * （「移除」被禁用），仅离线可操作；重建后旧数据/快照全部丢失，用 AlertDialog 强确认。 */
+  private confirmRebuild(): void {
+    const p = this.profile;
+    if (!p) {
       return;
     }
-    if (vmIsRunning(this.profile.id)) {
-      promptAction.showToast({ message: '运行中不能移除系统盘' });
+    if (vmIsRunning(p.id)) {
+      promptAction.showToast({ message: '运行中不能重建系统盘' });
       return;
     }
+    /* 重建尺寸沿用当前虚拟大小（未知回退 8G）；事后仍需更大可走「扩容」 */
+    const mb = Math.round((this.diskVirtualGB > 0 ? this.diskVirtualGB : 8) * 1024);
     AlertDialog.show({
-      title: '移除系统盘',
-      message: '移除后该虚拟机的系统盘文件将被删除，且不可恢复。确认？',
+      title: '重建系统盘',
+      message: `将删除现有系统盘镜像并在同一位置创建全新的空盘（约 ${Math.ceil(mb / 1024)} GB）。\n当前数据与快照将全部丢失，且不可恢复。确认？`,
       primaryButton: { value: '取消', action: () => {} },
       secondaryButton: {
-        value: '移除',
+        value: '重建',
         fontColor: cDanger,
         action: () => {
-          const p = this.profile;
-          if (!p) {
+          const cur = this.profile;
+          if (!cur) {
             return;
           }
+          const store = new VmStore(this.filesDir);
+          /* 重建统一落到应用管理的标准 qcow2 路径，避免在导入的 raw 路径下建出
+           * qcow2 而扩展名/格式不符；旧的导入镜像属用户资产，不属于本应用 vms 目录则不删 */
+          const path = `${store.dir}/${cur.id}.qcow2`;
+          this.diskPath = path; /* 本页读取/渲染统一走 new 后的路径 */
+          /* 删旧镜像：仅在应用 vms 目录内（同 VmStore.remove 的守卫）；删失败不阻塞 */
           try {
-            if (this.diskPath && fs.accessSync(this.diskPath)) {
-              fs.unlinkSync(this.diskPath);
+            const old = cur.media.diskPath;
+            if (old.length > 0 && old.startsWith(store.dir) && fs.accessSync(old)) {
+              fs.unlinkSync(old);
             }
           } catch {
-            /* 删除失败不阻塞，仍清引用 */
+            /* 删除失败不阻塞，仍重建 */
           }
-          p.media.diskPath = '';
-          new VmStore(this.filesDir).save(p);
-          this.diskPath = '';
+          const ret = napi.createDisk(path, mb, 'dynamic');
+          if (ret !== 0) {
+            promptAction.showToast({ message: '重建系统盘失败' });
+            return;
+          }
+          /* 引用与其他配置一致；bump 版本让详情页/列表重读 */
+          if (cur.media.diskPath !== path) {
+            cur.media.diskPath = path;
+            new VmStore(this.filesDir).save(cur);
+          }
           this.vmListVersion++;
+          this.diskVirtualGB = mb / GB;
           this.refreshDisk();
-          this.showSnack('已移除系统盘');
+          this.showSnack('已重建系统盘');
         },
       },
     });
@@ -210,12 +230,18 @@ export struct VmStorage {
       .padding({ top: sp1, bottom: sp1 }).width('100%')
   }
 
-  /* 系统盘：扩磎 / 移除 / 创建快照（从 VmManage 平移到 per-VM 存储页） */
+  /* 系统盘：扩容 / 重建 / 创建快照（从 VmManage 平移到 per-VM 存储页）。盘不可移除，只可重建 */
   @Builder
   secSystemDisk() {
     this.secHead('系统盘')
     if (!this.diskPath) {
-      Text('未配置系统盘，可到配置页添加').fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp1 })
+      Row({ space: sp2 }) {
+        Text('系统盘缺失').fontSize(tSub).fontColor(cWeak).layoutWeight(1).padding({ top: sp1, bottom: sp1 })
+        Button('重建系统盘').focusable(false).fontSize(tBody)
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .backgroundColor(Color.Transparent).fontColor(cDanger)
+          .onClick(() => this.confirmRebuild())
+      }.width('100%')
     } else {
       Column() {
         Row() {
@@ -237,10 +263,10 @@ export struct VmStorage {
               this.newGBText = this.diskVirtualGB > 0 ? String(Math.ceil(this.diskVirtualGB)) : '';
               this.expandMode = !this.expandMode;
             })
-          Button('移除').focusable(false).fontSize(tBody)
+          Button('重建系统盘').focusable(false).fontSize(tBody)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
             .backgroundColor(Color.Transparent).fontColor(cDanger)
-            .onClick(() => this.confirmRemove())
+            .onClick(() => this.confirmRebuild())
           if (this.canSnapshot()) {
             Button('创建快照').focusable(false).fontSize(tBody)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
@@ -304,19 +330,15 @@ export struct VmStorage {
   build() {
     Stack() {
       Column() {
-        /* 顶部行：返回(宽屏隐藏) / 存储 ·VM名 / arch */
+        /* 顶部行：存储 ·VM名 / arch + 关闭 */
         Row({ space: sp2 }) {
-          if (!this.isWide) {
-            Button('返回').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-              .backgroundColor(Color.Transparent).fontColor(cPrimary)
-              .onClick(() => this.navStack.pop())
-          }
           Column({ space: 1 }) {
             Text('存储 · ' + this.name).fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cText)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             Text(this.arch).fontSize(tSub).fontColor(cSub)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Button('×').backgroundColor(Color.Transparent).fontColor(cWeak)
+            .onClick(() => { if (this.onClose) { this.onClose(); } })
         }
         .width('100%')
         .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
@@ -350,8 +372,5 @@ export struct VmStorage {
     }
     .width('100%')
     .height('100%')
-    .onAreaChange((oldValue: Area, newValue: Area) => {
-      this.isWide = newValue.width >= 600;
-    })
   }
 }

@@ -1,6 +1,7 @@
 // 应用导航壳：宽屏 Auto → 左栏 VmList（Navigation 子内容即侧栏）+ 右侧 NavDestination 详情；
-// 窄屏 Auto 退化为 Stack，整页 push。工坊为【全窗口】居中模态（showWizard 开关 + wizardParam 参数，
-// 由 VmList 经 @Consume 触发、在本层渲染遮罩，覆盖整个窗口而非仅侧栏）。
+// 窄屏 Auto 退化为 Stack，整页 push。工坊为【全窗口】居中模态：本层铺半透明黑遮罩 + 居中卡片
+// （showWizard 开关 + wizardParam 参数，VmList 经 @Consume 触发；因 bindContentCover 遮罩在本
+// SDK 不渲染，改用 Stack 遮罩——与 VmManage 的存储弹窗同款，保证两模态一致）。
 // console 已迁出为每台 VM 独立的 VmConsoleAbility 窗口（见 VmList.openConsole）。
 // 注：本 SDK(API24) 的 NavigationAttribute 无 .sideBar()，侧栏 = Navigation 的子内容本身。
 import { VmList } from './VmList';
@@ -15,9 +16,11 @@ import { tBody, cSub, cCard, cBorder, rCard, bw } from '../lib/uiTokens';
 @Component
 struct Index {
   @Provide('navStack') navStack: NavPathStack = new NavPathStack();
-  /* 工坊模态：由 VmList @Consume 同一对变量；在本层(全窗口)渲染遮罩覆盖侧栏+内容 */
+  /* 工坊/存储模态：都由 VmList/VmManage @Consume 同一对变量，在本层(全窗口)渲染遮罩覆盖侧栏+内容 */
   @Provide('showWizard') showWizard: boolean = false;
   @Provide('wizardParam') wizardParam: WizardParam = { mode: 'new' };
+  @Provide('showStorage') showStorage: boolean = false;
+  @Provide('storageParam') storageParam: VmProfile | null = null;
   @StorageLink('vmListVersion') vmListVersion: number = 0;
 
   @Builder
@@ -27,8 +30,6 @@ struct Index {
         VmManage({ profile: param as VmProfile })
       } else if (name === 'edit') {
         VmEdit({ profile: param as VmProfile })
-      } else if (name === 'storage') {
-        VmStorage({ profile: param as VmProfile })
       } else if (name === 'idle') {
         Text('从左侧选择一台虚拟机').fontSize(tBody).fontColor(cSub)
       }
@@ -47,34 +48,75 @@ struct Index {
     this.vmListVersion++;
   }
 
+  private closeStorage(): void {
+    this.showStorage = false;
+  }
+
   @Builder
   wizardCover() {
     VmWizard({ param: this.wizardParam, onClose: () => this.closeWizard() })
   }
 
+  /* 工坊弹窗：遮罩(压暗主界面) + 居中卡片。bindContentCover 自带遮罩在本 SDK 不渲染，
+   * 故用 ArkUI Stack 在底下铺一层半透明黑（与存储弹窗同款，保证两模态一致）。
+   * 点遮罩关闭；卡片自身吃掉点击、不穿透。 */
   @Builder
-  coverBuilder() {
-    /* bindContentCover 自带半透明遮罩 / 点外部关闭 / 返回键 / 转场；这里只放居中卡片 */
-    Column() {
+  wizardOverlay() {
+    Stack() {
+      Column().width('100%').height('100%').backgroundColor('rgba(0,0,0,0.45)')
+        .onClick(() => this.closeWizard())
       Column() { this.wizardCover() }
         .width('88%').constraintSize({ maxWidth: 640 })
         .height(500)
         .backgroundColor(cCard)
         .border({ width: bw, color: cBorder })
         .borderRadius(rCard)
+        .clip(true) /* 裁掉子组件(直角背景)超出圆角的部分 */
+        .onClick(() => { /* 吃掉卡片区点击，避免透传遮罩误关 */ })
     }
     .width('100%').height('100%')
-    .justifyContent(FlexAlign.Center)
+    .alignContent(Alignment.Center)
+  }
+
+  /* 存储弹窗：与工坊同款的全窗口遮罩 + 居中卡片，铺满主界面（侧栏+内容一起压暗）。 */
+  @Builder
+  storageOverlay() {
+    Stack() {
+      Column().width('100%').height('100%').backgroundColor('rgba(0,0,0,0.45)')
+        .onClick(() => this.closeStorage())
+      Column() {
+        VmStorage({ profile: this.storageParam, onClose: () => this.closeStorage() })
+      }
+      .width('88%').constraintSize({ maxWidth: 640 })
+      .height(540)
+      .backgroundColor(cCard)
+      .border({ width: 1, color: cBorder })
+      .borderRadius(rCard)
+      .clip(true) /* 裁掉子组件(直角背景)超出圆角的部分 */
+      .onClick(() => { /* 吃掉卡片区点击，避免透传遮罩误关 */ })
+    }
+    .width('100%').height('100%')
+    .alignContent(Alignment.Center)
   }
 
   build() {
-    Navigation(this.navStack) {
-      VmList()
+    Stack() {
+      Navigation(this.navStack) {
+        VmList()
+      }
+      .mode(NavigationMode.Auto)
+      .navBarWidth(300)
+      .navDestination(this.pageMap)
+      .hideTitleBar(true)
+
+      if (this.showWizard) {
+        this.wizardOverlay()
+      }
+      if (this.showStorage) {
+        this.storageOverlay()
+      }
     }
-    .mode(NavigationMode.Auto)
-    .navBarWidth(300)
-    .navDestination(this.pageMap)
-    .hideTitleBar(true)
-    .bindContentCover($$this.showWizard, this.coverBuilder, { enableSafeArea: true })
+    .width('100%')
+    .height('100%')
   }
 }

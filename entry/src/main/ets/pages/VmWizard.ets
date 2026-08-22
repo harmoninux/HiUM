@@ -51,7 +51,6 @@ export struct VmWizard {
   @State cpus: number = 2;
   @State mttcg: boolean = true;
   @State tbSizeText: string = '1024';
-  @State diskEnabled: boolean = false;
   @State diskGB: number = 8;
   @State diskAlloc: string = 'dynamic';
   @State diskPath: string = '';
@@ -81,7 +80,6 @@ export struct VmWizard {
     this.cpus = 2;
     this.mttcg = true;
     this.tbSizeText = '1024';
-    this.diskEnabled = false;
     this.diskGB = 8;
     this.diskAlloc = 'dynamic';
     this.diskPath = '';
@@ -106,7 +104,6 @@ export struct VmWizard {
       this.cpus = p.runtime.cpus;
       this.mttcg = p.runtime.mttcg;
       this.tbSizeText = String(p.runtime.tbSize);
-      this.diskEnabled = p.media.diskPath.length > 0;
       this.diskPath = p.media.diskPath;
       this.cdromPath = p.media.cdromPath;
       this.bootFromCdrom = p.media.bootFromCdrom;
@@ -131,7 +128,6 @@ export struct VmWizard {
     this.cpus = t.cpus;
     this.mttcg = t.mttcg;
     this.tbSizeText = String(t.tbSize);
-    this.diskEnabled = t.diskMB > 0;
     this.diskGB = Math.max(1, Math.ceil(t.diskMB / 1024));
     this.cdromPath = t.isoName.length > 0 ? `${this.vmDataDir}/${t.isoName}` : '';
     this.bootFromCdrom = t.bootFromCdrom;
@@ -155,8 +151,9 @@ export struct VmWizard {
 
   /* 从当前步装配一份 VmProfile（不落盘、不建盘；用于预览/完成） */
   private assemble(id: string): VmProfile {
+    /* 系统盘必配：未指定路径则用标准位置，保证每台 VM 都有系统盘 */
     let diskPath = this.diskPath;
-    if (this.diskEnabled && diskPath.length === 0) {
+    if (diskPath.length === 0) {
       diskPath = `${this.filesDir}/vms/${id}.qcow2`;
     }
     const tbSize = Number(this.tbSizeText);
@@ -204,7 +201,7 @@ export struct VmWizard {
   private finish(): void {
     const id = this.isEdit() ? (this.param.profile as VmProfile).id : newProfileId();
     const p = this.assemble(id);
-    if (this.diskEnabled && p.media.diskPath.length > 0) {
+    if (p.media.diskPath.length > 0) {
       if (!pathExists(p.media.diskPath)) {
         const ret = napi.createDisk(p.media.diskPath, Math.round(this.diskGB * 1024), this.diskAlloc);
         if (ret !== 0) {
@@ -385,29 +382,24 @@ export struct VmWizard {
   @Builder
   stepMedia() {
     Column({ space: 8 }) {
-      Row() {
-        Text('系统盘').fontSize(tLabel).layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.diskEnabled })
-          .onChange((v: boolean) => this.diskEnabled = v)
+      /* 系统盘必配（无开关）：每台 VM 都带系统盘，未指定路径则保存时建在标准位置 */
+      Text('系统盘').fontSize(tLabel)
+      Text(this.diskPath ? pathExists(this.diskPath) ? '已有盘: ' + this.baseName(this.diskPath) : '新建: ' + this.baseName(this.diskPath) : '保存时创建')
+        .fontSize(tSub).fontColor(cSub)
+      Row({ space: 8 }) {
+        Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
+          min: 0, max: DISK_SIZES.length - 1, step: 1 })
+          .layoutWeight(1)
+          .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
+        Text(`${Math.round(this.diskGB)}GB`).fontSize(tLabel)
       }
-      if (this.diskEnabled) {
-        Text(this.diskPath ? pathExists(this.diskPath) ? '已有盘: ' + this.baseName(this.diskPath) : '新建: ' + this.baseName(this.diskPath) : '保存时创建')
-          .fontSize(tSub).fontColor(cSub)
-        Row({ space: 8 }) {
-          Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
-            min: 0, max: DISK_SIZES.length - 1, step: 1 })
-            .layoutWeight(1)
-            .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
-          Text(`${Math.round(this.diskGB)}GB`).fontSize(tLabel)
-        }
-        Row({ space: 8 }) {
-          Text('动态分配').fontSize(tLabel)
-            .fontColor(this.diskAlloc === 'dynamic' ? cPrimary : cText)
-            .onClick(() => this.diskAlloc = 'dynamic')
-          Text('固定大小').fontSize(tLabel)
-            .fontColor(this.diskAlloc === 'fixed' ? cPrimary : cText)
-            .onClick(() => this.diskAlloc = 'fixed')
-        }
+      Row({ space: 8 }) {
+        Text('动态分配').fontSize(tLabel)
+          .fontColor(this.diskAlloc === 'dynamic' ? cPrimary : cText)
+          .onClick(() => this.diskAlloc = 'dynamic')
+        Text('固定大小').fontSize(tLabel)
+          .fontColor(this.diskAlloc === 'fixed' ? cPrimary : cText)
+          .onClick(() => this.diskAlloc = 'fixed')
       }
 
       Row() {
