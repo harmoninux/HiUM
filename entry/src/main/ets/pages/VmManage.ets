@@ -13,7 +13,7 @@ import {
 } from '../lib/vmsnapshot';
 import { isTempSnapshot } from '../lib/tempSession';
 import {
-  cPrimary, cDanger, cRunning, cText, cSub, cWeak,
+  cPrimary, cDanger, cRunning, cSuccess, cText, cSub, cWeak,
   cCard, cBlock, cChip,
   tCard, tLabel, tBody, tSub,
   sp1, sp2, sp3, sp4, sp5, rElem, rBadge,
@@ -550,6 +550,8 @@ export struct VmManage {
             .onClick(() => this.openConsole())
           Button('编辑').focusable(false).fontSize(tBody).backgroundColor(cBlock).fontColor(cPrimary)
             .onClick(() => this.openEdit())
+          Button('存储').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cPrimary)
+            .onClick(() => this.navStack.pushPath({ name: 'storage' }))
           Button('删除').focusable(false).fontSize(tBody).backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.confirmDeleteVm())
         }
@@ -594,7 +596,7 @@ export struct VmManage {
 
       if (this.snack.length > 0) {
         Row() {
-          Text('✓ ').fontSize(tBody).fontColor('#ff34d399')
+          Text('✓ ').fontSize(tBody).fontColor(cSuccess)
           Text(this.snack).fontSize(tBody).fontColor(Color.White)
         }
         .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })

@@ -4,6 +4,7 @@
 export const cPrimary  = '#ff0563ff'; /* 主色：主按钮/选中/强调 */
 export const cDanger   = '#ffd92d20'; /* 危险：删除/强制断电 */
 export const cRunning  = '#ff1f7a44'; /* 运行中 */
+export const cSuccess  = '#ff34d399'; /* 成功：snackbar 勾 */
 export const cWarn     = '#ffb25e09'; /* 需自备镜像/缺媒体 */
 export const cText     = '#ff15181c'; /* 主文本 */
 export const cSub      = '#ff8a8f98'; /* 次级文本 */
