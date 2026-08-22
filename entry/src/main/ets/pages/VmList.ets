@@ -10,6 +10,7 @@ import {
   VmProfile, VmStore,
   newProfileId, blankProfile, alpineProfile, qmpSockPath,
 } from '../lib/vmprofile';
+import { OS_TEMPLATES, OsTemplate, buildTemplateProfile } from '../lib/osTemplates';
 import {
   initVmRegistry, refreshRunningMap, vmIsRunning,
   subscribeVmLifecycle, unsubscribeVmLifecycle, VmLifecycleEvent,
@@ -20,6 +21,12 @@ interface QmpNapi {
   qmpConnect: (vmId: string, sockPath: string) => number;
   qmpCommand: (vmId: string, cmd: string) => string;
 }
+/* 模板一键创建要用的 qemu-img create（盘在创建时建好，失败不落配置） */
+interface DiskNapi {
+  createDisk: (path: string, sizeMB: number, alloc: string) => number;
+}
+const diskNapi = napiModule as DiskNapi;
+
 const qmpNapi = napiModule as QmpNapi;
 
 @Component
@@ -33,6 +40,7 @@ export struct VmList {
   @State thumbTick: number = 0;
   @State runningIds: Record<string, boolean> = {};
   @State diskUsage: Record<string, number> = {}; /* vmId → 磁盘实占字节数 */
+  @State showPicker: boolean = false; /* 「+ 新建」模板选择面板 */
   private pollTimer: number = -1;
   private lifecycleCb: ((e: VmLifecycleEvent) => void) | null = null;
 
@@ -172,6 +180,23 @@ export struct VmList {
     }
   }
 
+  /* 从模板一键创建：建盘 + 存配置 + 刷新。新盘用动态分配（稀疏，实占≈0）。 */
+  private templateCreate(tpl: OsTemplate): void {
+    const id = newProfileId();
+    const p = buildTemplateProfile(tpl, id, this.filesDir, this.vmDataDir);
+    if (tpl.diskMB > 0 && p.media.diskPath.length > 0) {
+      const ret = diskNapi.createDisk(p.media.diskPath, tpl.diskMB, 'dynamic');
+      if (ret !== 0) {
+        promptAction.showToast({ message: '创建磁盘失败' });
+        return;
+      }
+    }
+    this.store().save(p);
+    this.vmListVersion++;
+    this.showPicker = false;
+    promptAction.showToast({ message: `已创建「${p.name}」` });
+  }
+
   private openConsole(p: VmProfile): void {
     /* 拉起（或复用并置前）该 VM 的独立 console 窗口；VM 未运行则由窗口页自启 */
     const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -227,6 +252,67 @@ export struct VmList {
       .backgroundColor('#ff334455')
       .borderRadius(4)
     }
+  }
+
+  /* 「+ 新建」模板选择面板：点模板一键创建；点「从零开始」进手工配置 */
+  @Builder
+  templatePicker() {
+    Column() {
+      Row() {
+        Text('从模板新建').fontSize(18).fontWeight(FontWeight.Bold)
+        Blank()
+        Button('×').focusable(false).fontSize(20).backgroundColor(Color.Transparent)
+          .fontColor('#888888')
+          .onClick(() => this.showPicker = false)
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 16, bottom: 8 })
+
+      Scroll() {
+        Column({ space: 10 }) {
+          ForEach(OS_TEMPLATES, (t: OsTemplate) => {
+            Column({ space: 4 }) {
+              Row({ space: 8 }) {
+                Text(t.name).fontSize(16).fontWeight(FontWeight.Medium)
+                Text(t.arch).fontSize(12).fontColor('#ff666666')
+                Blank()
+                Text(t.imageNeeded ? '需自备镜像' : '内置镜像')
+                  .fontSize(11)
+                  .fontColor(t.imageNeeded ? '#ff9900' : '#ff2e7d32')
+              }
+              Text(t.desc).fontSize(12).fontColor('#ff666666')
+              Text(t.imageLabel).fontSize(11).fontColor('#ff999999')
+            }
+            .alignItems(HorizontalAlign.Start)
+            .width('100%')
+            .padding(12)
+            .backgroundColor(Color.White)
+            .borderRadius(8)
+            .onClick(() => this.templateCreate(t))
+          }, (t: OsTemplate) => t.id)
+
+          Column({ space: 4 }) {
+            Text('从零开始').fontSize(16).fontWeight(FontWeight.Medium)
+            Text('自定义架构/板卡/固件/介质（手工向导）').fontSize(12).fontColor('#ff999999')
+          }
+          .alignItems(HorizontalAlign.Start)
+          .width('100%')
+          .padding(12)
+          .backgroundColor(Color.White)
+          .borderRadius(8)
+          .onClick(() => {
+            this.showPicker = false;
+            this.navStack.pushPath({ name: 'edit', param: blankProfile(newProfileId()) });
+          })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, bottom: 24 })
+      }
+      .layoutWeight(1)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#ffffff')
   }
 
   @Builder
@@ -287,6 +373,7 @@ export struct VmList {
   }
 
   build() {
+    Stack() {
     Column() {
       Row() {
         Text('虚拟机').fontSize(24).fontWeight(FontWeight.Bold)
@@ -301,7 +388,7 @@ export struct VmList {
           .focusable(false)
           .fontSize(14)
           .onClick(() => {
-            this.navStack.pushPath({ name: 'edit', param: blankProfile(newProfileId()) });
+            this.showPicker = true;
           })
       }
       .width('100%')
@@ -327,5 +414,12 @@ export struct VmList {
     .width('100%')
     .height('100%')
     .backgroundColor('#fff2f3f5')
+
+    if (this.showPicker) {
+      this.templatePicker()
+    }
+    }
+    .width('100%')
+    .height('100%')
   }
 }
