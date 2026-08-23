@@ -16,8 +16,7 @@ import { prepareStart } from '../lib/tempSession';
 import { takePendingVmId, isPadOrPhone } from '../lib/vmwindows';
 import { VirtualKeyboard } from '../lib/VirtualKeyboard';
 import {
-  cDanger, cPrimary,
-  rBtn, rElem, btnH, tBody, tMono, sp1, sp2, sp3,
+  cDanger, cPrimary, sp1, sp2,
 } from '../lib/uiTokens';
 
 interface ScreenShotBuf {
@@ -49,13 +48,11 @@ const TAG = 'QemuUI';
 /* 悬浮按钮（替代顶部工具条）：半透明圆钮，可拖拽移动，点击展开竖向操作面板。
  * 位置持久化到 preferences（键按 vmId 区分，跨窗口/重开记住落位）。
  * 尺寸/阈值参照 wineohos VirtualDesktop 的 EXIT_BTN_SIZE/EXIT_DRAG_THRESHOLD。 */
-const FAB_SIZE = 48;          /* 圆钮直径 (vp) */
-const FAB_PAD = 16;           /* 默认距边留白 (vp) */
-const FAB_DRAG_THRESHOLD = 5; /* 位移 >5vp 判定拖动，否则点击 */
-const FAB_PREF = 'vmconsole_fab'; /* preferences 文件名 */
-const PANEL_W = 168;          /* 展开面板宽 (vp) */
-const MENU_BOX_H = 520;       /* 面板定位盒高：内容底部对齐、向上生长，容纳电源子菜单 */
-const MENU_TEXT = '#fff5f7fa'; /* 面板浅底上的文字色 */
+const STATUS_H = 32;          /* 底部状态栏高 (vp) */
+const STATUS_BTN_H = 26;      /* 底部按钮高 (vp)，收窄让状态条更细 */
+const STATUS_FS = 12;         /* 底部状态栏字号（running 字样基准，按钮同） */
+const FAB_PREF = 'vmconsole_fab'; /* console 偏好文件名（现仅虚拟键盘显隐用） */
+const MENU_TEXT = '#fff5f7fa'; /* 底部栏浅色文字 */
 
 interface QmpEvent {
   event: string;
@@ -101,11 +98,7 @@ struct VmConsole {
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmListVersion') vmListVersion: number = 0;
   @State status: string = '';
-  /* 悬浮按钮（替代顶部工具条）：圆钮位置 + 面板开合 */
-  @State fabX: number = -1;    /* <0 = 尚未初始化（等 onAreaChange 定初位） */
-  @State fabY: number = -1;
-  @State menuOpen: boolean = false;  /* 竖向面板展开 */
-  @State showKbd: boolean = false;   /* 虚拟键盘显隐（浮动菜单开关，按 vmId 持久化） */
+  @State showKbd: boolean = false;   /* 虚拟键盘显隐（底部状态栏开关，按 vmId 持久化） */
   private vmId: string = '';
   private profile: VmProfile | null = null;
   private xcController: VmXComponentController = new VmXComponentController();
@@ -126,14 +119,6 @@ struct VmConsole {
   private scrollAcc: number = 0;
   private lastX: number = 0;
   private lastY: number = 0;
-  /* 悬浮按钮拖拽状态机（onTouch 驱动，同 wineohos VirtualDesktop） */
-  private fabW: number = 0;      /* 窗口内容 vp 宽（钳制基准） */
-  private fabH: number = 0;      /* 窗口内容 vp 高 */
-  private fabStartX: number = 0; /* 手势起点触摸窗坐标 */
-  private fabStartY: number = 0;
-  private fabBtnX: number = 0;   /* 手势起点按钮位置 */
-  private fabBtnY: number = 0;
-  private fabMoved: boolean = false;
 
   private toSurfacePx(vp: number, vpSize: number, surfaceSize: number): number {
     if (vpSize <= 0 || surfaceSize <= 0) {
@@ -462,99 +447,13 @@ struct VmConsole {
     });
   }
 
-  /* ================= 悬浮按钮（拖拽移动 / 点击展开） ================= */
-
-  /* 位置持久化：Preferences 按 vmId 区分不同 VM 的落位 */
-  private fabPrefKey(suffix: string): string {
-    return `${this.vmId}_${suffix}`;
-  }
-
-  private fabCtx(): common.UIAbilityContext {
+  /* console 通用 helpers（preferences 按 vmId 区分键；原 fab 前缀沿用为文件名） */
+  private vmCtx(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
   }
 
-  private loadFabPos(): void {
-    if (this.vmId.length === 0) {
-      return;
-    }
-    preferences.getPreferences(this.fabCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
-      const x = prefs.getSync(this.fabPrefKey('x'), -1) as number;
-      const y = prefs.getSync(this.fabPrefKey('y'), -1) as number;
-      if (x >= 0 && y >= 0) {
-        this.fabX = this.clampFabX(x);
-        this.fabY = this.clampFabY(y);
-      }
-    }).catch((e: Error) => {
-      hilog.warn(DOMAIN, TAG, 'loadFabPos: %{public}s', JSON.stringify(e));
-    });
-  }
-
-  private saveFabPos(): void {
-    if (this.vmId.length === 0) {
-      return;
-    }
-    preferences.getPreferences(this.fabCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
-      prefs.putSync(this.fabPrefKey('x'), this.fabX);
-      prefs.putSync(this.fabPrefKey('y'), this.fabY);
-      prefs.flush();
-    }).catch((e: Error) => {
-      hilog.warn(DOMAIN, TAG, 'saveFabPos: %{public}s', JSON.stringify(e));
-    });
-  }
-
-  private clampFabX(x: number): number {
-    const max = Math.max(0, this.fabW - FAB_SIZE);
-    return Math.min(Math.max(0, x), max);
-  }
-
-  private clampFabY(y: number): number {
-    const max = Math.max(0, this.fabH - FAB_SIZE);
-    return Math.min(Math.max(0, y), max);
-  }
-
-  /* 初始落位（onAreaChange 第一次拿到窗口大小时）：右下角 */
-  private initFab(): void {
-    if (this.fabX >= 0) {
-      return;
-    }
-    this.fabX = this.clampFabX(this.fabW - FAB_SIZE - FAB_PAD);
-    this.fabY = this.clampFabY(this.fabH - FAB_SIZE - FAB_PAD);
-    this.loadFabPos(); /* 有持久化记录就覆盖默认 */
-  }
-
-  /* 拖拽 + 点击判定（onTouch 驱动，同 wineohos VirtualDesktop）：
-   * 位移 > FAB_DRAG_THRESHOLD → 拖动（移动按钮）；否则视为点击 → 展开/收面板 */
-  private onFabTouch(ev: TouchEvent): void {
-    if (ev.type === TouchType.Down) {
-      const t = ev.touches[0];
-      if (t) {
-        this.fabStartX = t.windowX;
-        this.fabStartY = t.windowY;
-      }
-      this.fabBtnX = this.fabX;
-      this.fabBtnY = this.fabY;
-      this.fabMoved = false;
-    } else if (ev.type === TouchType.Move) {
-      const t = ev.touches[0];
-      if (t) {
-        if (!this.fabMoved &&
-          (Math.abs(t.windowX - this.fabStartX) > FAB_DRAG_THRESHOLD ||
-            Math.abs(t.windowY - this.fabStartY) > FAB_DRAG_THRESHOLD)) {
-          this.fabMoved = true;
-        }
-        if (this.fabMoved) {
-          this.fabX = this.clampFabX(this.fabBtnX + (t.windowX - this.fabStartX));
-          this.fabY = this.clampFabY(this.fabBtnY + (t.windowY - this.fabStartY));
-        }
-      }
-    } else if (ev.type === TouchType.Up || ev.type === TouchType.Cancel) {
-      if (this.fabMoved) {
-        this.saveFabPos(); /* 拖动落位 → 持久化（跨窗口/重开记住） */
-      } else {
-        this.menuOpen = !this.menuOpen;
-      }
-      this.fabMoved = false;
-    }
+  private vmPrefKey(suffix: string): string {
+    return `${this.vmId}_${suffix}`;
   }
 
   /* 虚拟键盘显隐持久化（Preferences 按 vmId 区分，重开窗口记住开/关） */
@@ -562,8 +461,8 @@ struct VmConsole {
     if (this.vmId.length === 0) {
       return;
     }
-    preferences.getPreferences(this.fabCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
-      this.showKbd = prefs.getSync(this.fabPrefKey('kbd'), false) as boolean;
+    preferences.getPreferences(this.vmCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
+      this.showKbd = prefs.getSync(this.vmPrefKey('kbd'), false) as boolean;
     }).catch((e: Error) => {
       hilog.warn(DOMAIN, TAG, 'loadKbd: %{public}s', JSON.stringify(e));
     });
@@ -571,8 +470,8 @@ struct VmConsole {
 
   private toggleKbd(): void {
     this.showKbd = !this.showKbd;
-    preferences.getPreferences(this.fabCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
-      prefs.putSync(this.fabPrefKey('kbd'), this.showKbd);
+    preferences.getPreferences(this.vmCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
+      prefs.putSync(this.vmPrefKey('kbd'), this.showKbd);
       prefs.flush();
     }).catch((e: Error) => {
       hilog.warn(DOMAIN, TAG, 'saveKbd: %{public}s', JSON.stringify(e));
@@ -586,125 +485,61 @@ struct VmConsole {
       '{"type":"qcode","data":"delete"}]}');
   }
 
-  @Builder
-  fabMenuHeader() {
-    Row() {
-      Text(this.status).fontSize(tMono).fontColor('#ffb8c4d0').layoutWeight(1).maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-      Text('×').fontSize(tBody).fontColor('#ffb8c4d0')
-        .padding({ left: sp2, right: sp2 })
-        .onClick(() => {
-          this.menuOpen = false;
-        })
-    }
-    .width('100%')
-    .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-    .borderRadius(rElem)
-    .backgroundColor('#22000000')
-  }
-
-  /* 竖向面板：电源四项全部平铺 / Ctrl+Alt+Del / 串口。
-   * 去除截图/全屏/QMP（用户反馈不需要）。点击即执行 */
-  @Builder
-  fabMenu() {
-    Column({ space: 2 }) {
-      this.fabMenuHeader()
-      Button('关机 (ACPI)').focusable(false).fontSize(tBody)
-        .fontColor(MENU_TEXT).width('100%').height(btnH).borderRadius(rBtn)
-        .backgroundColor(Color.Transparent)
-        .onClick(() => { this.qmp('system_powerdown') })
-      Button('重启 (Reset)').focusable(false).fontSize(tBody)
-        .fontColor(MENU_TEXT).width('100%').height(btnH).borderRadius(rBtn)
-        .backgroundColor(Color.Transparent)
-        .onClick(() => { this.qmp('system_reset') })
-      Button('强制断电').focusable(false).fontSize(tBody)
-        .fontColor(cDanger).width('100%').height(btnH).borderRadius(rBtn)
-        .backgroundColor(Color.Transparent)
-        .onClick(() => { this.qmp('quit') })
-      Button('Ctrl+Alt+Del').focusable(false).fontSize(tBody)
-        .fontColor(MENU_TEXT).width('100%').height(btnH).borderRadius(rBtn)
-        .backgroundColor(Color.Transparent)
-        .onClick(() => { this.actReset() })
-      Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(tBody)
-        .fontColor(this.showKbd ? cPrimary : MENU_TEXT).width('100%').height(btnH).borderRadius(rBtn)
-        .backgroundColor(Color.Transparent)
-        .onClick(() => { this.toggleKbd() })
-    }
-    .width(PANEL_W)
-    .padding({ top: 6, bottom: 6 })
-    .borderRadius(rElem)
-    .backgroundColor('#e620242b')
-    .border({ width: 1, color: '#66FFFFFF' })
-  }
-
   build() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column() {
+    Column() {
+      /* VM 画面区：XComponent + 虚拟键盘 overlay（键盘盖画面、不压底部状态栏） */
+      Stack() {
         XComponent({ type: XComponentType.SURFACE, controller: this.xcController })
           .width('100%')
-          .layoutWeight(1)
+          .height('100%')
           .backgroundColor(Color.Black)
           .onAreaChange((oldArea: Area, newArea: Area) => {
             this.areaW = newArea.width as number;
             this.areaH = newArea.height as number;
-            this.fabW = newArea.width as number;
-            this.fabH = newArea.height as number;
-            this.initFab();
           })
           .onTouch((event: TouchEvent) => this.handleTouch(event))
+        /* 虚拟键盘 overlay：盖在 VM 画面上。面板空白处透传给画面，
+         * 键帽/把手消费触摸（见 VirtualKeyboard 组件 hitTest 说明） */
+        if (isPadOrPhone() && this.showKbd) {
+          VirtualKeyboard({ vmId: this.vmId, showKbd: this.$showKbd })
+        }
       }
       .width('100%')
-      .height('100%')
+      .layoutWeight(1)
 
-      /* 虚拟键盘 overlay：VM 画面之上、悬浮按钮之下。面板空白处透传给画面，
-       * 键帽/把手消费触摸（见 VirtualKeyboard 组件 hitTest 说明） */
-      if (isPadOrPhone() &&this.showKbd) {
-        VirtualKeyboard({ vmId: this.vmId, showKbd: this.$showKbd })
-      }
-
-      /* 面板展开时：点面板外的空白区收起面板（透明 catcher，盖在 VM 之上）。
-       * 用 Stack 全屏透明层拦截触摸，避免点穿透到客机输入 */
-      if (isPadOrPhone() &&this.menuOpen) {
-        Column()
-          .width('100%').height('100%')
-          .backgroundColor('#0a000000')
-          .onClick(() => {
-            this.menuOpen = false;
-          })
-      }
-
-      /* 悬浮操作面板：停在按钮正上方、右缘与按钮对齐。用固定高度的定位盒 +
-       * Blank 撑底，让面板内容自底部向上生长（分组标题/多按钮往上扩，不剪裁）。 */
-      if (isPadOrPhone() &&this.menuOpen && this.fabX >= 0) {
-        Column() {
-          Blank()
-          Column() {
-            this.fabMenu()
-          }
-          .width('100%')
-          .align(Alignment.BottomEnd)
+      /* 底部状态栏：运行状态 + 电源/远程控制（常驻，所有设备） */
+      Row({ space: sp2 }) {
+        Text(this.status).fontSize(STATUS_FS).fontColor(MENU_TEXT)
+          .layoutWeight(1).maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Button('关机').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+          .padding({ left: sp1, right: sp1 })
+          .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+          .onClick(() => { this.qmp('system_powerdown') })
+        Button('重启').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+          .padding({ left: sp1, right: sp1 })
+          .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+          .onClick(() => { this.qmp('system_reset') })
+        Button('强制断电').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+          .padding({ left: sp1, right: sp1 })
+          .fontColor(cDanger).backgroundColor(Color.Transparent)
+          .onClick(() => { this.qmp('quit') })
+        Button('Ctrl+Alt+Del').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+          .padding({ left: sp1, right: sp1 })
+          .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+          .onClick(() => { this.actReset() })
+        if (isPadOrPhone()) {
+          Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+            .padding({ left: sp1, right: sp1 })
+            .fontColor(this.showKbd ? cPrimary : MENU_TEXT).backgroundColor(Color.Transparent)
+            .onClick(() => { this.toggleKbd() })
         }
-        .width(PANEL_W)
-        .height(MENU_BOX_H)
-        .position({
-          x: this.fabX + FAB_SIZE - PANEL_W,
-          y: this.fabY - 6 - MENU_BOX_H,
-        })
       }
-
-      /* 半透明可拖拽悬浮圆钮（替代顶部工具条）：点击展开/收起面板，拖动移动 */
-      if (isPadOrPhone() &&this.fabX >= 0) {
-        Stack() {
-          Text('≡').fontSize(22).fontColor(Color.White).fontWeight(FontWeight.Bold)
-        }
-        .width(FAB_SIZE)
-        .height(FAB_SIZE)
-        .borderRadius(FAB_SIZE / 2)
-        .backgroundColor('#33000000')
-        .border({ width: 1, color: '#66FFFFFF', style: BorderStyle.Solid })
-        .position({ x: this.fabX, y: this.fabY })
-        .onTouch((ev: TouchEvent) => this.onFabTouch(ev))
-      }
+      .width('100%')
+      .height(STATUS_H)
+      .backgroundColor('#e620242b')
+      .padding({ left: sp2, right: sp2 })
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
     .height('100%')
