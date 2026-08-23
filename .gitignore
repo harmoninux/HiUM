@@ -27,3 +27,6 @@
 # guest images / firmware blobs (produced by deps or downloaded)
 /images
 /entry/src/main/resources/rawfile/vm
+
+# local HarmonyOS signing keys / material (do not commit)
+/.ohos

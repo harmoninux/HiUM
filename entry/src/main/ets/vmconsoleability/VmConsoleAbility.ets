@@ -7,6 +7,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { ensureAppBootstrap } from '../lib/bootstrap';
 import { setConsoleWindow, removeConsoleWindow, pushPendingVmId, isPadOrPhone } from '../lib/vmwindows';
+import napi from 'libentry.so';
 
 const DOMAIN = 0x0002;
 const TAG = 'QemuUI';
@@ -49,6 +50,15 @@ export default class VmConsoleAbility extends UIAbility {
         }
         win.setWindowTitle(vmName.length > 0 ? vmName : '虚拟机')
           .catch((e: Object) => hilog.warn(DOMAIN, TAG, 'setWindowTitle: %{public}s', JSON.stringify(e)));
+        /* 窗口矩形变化（最大化/全屏/还原）时同步 renderer，弥补 onSurfaceChanged
+         * 偶发不触发导致的画面黑屏/错位（参考 wineohos 监听 window 事件的做法）。
+         * 注意：windowRect 含标题栏，精度略差，onSurfaceChanged 会给精确内容区尺寸。 */
+        win.on('windowRectChange', () => {
+          const ref = win.getWindowProperties().windowRect;
+          if (ref && ref.width > 0 && ref.height > 0) {
+            napi.resizeSurface(vmId, ref.width, ref.height);
+          }
+        });
       }).catch((e: Object) => hilog.error(DOMAIN, TAG, 'getMainWindow: %{public}s', JSON.stringify(e)));
     });
   }

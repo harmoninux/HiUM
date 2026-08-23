@@ -31,6 +31,7 @@ struct RenderState {
     EGLContext context = EGL_NO_CONTEXT;
     EGLConfig config = nullptr;
     int winW = 0, winH = 0;
+    std::atomic<bool> surfaceRecreate{false}; /* resize 时重建 EGL surface，跟上 nativeWin 缓冲尺寸 */
     GLuint tex = 0;
     GLuint prog = 0;
     GLuint vbo = 0;
@@ -174,6 +175,23 @@ void renderLoop()
 
     int swapRetries = 0;
     while (g_rs.running.load()) {
+        if (g_rs.surfaceRecreate.exchange(false)) {
+            /* 窗口 resize：重建 EGL surface，让它绑定到 nativeWin 的新缓冲尺寸，
+             * 否则 egl 仍停留在旧尺寸，viewport 按 win 计算会把画面放大/错位 */
+            eglMakeCurrent(g_rs.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            if (g_rs.surface != EGL_NO_SURFACE) {
+                eglDestroySurface(g_rs.display, g_rs.surface);
+            }
+            g_rs.surface = eglCreateWindowSurface(g_rs.display, g_rs.config,
+                                                  (EGLNativeWindowType)g_rs.nativeWin, nullptr);
+            if (g_rs.surface == EGL_NO_SURFACE) {
+                OH_LOG_ERROR(LOG_APP, "recreate surface failed: 0x%{public}x", eglGetError());
+            } else if (eglMakeCurrent(g_rs.display, g_rs.surface, g_rs.surface, g_rs.context)) {
+                g_rs.texW = 0;
+                g_rs.texH = 0; /* 重建后 EGL 纹理空，强制全量重传，避免黑屏 */
+                OH_LOG_INFO(LOG_APP, "surface recreated for resize");
+            }
+        }
         bool didWork = false;
         int curFbW = 0, curFbH = 0;
         {
@@ -342,6 +360,12 @@ int renderer_resize_surface(int32_t w, int32_t h)
 {
     g_rs.winW = w;
     g_rs.winH = h;
+    /* 主动把 native buffer 物理尺寸设成窗口内容区尺寸，否则 XComponent buffer 仍停留在
+     * 创建时尺寸，renderer 按 win 计算 viewport 会放大/错位；随后重建 EGL surface 应用 */
+    if (g_rs.nativeWin) {
+        OH_NativeWindow_NativeWindowHandleOpt(g_rs.nativeWin, SET_BUFFER_GEOMETRY, w, h);
+    }
+    g_rs.surfaceRecreate.store(true);
     OH_LOG_INFO(LOG_APP, "surface resize: %{public}dx%{public}d", w, h);
     return 0;
 }
