@@ -33,10 +33,13 @@ export struct VmManage {
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmDataDir') vmDataDir: string = '';
   @StorageLink('vmListVersion') @Watch('onVmListChanged') vmListVersion: number = 0;
+  /* 运行态权威源（侧栏每 2s 刷新）。build 里经 isRunningNow() 直接读本字段：
+   * runningMap 变化 → 组件（框架强保证）重绘 → 按钮/徽标拿到最新 running。
+   * 不走 @State 中转——@State 在异步事件回调里赋值不驱动本次重绘，会停留旧值。 */
+  @StorageLink('runningMap') runningMap: Record<string, Object> = {};
 
   @State name: string = '';
   @State arch: string = '';
-  @State running: boolean = false;
   @State diskPath: string = '';
   @State cdromPath: string = '';
   @State bootFromCdrom: boolean = false;
@@ -55,6 +58,22 @@ export struct VmManage {
     this.refreshProfile();
   }
 
+  /* 本页 VM 是否运行：build 直接依赖 @StorageLink('runningMap')（响应式），
+   * runningMap 每 2s 由 VmList poll 刷新，变化即触发重绘，此处拿到最新值。 */
+  private isRunningNow(): boolean {
+    const p = this.profile;
+    if (!p) {
+      return false;
+    }
+    const st = this.runningMap[p.id];
+    if (typeof st === 'undefined') {
+      return false;
+    }
+    const so = st as Record<string, Object>;
+    const r = so['running'];
+    return typeof r === 'boolean' && r as boolean;
+  }
+
   /* 重读 profile 刷新本页状态。编辑页保存会 bump vmListVersion，@Watch 触发这里：
    * 必须从磁盘 load 最新版（详情页 this.profile 是导航传入的旧引用，编辑页写的是
    * 它自己构建的对象，读引用拿不到新值），让启动盘徽标、磁盘/光盘/网络等跟着更新。 */
@@ -68,7 +87,6 @@ export struct VmManage {
     this.profile = p; /* 让后续 isTempSnapshot/canSnapshot 也用最新对象 */
     this.name = p.name;
     this.arch = p.machine.arch;
-    this.running = vmIsRunning(p.id);
     this.diskPath = p.media.diskPath;
     this.cdromPath = p.media.cdromPath;
     this.bootFromCdrom = p.media.bootFromCdrom;
@@ -498,14 +516,14 @@ export struct VmManage {
             Row({ space: sp1 }) {
               Text(this.name).fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cText)
                 .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-              if (this.running) {
+              if (this.isRunningNow()) {
                 Text('运行').fontSize(tSub).fontColor(cRunning).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp1, right: sp1 })
               }
             }.alignItems(VerticalAlign.Center)
             Text(this.arch).fontSize(tSub).fontColor(cSub)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          Button(this.running ? '进入' : '启动').focusable(false).fontSize(tBody)
+          Button(this.isRunningNow() ? '进入' : '启动').focusable(false).fontSize(tBody)
             .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
             .backgroundColor(cPrimary).fontColor(Color.White)
             .onClick(() => this.openConsole())
