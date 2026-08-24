@@ -223,11 +223,15 @@ export struct VmStorage {
     this.showSnack('已清除光盘引用');
   }
 
+  /* 分区标题（与 VmWizard groupHeader 同款：灰字在左，细线延伸至右） */
   @Builder
   secHead(t: string) {
-    Divider().color(cBorder).margin({ top: sp2 })
-    Text(t).fontSize(tSub).fontColor(cWeak).fontWeight(FontWeight.Bold).letterSpacing(0.5)
-      .padding({ top: sp1, bottom: sp1 }).width('100%')
+    Row({ space: 8 }) {
+      Text(t).fontSize(tSub).fontColor(cSub)
+      Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
+    }
+    .width('100%')
+    .margin({ top: sp2, bottom: sp1 })
   }
 
   /* 系统盘：扩容 / 重建 / 创建快照（从 VmManage 平移到 per-VM 存储页）。盘不可移除，只可重建 */

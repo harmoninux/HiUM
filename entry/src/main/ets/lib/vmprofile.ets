@@ -210,7 +210,8 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
 
 /* =============================== 命令行生成 =============================== */
 
-/* 解析 "8080:80,2222:22" 形式的端口转发；非法条目直接跳过 */
+/* 解析 "8080:80,2222:22" 形式的端口转发；非法条目直接跳过（向导内由
+ * forwardErrors 提前暴露，运行期此处只保底不崩） */
 function parseForwards(text: string): string[] {
   const out: string[] = [];
   for (const item of text.split(',')) {
@@ -220,11 +221,48 @@ function parseForwards(text: string): string[] {
     }
     const host = Number(kv[0]);
     const guest = Number(kv[1]);
-    if (Number.isInteger(host) && Number.isInteger(guest) && host > 0 && guest > 0) {
+    if (Number.isInteger(host) && Number.isInteger(guest) && host >= 1 && host <= 65535
+      && guest >= 1 && guest <= 65535) {
       out.push(`hostfwd=tcp::${host}-:${guest}`);
     }
   }
   return out;
+}
+
+/* 端口转发完整校验（向导即时提示用）：逐条检查 "宿主端口:客机端口" 格式、
+ * 1-65535 范围、宿主端口不重复（多个 forward 抢同一宿主端口会 bind 失败），
+ * 返回所有错误描述；空数组 = 全部合法。 */
+export function forwardErrors(text: string): string[] {
+  const errs: string[] = [];
+  const seenHosts: number[] = [];
+  for (const item of text.split(',')) {
+    const s = item.trim();
+    if (s.length === 0) {
+      errs.push('条目为空');
+      continue;
+    }
+    const kv = s.split(':');
+    if (kv.length !== 2) {
+      errs.push(`「${s}」应为 宿主端口:客机端口`);
+      continue;
+    }
+    const host = Number(kv[0]);
+    const guest = Number(kv[1]);
+    if (!Number.isInteger(host) || !Number.isInteger(guest)) {
+      errs.push(`「${s}」端口需为整数`);
+      continue;
+    }
+    if (host < 1 || host > 65535 || guest < 1 || guest > 65535) {
+      errs.push(`「${s}」端口需在 1-65535 之间`);
+      continue;
+    }
+    if (seenHosts.indexOf(host) >= 0) {
+      errs.push(`宿主端口 ${host} 重复`);
+      continue;
+    }
+    seenHosts.push(host);
+  }
+  return errs;
 }
 
 /* 该 VM 的 QMP unix socket 路径（每 VM 一个，天然无端口冲突） */

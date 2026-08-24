@@ -367,11 +367,15 @@ export struct VmManage {
 
   /* ================= 分区 ================= */
 
+  /* 分区标题（与 VmWizard groupHeader 同款：灰字在左，细线延伸至右） */
   @Builder
   secHead(t: string) {
-    Divider().color(cBorder).margin({ top: sp2 })
-    Text(t).fontSize(tSub).fontColor(cWeak).fontWeight(FontWeight.Bold).letterSpacing(0.5)
-      .padding({ top: sp1, bottom: sp1 }).width('100%')
+    Row({ space: 8 }) {
+      Text(t).fontSize(tSub).fontColor(cSub)
+      Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
+    }
+    .width('100%')
+    .margin({ top: sp2, bottom: sp1 })
   }
 
   @Builder
