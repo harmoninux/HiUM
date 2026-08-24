@@ -31,23 +31,13 @@ struct Index {
       } else if (name === 'edit') {
         VmEdit({ profile: param as VmProfile })
       } else if (name === 'idle') {
-        /* 未选中任何虚拟机时的内容区占位：居中引导 + 新建入口，避免右侧留白 */
+        /* 未选中任何虚拟机时的内容区占位：居中引导，避免右侧留白 */
         Column({ space: 12 }) {
           Text('🖥').fontSize(56)
           Text('未选择虚拟机')
             .fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cSub)
           Text('从左侧列表选择一台虚拟机，查看详情 / 启动 / 存储')
             .fontSize(tSub).fontColor(cWeak).textAlign(TextAlign.Center)
-          Button('＋ 新建虚拟机')
-            .focusable(false)
-            .fontSize(tBody)
-            .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
-            .backgroundColor(cPrimary)
-            .margin({ top: sp2 })
-            .onClick(() => {
-              this.wizardParam = { mode: 'new' };
-              this.showWizard = true;
-            })
         }
         .width('100%')
         .height('100%')

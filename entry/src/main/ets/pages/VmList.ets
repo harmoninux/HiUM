@@ -282,14 +282,17 @@ export struct VmList {
         .fontSize(tSub)
         .fontColor(cWeak)
       Row({ space: sp2 }) {
-        Button('＋ 新建')
-          .focusable(false)
-          .fontSize(tBody)
-          .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
-          .backgroundColor(cPrimary)
-          .onClick(() => {
-            this.openWizardNew();
-          })
+        Button() {
+          SymbolGlyph($r('sys.symbol.plus'))
+            .fontSize(20)
+            .fontColor([cPrimary])
+        }
+        .focusable(false)
+        .width(btnH).height(btnH)
+        .backgroundColor(Color.Transparent)
+        .onClick(() => {
+          this.openWizardNew();
+        })
       }
     }
     .width('100%')
@@ -354,14 +357,17 @@ export struct VmList {
     Column() {
       Row() {
         Text('虚拟机').fontSize(tPage).fontWeight(FontWeight.Bold).layoutWeight(1)
-        Button('＋ 新建')
-          .focusable(false)
-          .fontSize(tBody)
-          .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
-          .backgroundColor(cPrimary)
-          .onClick(() => {
-            this.openWizardNew();
-          })
+        Button() {
+          SymbolGlyph($r('sys.symbol.plus'))
+            .fontSize(20)
+            .fontColor([cPrimary])
+        }
+        .focusable(false)
+        .width(btnH).height(btnH)
+        .backgroundColor(Color.Transparent)
+        .onClick(() => {
+          this.openWizardNew();
+        })
       }
       .width('100%')
       .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })

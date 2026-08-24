@@ -527,18 +527,34 @@ export struct VmManage {
             }.alignItems(VerticalAlign.Center)
             Text(this.arch).fontSize(tSub).fontColor(cSub)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          Button(this.isRunningNow() ? '进入' : '启动').focusable(false).fontSize(tBody)
-            .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
-            .backgroundColor(cPrimary).fontColor(Color.White)
-            .onClick(() => this.openConsole())
-          Button('编辑').focusable(false).fontSize(tBody)
-            .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
-            .backgroundColor(cBlock).fontColor(cPrimary)
-            .onClick(() => this.openEdit())
-          Button('删除').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-            .backgroundColor(Color.Transparent).fontColor(cDanger)
-            .onClick(() => this.confirmDeleteVm())
+          /* 操作图标钮：启动(play_fill) / 编辑(slider_vertical_3) / 删除(trash) */
+          Button() {
+            SymbolGlyph($r('sys.symbol.play_fill'))
+              .fontSize(20)
+              .fontColor([cPrimary])
+          }
+          .focusable(false)
+          .width(btnH).height(btnH)
+          .backgroundColor(Color.Transparent)
+          .onClick(() => this.openConsole())
+          Button() {
+            SymbolGlyph($r('sys.symbol.slider_vertical_3'))
+              .fontSize(20)
+              .fontColor([cText])
+          }
+          .focusable(false)
+          .width(btnH).height(btnH)
+          .backgroundColor(Color.Transparent)
+          .onClick(() => this.openEdit())
+          Button() {
+            SymbolGlyph($r('sys.symbol.trash'))
+              .fontSize(20)
+              .fontColor([cDanger])
+          }
+          .focusable(false)
+          .width(btnH).height(btnH)
+          .backgroundColor(Color.Transparent)
+          .onClick(() => this.confirmDeleteVm())
         }
         .width('100%')
         .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
