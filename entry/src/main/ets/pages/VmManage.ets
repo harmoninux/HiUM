@@ -527,9 +527,9 @@ export struct VmManage {
             }.alignItems(VerticalAlign.Center)
             Text(this.arch).fontSize(tSub).fontColor(cSub)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          /* 操作图标钮：启动(play_fill) / 编辑(slider_vertical_3) / 删除(trash) */
+          /* 操作图标钮：启动(play_fill) / 进入(full_screen_fill) / 编辑(slider_vertical_3) / 删除(trash) */
           Button() {
-            SymbolGlyph($r('sys.symbol.play_fill'))
+            SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.full_screen_fill') : $r('sys.symbol.play_fill'))
               .fontSize(20)
               .fontColor([cPrimary])
           }
