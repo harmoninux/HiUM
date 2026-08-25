@@ -540,9 +540,9 @@ export struct VmManage {
             }.alignItems(VerticalAlign.Center)
             Text(this.arch).fontSize(tSub).fontColor(cSub)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          /* 操作图标钮：启动(play_fill) / 进入(rectangle_on_rectangle) / 编辑(slider_vertical_3) / 删除(trash) */
+          /* 操作图标钮：启动(play_fill) / 进入(rectangle) / 编辑(slider_vertical_3) / 删除(trash) */
           Button() {
-            SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.rectangle_on_rectangle') : $r('sys.symbol.play_fill'))
+            SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.rectangle') : $r('sys.symbol.play_fill'))
               .fontSize(20)
               .fontColor([cPrimary])
           }
