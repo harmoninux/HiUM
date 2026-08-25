@@ -534,7 +534,7 @@ export struct VmManage {
               Text(this.name).fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cText)
                 .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               if (this.isRunningNow()) {
-                Text('运行').fontSize(tSub).fontColor(cRunning).backgroundColor(cChip).borderRadius(rBadge)
+                Text('运行中').fontSize(tSub).fontColor(cRunning).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp1, right: sp1 })
               }
             }.alignItems(VerticalAlign.Center)

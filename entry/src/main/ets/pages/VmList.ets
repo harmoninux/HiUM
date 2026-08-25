@@ -314,7 +314,7 @@ export struct VmList {
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
           if (this.isRunning(p)) {
-            Text('运行')
+            Text('运行中')
               .fontSize(tSub)
               .fontColor(cRunning)
               .backgroundColor(cChip)
@@ -373,7 +373,7 @@ export struct VmList {
       .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
 
       Row({ space: sp2 }) {
-        Text(`● ${this.runningCount()} 运行`).fontSize(tSub).fontColor(cRunning)
+        Text(`● ${this.runningCount()} 运行中`).fontSize(tSub).fontColor(cRunning)
         Text(`${this.profiles.length - this.runningCount()} 已停`).fontSize(tSub).fontColor(cSub)
       }
       .width('100%')

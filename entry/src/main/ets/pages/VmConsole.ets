@@ -158,7 +158,7 @@ struct VmConsole {
     }
     if (napi.vmRunning(this.vmId)) {
       /* 已在后台运行（上次关窗只是摘窗）：重新挂窗，接管 QMP */
-      this.status = 'running';
+      this.status = '运行中';
       napi.qmpConnect(this.vmId, qmpSockPath(this.profile, this.vmDataDir));
       return;
     }
@@ -233,17 +233,17 @@ struct VmConsole {
       this.status = '启动失败: ' + ret;
       return;
     }
-    this.status = 'starting...';
+    this.status = '启动中...';
     napi.qmpConnect(this.vmId, qmpSockPath(this.profile, this.vmDataDir));
     /* 首次启动 qemu 不发 RESUME 事件，按实际运行状态翻牌；长时间没起来
      * 说明子进程早夭（如参数/资源问题），给个可见的失败 */
     setTimeout(() => {
-      if (this.status === 'starting...' && napi.vmRunning(this.vmId)) {
-        this.status = 'running';
+      if (this.status === '启动中...' && napi.vmRunning(this.vmId)) {
+        this.status = '运行中';
       }
     }, 2000);
     setTimeout(() => {
-      if (this.status === 'starting...' && !napi.vmRunning(this.vmId)) {
+      if (this.status === '启动中...' && !napi.vmRunning(this.vmId)) {
         this.status = '启动失败（子进程退出）';
       }
     }, 10000);
@@ -262,10 +262,10 @@ struct VmConsole {
         this.status = '已暂停';
         break;
       case 'RESUME':
-        this.status = 'running';
+        this.status = '运行中';
         break;
       case 'RESET':
-        this.status = 'running (reset)';
+        this.status = '运行中 (复位)';
         break;
       case 'SHUTDOWN':
       case 'QMP_DISCONNECT':
