@@ -5,7 +5,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { image } from '@kit.ImageKit';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
@@ -99,9 +99,11 @@ struct VmConsole {
   @StorageLink('vmListVersion') vmListVersion: number = 0;
   @State status: string = '';
   @State showKbd: boolean = false;   /* 虚拟键盘显隐（底部状态栏开关，按 vmId 持久化） */
+  @State immersive: boolean = false; /* 沉浸全屏态（最大化进入），沉浸时隐藏底部状态栏 */
   private vmId: string = '';
   private profile: VmProfile | null = null;
   private xcController: VmXComponentController = new VmXComponentController();
+  private immersiveMaximized: boolean = false;  /* 防递归：maximize() 自身也触发窗口状态回调 */
   private areaW: number = 0;
   private areaH: number = 0;
   private surfaceReady: boolean = false;
@@ -144,6 +146,11 @@ struct VmConsole {
     napi.setQmpEventCallback(this.vmId, (evt: string) => this.onQmpEvent(evt));
     this.loadKbd();
     this.enterVm();
+    /* 最大化→沉浸仅对自由窗口设备（PC 2in1 等）有意义；Pad/手机窗口本来就
+     * 全屏沉浸（Ability 侧 layoutFullScreen），由系统手势/任务栏管，不监听 */
+    if (!isPadOrPhone()) {
+      this.initImmersive();
+    }
   }
 
   aboutToDisappear(): void {
@@ -485,6 +492,40 @@ struct VmConsole {
       '{"type":"qcode","data":"delete"}]}');
   }
 
+  /* ================ 窗口最大化 → 沉浸全屏（参照 wineohos VirtualDesktopAbility） ================
+   * 用户点系统最大化按钮 → 系统发 MAXIMIZE(2) → 本页以 ENTER_IMMERSIVE 方式
+   * 最大化：铺满屏幕、隐藏系统标题栏/状态栏(Dock)。还原走系统自带通道——悬停
+   * 屏幕边缘唤出标题栏/Dock 点还原，无需应用自建入口（不用
+   * DISABLE_TITLE_AND_DOCK_HOVER，那会禁掉 hover 还原）。immersive = 沉浸稳态
+   * （FULL_SCREEN），此时连页内底部状态栏也一起隐藏，画面铺满整窗；还原后
+   * 状态栏回来。immersiveMaximized 防递归：maximize() 自身也会触发状态回调。 */
+  private initImmersive(): void {
+    window.getLastWindow(this.vmCtx()).then((win: window.Window) => {
+      win.on('windowStatusChange', (statusType: number) => {
+        if (statusType === window.WindowStatusType.MAXIMIZE) {
+          if (!this.immersiveMaximized) {
+            this.immersiveMaximized = true;
+            win.maximize(window.MaximizePresentation.ENTER_IMMERSIVE)
+              .catch((e: Error) => {
+                hilog.warn(DOMAIN, TAG, 'maximize immersive failed: %{public}s', JSON.stringify(e));
+                this.immersiveMaximized = false;
+              });
+          }
+          return;
+        }
+        if (statusType === window.WindowStatusType.FULL_SCREEN) {
+          this.immersive = true; /* 沉浸稳态：隐藏系统栏（系统侧）+ 页内底部状态栏 */
+          return;
+        }
+        /* 还原/最小化/分屏等：恢复底部状态栏 + 复位，下次再点最大化仍能拦截 */
+        this.immersive = false;
+        this.immersiveMaximized = false;
+      });
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN, TAG, 'getLastWindow: %{public}s', JSON.stringify(e));
+    });
+  }
+
   build() {
     Column() {
       /* VM 画面区：XComponent + 虚拟键盘 overlay（键盘盖画面、不压底部状态栏） */
@@ -507,39 +548,42 @@ struct VmConsole {
       .width('100%')
       .layoutWeight(1)
 
-      /* 底部状态栏：运行状态 + 电源/远程控制（常驻，所有设备） */
-      Row({ space: sp2 }) {
-        Text(this.status).fontSize(STATUS_FS).fontColor(MENU_TEXT)
-          .layoutWeight(1).maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Button('关机').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
-          .padding({ left: sp1, right: sp1 })
-          .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
-          .onClick(() => { this.qmp('system_powerdown') })
-        Button('重启').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
-          .padding({ left: sp1, right: sp1 })
-          .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
-          .onClick(() => { this.qmp('system_reset') })
-        Button('强制断电').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
-          .padding({ left: sp1, right: sp1 })
-          .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
-          .onClick(() => { this.qmp('quit') })
-        Button('Ctrl+Alt+Del').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
-          .padding({ left: sp1, right: sp1 })
-          .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
-          .onClick(() => { this.actReset() })
-        if (isPadOrPhone()) {
-          Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+      /* 底部状态栏：运行状态 + 电源/远程控制（常驻，所有设备；
+       * 沉浸全屏时整体隐藏，画面铺满整窗） */
+      if (!this.immersive) {
+        Row({ space: sp2 }) {
+          Text(this.status).fontSize(STATUS_FS).fontColor(MENU_TEXT)
+            .layoutWeight(1).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Button('关机').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
-            .fontColor(this.showKbd ? cPrimary : MENU_TEXT).backgroundColor(Color.Transparent)
-            .onClick(() => { this.toggleKbd() })
+            .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+            .onClick(() => { this.qmp('system_powerdown') })
+          Button('重启').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+            .padding({ left: sp1, right: sp1 })
+            .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+            .onClick(() => { this.qmp('system_reset') })
+          Button('强制断电').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+            .padding({ left: sp1, right: sp1 })
+            .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+            .onClick(() => { this.qmp('quit') })
+          Button('Ctrl+Alt+Del').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+            .padding({ left: sp1, right: sp1 })
+            .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+            .onClick(() => { this.actReset() })
+          if (isPadOrPhone()) {
+            Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+              .padding({ left: sp1, right: sp1 })
+              .fontColor(this.showKbd ? cPrimary : MENU_TEXT).backgroundColor(Color.Transparent)
+              .onClick(() => { this.toggleKbd() })
+          }
         }
+        .width('100%')
+        .height(STATUS_H)
+        .backgroundColor('#e620242b')
+        .padding({ left: sp2, right: sp2 })
+        .alignItems(VerticalAlign.Center)
       }
-      .width('100%')
-      .height(STATUS_H)
-      .backgroundColor('#e620242b')
-      .padding({ left: sp2, right: sp2 })
-      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
     .height('100%')
