@@ -522,7 +522,7 @@ struct VmConsole {
           .onClick(() => { this.qmp('system_reset') })
         Button('强制断电').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
           .padding({ left: sp1, right: sp1 })
-          .fontColor(cDanger).backgroundColor(Color.Transparent)
+          .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
           .onClick(() => { this.qmp('quit') })
         Button('Ctrl+Alt+Del').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
           .padding({ left: sp1, right: sp1 })

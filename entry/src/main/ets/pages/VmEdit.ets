@@ -25,6 +25,8 @@ const GB = 1024 * 1024 * 1024;
 export struct VmEdit {
   profile: VmProfile | null = null; /* 由导航参数传入；就地编辑副本 */
   @Consume('navStack') navStack: NavPathStack;
+  @Consume('showStorage') showStorage: boolean; /* 存储弹窗全窗口开关（Index @Provide） */
+  @Consume('storageParam') storageParam: VmProfile | null;
   @StorageLink('vmDataDir') vmDataDir: string = '';
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmListVersion') vmListVersion: number = 0;
@@ -270,7 +272,16 @@ export struct VmEdit {
                 }
                 .alignItems(HorizontalAlign.Start)
                 .layoutWeight(1)
-                Text('扩容 / 重建在存储页').fontSize(tBody).fontColor(cWeak)
+                Button('存储管理').focusable(false).fontSize(tBody)
+                  .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                  .backgroundColor(Color.Transparent).fontColor(cPrimary)
+                  .onClick(() => {
+                    const p = this.profile;
+                    if (p) {
+                      this.storageParam = p;
+                      this.showStorage = true;
+                    }
+                  })
               } else {
                 Text('保存时创建').fontSize(tSub).fontColor(cSub).layoutWeight(1)
               }

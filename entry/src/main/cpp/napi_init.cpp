@@ -346,6 +346,7 @@ static napi_value DiskInfo(napi_env env, napi_callback_info info)
 
     std::vector<std::string> argv;
     argv.push_back("info");
+    argv.push_back("-U"); /* force-share：VM 运行时 qcow2 带独占锁，不加会读不了（返回空串→UI 显示 ?） */
     argv.push_back("--output=json");
     argv.push_back(path);
 

@@ -3,7 +3,7 @@
 // 从列表侧栏点行进（Navigation replace 渲染到 content/detail 区）；成功反馈走右下角 snackbar。
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
-import { BusinessError } from '@kit.BasicServicesKit';
+import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore, buildArgs, sharedDir } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
@@ -168,15 +168,14 @@ export struct VmManage {
     return 'none';
   }
 
-  /* 「启动」徽标：高亮描边 pill，仅挂在当前启动盘行 */
+  /* 「启动」徽标：与「运行」徽标同款柔和样式（cChip 底 + 无描边），仅挂在当前启动盘行 */
   @Builder
   bootBadge() {
     Text('启动')
-      .fontSize(10).fontColor(cPrimary)
-      .padding({ left: sp2, right: sp2, top: 1, bottom: 1 })
+      .fontSize(tSub).fontColor(cPrimary)
+      .padding({ left: sp1, right: sp1 })
       .borderRadius(rBadge)
-      .backgroundColor(cBlock)
-      .border({ width: 1, color: cPrimary })
+      .backgroundColor(cChip)
   }
 
   /* ================= 快照 / 时光机（Phase 1，离线 qcow2 内部快照） ================= */
@@ -474,8 +473,12 @@ export struct VmManage {
     Row() {
       Text('qemu 启动参数预览').fontSize(tSub).fontColor(cSub)
       Blank()
+      Button('复制').focusable(false).fontSize(tBody)
+        .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+        .backgroundColor(Color.Transparent).fontColor(cPrimary)
+        .onClick(() => this.copyArgs())
       Text('只读').fontSize(tSub).fontColor(cWeak)
-    }.width('100%').padding({ top: sp1, bottom: sp1 })
+    }.width('100%').padding({ top: sp1, bottom: sp1 }).alignItems(VerticalAlign.Center)
     Text(this.qemuArgsText())
       .fontSize(tMono)
       .fontColor(cText)
@@ -505,6 +508,16 @@ export struct VmManage {
     return buildArgs(p, this.vmDataDir, sharedDir(this.filesDir)).join(' ');
   }
 
+  /* 复制 qemu 参数全文到系统剪贴板（长命令手抄容易错） */
+  private copyArgs(): void {
+    const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.qemuArgsText());
+    pasteboard.getSystemPasteboard().setData(data).then(() => {
+      promptAction.showToast({ message: '已复制' });
+    }).catch((e: BusinessError) => {
+      promptAction.showToast({ message: '复制失败: ' + e.code });
+    });
+  }
+
   build() {
     Stack() {
       Column() {
@@ -527,9 +540,9 @@ export struct VmManage {
             }.alignItems(VerticalAlign.Center)
             Text(this.arch).fontSize(tSub).fontColor(cSub)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          /* 操作图标钮：启动(play_fill) / 进入(full_screen_fill) / 编辑(slider_vertical_3) / 删除(trash) */
+          /* 操作图标钮：启动(play_fill) / 进入(rectangle_on_rectangle) / 编辑(slider_vertical_3) / 删除(trash) */
           Button() {
-            SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.full_screen_fill') : $r('sys.symbol.play_fill'))
+            SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.rectangle_on_rectangle') : $r('sys.symbol.play_fill'))
               .fontSize(20)
               .fontColor([cPrimary])
           }
