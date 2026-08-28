@@ -303,7 +303,7 @@ export struct VmList {
   /* 侧栏紧凑行：封面/架构 tag + 名称(运行/缺媒体徽标) + 规格行 + 进入/启动 */
   @Builder
   sideRow(p: VmProfile) {
-    Row({ space: sp3 }) {
+    Row({ space: sp2 }) {
       Column({ space: sp1 }) {
         Row({ space: sp1 }) {
           Text(p.name)
@@ -389,7 +389,7 @@ export struct VmList {
       if (this.profiles.length === 0) {
         this.emptySide()
       } else {
-        List({ space: sp2 }) {
+        List({ space: sp1 }) {
           ForEach(this.profiles, (p: VmProfile) => {
             ListItem() {
               this.sideRow(p)

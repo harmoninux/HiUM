@@ -54,14 +54,12 @@ export struct VmWizard {
   @State diskPath: string = '';
   @State cdromPath: string = '';
   @State bootFromCdrom: boolean = false;
-  @State kernelBoot: boolean = false;
-  @State kernelPath: string = '';
-  @State initrdPath: string = '';
-  @State kernelArgs: string = '';
   @State netEnabled: boolean = true;
   @State portForwards: string = '';
   @State sharedFolder: boolean = false;
   @State name: string = '';
+  @State cpuModelCollapsed: boolean = true; /* CPU 机型组默认折叠（步骤②） */
+  @State tcgCollapsed: boolean = true;      /* TCG 模拟组默认折叠（步骤③） */
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine ISO 下载中 */
   @State isoPct: number = 0;
 
@@ -83,13 +81,11 @@ export struct VmWizard {
     this.diskPath = '';
     this.cdromPath = '';
     this.bootFromCdrom = false;
-    this.kernelBoot = false;
-    this.kernelPath = '';
-    this.initrdPath = '';
-    this.kernelArgs = '';
     this.netEnabled = true;
     this.portForwards = '';
     this.sharedFolder = false;
+    this.cpuModelCollapsed = true;
+    this.tcgCollapsed = true;
     if (pm.mode === 'edit' && pm.profile) {
       const p = pm.profile;
       this.name = p.name;
@@ -196,13 +192,6 @@ export struct VmWizard {
       }
     }
     if (step === 3) {
-      if (this.kernelBoot) {
-        if (this.kernelPath.trim().length === 0) { return '直启内核模式必须指定 kernel 路径'; }
-        if (!pathExists(this.kernelPath.trim())) { return 'kernel 路径不存在'; }
-      }
-      if (this.initrdPath.trim().length > 0 && !pathExists(this.initrdPath.trim())) {
-        return 'initrd 路径不存在';
-      }
       if (this.cdromPath.trim().length > 0 && !pathExists(this.cdromPath.trim())) {
         return 'ISO 路径不存在';
       }
@@ -212,7 +201,7 @@ export struct VmWizard {
       if (errs.length > 0) { return '端口转发：' + errs.join('；'); }
     }
     if (step === 5) {
-      if (this.name.trim().length === 0) { return '名称必填'; }
+      if (this.name.trim().length === 0) { return '需要指定虚拟机名称'; }
     }
     return '';
   }
@@ -241,7 +230,7 @@ export struct VmWizard {
   @Builder
   groupHeader(label: string) {
     Row({ space: 8 }) {
-      Text(label).fontSize(tSub).fontColor(cSub)
+      Text(label).fontSize(tLabel).fontColor(cSub)
       Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
     }
     .width('100%')
@@ -264,14 +253,6 @@ export struct VmWizard {
       diskPath = `${this.filesDir}/vms/${id}.qcow2`;
     }
     const tbSize = Number(this.tbSizeText);
-    let extra = '';
-    if (this.kernelBoot) {
-      const parts: string[] = [];
-      if (this.kernelPath.length > 0) { parts.push('-kernel ' + this.kernelPath); }
-      if (this.initrdPath.length > 0) { parts.push('-initrd ' + this.initrdPath); }
-      if (this.kernelArgs.length > 0) { parts.push('-append "' + this.kernelArgs + '"'); }
-      extra = parts.join(' ');
-    }
     const p: VmProfile = {
       schemaVersion: SCHEMA_VERSION,
       id: id,
@@ -300,7 +281,7 @@ export struct VmWizard {
         sharedFolder: this.sharedFolder,
       },
       temporarySession: this.isEdit() ? (this.param.profile as VmProfile).temporarySession : false,
-      extraArgs: extra,
+      extraArgs: '',
     };
     return p;
   }
@@ -392,7 +373,7 @@ export struct VmWizard {
           Column() {
             Text(b).fontSize(tCard).fontWeight(FontWeight.Medium)
               .fontColor(this.board === b ? Color.White : cText)
-            Text(this.boardName(b)).fontSize(tMono).fontColor(this.board === b ? Color.White : cWeak)
+            Text(this.boardName(b)).fontSize(tSub).fontColor(this.board === b ? Color.White : cWeak)
           }
           .layoutWeight(1)
           .padding(12)
@@ -405,35 +386,52 @@ export struct VmWizard {
 
       Text(this.firmwareHint()).fontSize(tSub).fontColor(cWeak).width('100%')
 
-      this.groupHeader('CPU 机型')
-      Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
-        Text('自动')
-          .fontSize(tBody)
-          .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-          .margin({ right: sp2, bottom: sp2 })
-          .fontColor(this.cpuModel.trim().length === 0 ? Color.White : cText)
-          .backgroundColor(this.cpuModel.trim().length === 0 ? cPrimary : cBg)
-          .borderRadius(rBtn)
-          .onClick(() => this.cpuModel = '')
-        ForEach(this.cpuPresets(), (m: string) => {
-          Text(m)
+      /* CPU 机型组：默认折叠，点组头展开/收起 */
+      /* CPU 机型组：默认折叠，点组头展开/收起。
+       * 标题+提示合成同一 Text 的 Span（单行盒排版），避免两个独立 Text
+       * 因符号字符(▸)字体度量不同而垂直错位 */
+      Row({ space: 8 }) {
+        Text() {
+          Span('CPU 机型').fontColor(cSub)
+          Span(this.cpuModelCollapsed ? ' ▸ 展开' : ' ▾ 收起').fontColor(cWeak).fontSize(tSub)
+        }
+        .fontSize(tLabel)
+        Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
+      }
+      .width('100%')
+      .margin({ top: sp2, bottom: sp1 })
+      .onClick(() => this.cpuModelCollapsed = !this.cpuModelCollapsed)
+
+      if (!this.cpuModelCollapsed) {
+        Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
+          Text('自动')
             .fontSize(tBody)
             .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
             .margin({ right: sp2, bottom: sp2 })
-            .fontColor(this.cpuModel.trim() === m ? Color.White : cText)
-            .backgroundColor(this.cpuModel.trim() === m ? cPrimary : cBg)
+            .fontColor(this.cpuModel.trim().length === 0 ? Color.White : cText)
+            .backgroundColor(this.cpuModel.trim().length === 0 ? cPrimary : cBg)
             .borderRadius(rBtn)
-            .onClick(() => this.cpuModel = m)
-        }, (m: string) => m)
+            .onClick(() => this.cpuModel = '')
+          ForEach(this.cpuPresets(), (m: string) => {
+            Text(m)
+              .fontSize(tBody)
+              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              .margin({ right: sp2, bottom: sp2 })
+              .fontColor(this.cpuModel.trim() === m ? Color.White : cText)
+              .backgroundColor(this.cpuModel.trim() === m ? cPrimary : cBg)
+              .borderRadius(rBtn)
+              .onClick(() => this.cpuModel = m)
+          }, (m: string) => m)
+        }
+        .width('100%')
+
+        TextInput({ text: this.cpuModel, placeholder: '自定义（预设外的机型）' })
+          .fontSize(tBody)
+          .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+          .onChange((v: string) => this.cpuModel = v)
+
+        Text('留空 = 自动；ARM/ARM64/龙芯/RISC-V 默认 max，x86 用板卡默认').fontSize(tSub).fontColor(cWeak)
       }
-      .width('100%')
-
-      TextInput({ text: this.cpuModel, placeholder: '自定义（预设外的机型）' })
-        .fontSize(tBody)
-        .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-        .onChange((v: string) => this.cpuModel = v)
-
-      Text('留空 = 自动；ARM/ARM64/龙芯/RISC-V 默认 max，x86 用板卡默认').fontSize(tSub).fontColor(cWeak)
 
       this.stepErrorMsg()
 
@@ -452,21 +450,35 @@ export struct VmWizard {
       Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
       Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
         .onChange((v: number) => this.cpus = v)
-      this.groupHeader('TCG 模拟')
-      Row() {
-        Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.mttcg })
-          .onChange((v: boolean) => this.mttcg = v)
+      /* TCG 模拟组：默认折叠，点组头展开/收起 */
+      Row({ space: 8 }) {
+        Text() {
+          Span('TCG 模拟').fontColor(cSub)
+          Span(this.tcgCollapsed ? ' ▸ 展开' : ' ▾ 收起').fontColor(cWeak).fontSize(tSub)
+        }
+        .fontSize(tLabel)
+        Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
       }
-      Row() {
-        Text('tb-size').fontSize(tLabel).width(90)
-        TextInput({ text: this.tbSizeText })
-          .layoutWeight(1)
-          .fontSize(tBody)
-          .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-          .onChange((v: string) => this.tbSizeText = v)
+      .width('100%')
+      .margin({ top: sp2, bottom: sp1 })
+      .onClick(() => this.tcgCollapsed = !this.tcgCollapsed)
+
+      if (!this.tcgCollapsed) {
+        Row() {
+          Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)
+          Toggle({ type: ToggleType.Switch, isOn: this.mttcg })
+            .onChange((v: boolean) => this.mttcg = v)
+        }
+        Row() {
+          Text('tb-size').fontSize(tLabel).width(90)
+          TextInput({ text: this.tbSizeText })
+            .layoutWeight(1)
+            .fontSize(tBody)
+            .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+            .onChange((v: string) => this.tbSizeText = v)
+        }
+        Text('有效范围 512-8192 MB（默认 1024）').fontSize(tSub).fontColor(cWeak)
       }
-      Text('有效范围 512-8192 MB（默认 1024）').fontSize(tSub).fontColor(cWeak)
 
       this.stepErrorMsg()
     }
@@ -515,7 +527,7 @@ export struct VmWizard {
             .onClick(() => this.cdromPath = '')
         }
       }
-      if (this.cdromPath.length === 0 && !this.kernelBoot) {
+      if (this.cdromPath.length === 0) {
         Row({ space: 8 }) {
           TextInput({ placeholder: 'ISO 完整路径', text: this.cdromPath })
             .layoutWeight(1).fontSize(tBody)
@@ -532,27 +544,6 @@ export struct VmWizard {
         Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
         Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
           .onChange((v: boolean) => this.bootFromCdrom = v)
-      }
-
-      this.groupHeader('直启内核（教学/实验室）')
-      Row() {
-        Text('启用直启').fontSize(tLabel).layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.kernelBoot })
-          .onChange((v: boolean) => this.kernelBoot = v)
-      }
-      if (this.kernelBoot) {
-        TextInput({ placeholder: 'kernel 路径，如 /data/.../kernel_aarch64', text: this.kernelPath })
-          .fontSize(tBody)
-          .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-          .onChange((v: string) => this.kernelPath = v)
-        TextInput({ placeholder: 'initrd 路径（可空）', text: this.initrdPath })
-          .fontSize(tBody)
-          .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-          .onChange((v: string) => this.initrdPath = v)
-        TextInput({ placeholder: '内核参数（可为空），如 console=ttyS0', text: this.kernelArgs })
-          .fontSize(tBody)
-          .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-          .onChange((v: string) => this.kernelArgs = v)
       }
 
       this.stepErrorMsg()
