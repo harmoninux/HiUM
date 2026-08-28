@@ -45,7 +45,6 @@ export struct VmWizard {
   @State tbSizeText: string = '1024';
   @State diskGB: number = 8;
   @State diskAlloc: string = 'dynamic';
-  @State diskPath: string = '';
   @State cdromPath: string = '';
   @State bootFromCdrom: boolean = false;
   @State netEnabled: boolean = true;
@@ -71,7 +70,6 @@ export struct VmWizard {
     this.tbSizeText = '1024';
     this.diskGB = 8;
     this.diskAlloc = 'dynamic';
-    this.diskPath = '';
     this.cdromPath = '';
     this.bootFromCdrom = false;
     this.netEnabled = true;
@@ -216,11 +214,8 @@ export struct VmWizard {
 
   /* 从当前步装配一份 VmProfile（不落盘、不建盘；用于预览/完成） */
   private assemble(id: string): VmProfile {
-    /* 系统盘必配：未指定路径则用标准位置，保证每台 VM 都有系统盘 */
-    let diskPath = this.diskPath;
-    if (diskPath.length === 0) {
-      diskPath = `${this.filesDir}/vms/${id}.qcow2`;
-    }
+    /* 系统盘必配：保存时建在标准位置 */
+    const diskPath = `${this.filesDir}/vms/${id}.qcow2`;
     const tbSize = Number(this.tbSizeText);
     const p: VmProfile = {
       schemaVersion: SCHEMA_VERSION,
@@ -453,10 +448,8 @@ export struct VmWizard {
   @Builder
   stepMedia() {
     Column({ space: 12 }) {
-      /* 系统盘必配（无开关）：每台 VM 都带系统盘，未指定路径则保存时建在标准位置 */
+      /* 系统盘必配（无开关）：每台 VM 都带系统盘，保存时建在标准位置 */
       this.groupHeader('系统盘')
-      Text(this.diskPath ? pathExists(this.diskPath) ? '已有盘: ' + this.baseName(this.diskPath) : '新建: ' + this.baseName(this.diskPath) : '保存时创建')
-        .fontSize(tSub).fontColor(cSub)
       Text(`磁盘大小: ${Math.round(this.diskGB)}GB`).fontSize(tLabel)
       Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
         min: 0, max: DISK_SIZES.length - 1, step: 1 })
