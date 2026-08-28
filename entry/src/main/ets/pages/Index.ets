@@ -1,6 +1,6 @@
 // 应用导航壳：宽屏 Auto → 左栏 VmList（Navigation 子内容即侧栏）+ 右侧 NavDestination 详情；
 // 窄屏 Auto 退化为 Stack，整页 push。工坊为【全窗口】居中模态：本层铺半透明黑遮罩 + 居中卡片
-// （showWizard 开关 + wizardParam 参数，VmList 经 @Consume 触发；因 bindContentCover 遮罩在本
+// （showWizard 开关，VmList 经 @Consume 触发；因 bindContentCover 遮罩在本
 // SDK 不渲染，改用 Stack 遮罩——与 VmManage 的存储弹窗同款，保证两模态一致）。
 // console 已迁出为每台 VM 独立的 VmConsoleAbility 窗口（见 VmList.openConsole）。
 // 注：本 SDK(API24) 的 NavigationAttribute 无 .sideBar()，侧栏 = Navigation 的子内容本身。
@@ -8,7 +8,7 @@ import { VmList } from './VmList';
 import { VmEdit } from './VmEdit';
 import { VmManage } from './VmManage';
 import { VmStorage } from './VmStorage';
-import { VmWizard, WizardParam } from './VmWizard';
+import { VmWizard } from './VmWizard';
 import { VmProfile } from '../lib/vmprofile';
 import { tBody, tSub, tCard, cSub, cWeak, cPrimary, cCard, cBorder, rCard, bw, sp2, rBtn, btnH, btnPadX } from '../lib/uiTokens';
 
@@ -18,7 +18,6 @@ struct Index {
   @Provide('navStack') navStack: NavPathStack = new NavPathStack();
   /* 工坊/存储模态：都由 VmList/VmManage @Consume 同一对变量，在本层(全窗口)渲染遮罩覆盖侧栏+内容 */
   @Provide('showWizard') showWizard: boolean = false;
-  @Provide('wizardParam') wizardParam: WizardParam = { mode: 'new' };
   @Provide('showStorage') showStorage: boolean = false;
   @Provide('storageParam') storageParam: VmProfile | null = null;
   @StorageLink('vmListVersion') vmListVersion: number = 0;
@@ -65,7 +64,7 @@ struct Index {
 
   @Builder
   wizardCover() {
-    VmWizard({ param: this.wizardParam, onClose: () => this.closeWizard() })
+    VmWizard({ onClose: () => this.closeWizard() })
   }
 
   /* 工坊弹窗：遮罩(压暗主界面) + 居中卡片。bindContentCover 自带遮罩在本 SDK 不渲染，

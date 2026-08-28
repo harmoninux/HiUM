@@ -59,7 +59,7 @@ export interface VmRuntime {
 
 /* 介质层 */
 export interface VmMedia {
-  diskPath: string;   /* '' = 无系统盘；当前新建为 qcow2，导入 raw 按扩展名回退 */
+  diskPath: string;   /* 系统盘必配：新建/编辑均在标准位置生成 qcow2 */
   cdromPath: string;  /* '' = 无光盘 */
   bootFromCdrom: boolean;
 }

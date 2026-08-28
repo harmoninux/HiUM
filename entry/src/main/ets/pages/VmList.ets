@@ -2,7 +2,7 @@
 // 宽屏下作为 Index 的 sideBar 常驻左侧，点行 push 'manage' 在右侧渲染详情；
 // 多实例：每台 VM 独立子进程，可同时运行多台（受内存约束）；
 // console 为每台 VM 一个 VmConsoleAbility 独立窗口（specified 模式按 vmId 归并）。
-// 工坊为内嵌居中模态：Stack 遮罩浮层承载 VmWizard（showWizard 开关 + wizardParam 参数）。
+// 工坊为内嵌居中模态：Stack 遮罩浮层承载 VmWizard（showWizard 开关）。
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { pathExists } from '../lib/fsutil';
 import { promptAction } from '@kit.ArkUI';
@@ -12,7 +12,6 @@ import napiModule from 'libentry.so';
 import {
   VmProfile, VmStore, qmpSockPath,
 } from '../lib/vmprofile';
-import { WizardParam } from './VmWizard';
 import {
   initVmRegistry, refreshRunningMap, vmIsRunning,
   subscribeVmLifecycle, unsubscribeVmLifecycle, VmLifecycleEvent,
@@ -49,7 +48,6 @@ export struct VmList {
   @State runningIds: Record<string, boolean> = {};
   @State diskUsage: Record<string, number> = {}; /* vmId → 磁盘实占字节数 */
   @Consume('showWizard') showWizard: boolean; /* 全窗口工坊模态开关（Index @Provide） */
-  @Consume('wizardParam') wizardParam: WizardParam; /* 工坊参数（新建/编辑） */
   @State selectedId: string = ''; /* 当前选中行（详情区正在展示的 VM） */
   private pollTimer: number = -1;
   private lifecycleCb: ((e: VmLifecycleEvent) => void) | null = null;
@@ -190,12 +188,6 @@ export struct VmList {
 
   /* 新建 → 机器工坊（模态浮层，手工向导新建即开箱） */
   private openWizardNew(): void {
-    this.wizardParam = { mode: 'new' };
-    this.showWizard = true;
-  }
-
-  private openWizardEdit(p: VmProfile): void {
-    this.wizardParam = { mode: 'edit', profile: p };
     this.showWizard = true;
   }
 
@@ -256,9 +248,6 @@ export struct VmList {
           .fontColor(cDanger)
           .onClick(() => this.confirmPowerOff(p, true))
       }
-      Button('编辑').focusable(false).width('100%')
-        .height(btnSh).borderRadius(rBtn)
-        .onClick(() => this.openWizardEdit(p))
       Button('删除').focusable(false).width('100%')
         .height(btnSh).borderRadius(rBtn)
         .fontColor(cDanger)

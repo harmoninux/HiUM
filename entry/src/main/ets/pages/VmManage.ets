@@ -477,7 +477,6 @@ export struct VmManage {
         .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
         .backgroundColor(Color.Transparent).fontColor(cPrimary)
         .onClick(() => this.copyArgs())
-      Text('只读').fontSize(tSub).fontColor(cWeak)
     }.width('100%').padding({ top: sp1, bottom: sp1 }).alignItems(VerticalAlign.Center)
     Text(this.qemuArgsText())
       .fontSize(tMono)

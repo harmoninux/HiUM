@@ -12,7 +12,7 @@ import {
 } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import {
-  cPrimary, cSub, cWeak, cText, cBorder, cWarn, cDanger, cBg, cBlock,
+  cPrimary, cSub, cWeak, cText, cBorder, cDanger, cBg, cBlock,
   tPage, tCard, tBody, tSub, tLabel, tMono,
   sp1, sp2, sp3, sp4, bw, rBtn, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
@@ -23,18 +23,12 @@ interface DiskNapi {
 }
 const napi = napiModule as DiskNapi;
 
-export interface WizardParam {
-  mode: string;            /* 'new' | 'edit' */
-  profile?: VmProfile;     /* 编辑已有 */
-}
-
 const STEPS: string[] = ['架构', '板卡/固件', 'CPU/内存', '介质', '网络', '命名'];
 const ARCH_OPTIONS: VmArch[] = ['x86_64', 'i386', 'aarch64', 'arm', 'loongarch64', 'riscv64'];
 const DISK_SIZES: number[] = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 
 @Component
 export struct VmWizard {
-  @Prop param: WizardParam = { mode: 'new' };
   onClose: (() => void) | null = null; /* 模态关闭回调（宿主 Stack 置 false）；非响应式，够用 */
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmDataDir') vmDataDir: string = '';
@@ -64,7 +58,6 @@ export struct VmWizard {
   @State isoPct: number = 0;
 
   aboutToAppear(): void {
-    const pm = this.param;
     /* 每次打开都重置到默认，防止组件实例跨 if(showWizard) 开关复用残留上一次状态 */
     this.step = 0;
     this.name = '';
@@ -86,26 +79,6 @@ export struct VmWizard {
     this.sharedFolder = false;
     this.cpuModelCollapsed = true;
     this.tcgCollapsed = true;
-    if (pm.mode === 'edit' && pm.profile) {
-      const p = pm.profile;
-      this.name = p.name;
-      this.arch = p.machine.arch;
-      this.vga = p.machine.vga;
-      this.board = p.machine.machine;
-      this.cpuModel = p.machine.cpuModel;
-      this.memoryMB = p.runtime.memoryMB;
-      this.cpus = p.runtime.cpus;
-      this.mttcg = p.runtime.mttcg;
-      /* 旧档 tb-size 越界（有效范围 512-8192）时收敛回默认，避免打开即被判非法 */
-      const tb = Number(p.runtime.tbSize);
-      this.tbSizeText = (Number.isInteger(tb) && tb >= 512 && tb <= 8192) ? String(tb) : '1024';
-      this.diskPath = p.media.diskPath;
-      this.cdromPath = p.media.cdromPath;
-      this.bootFromCdrom = p.media.bootFromCdrom;
-      this.netEnabled = p.net.enabled;
-      this.portForwards = p.net.portForwards;
-      this.sharedFolder = p.net.sharedFolder;
-    }
   }
 
   /* 「内置 Alpine」按钮：按当前架构确保内置 iso 就绪（缺失则按需下载），完成后挂到光驱 */
@@ -129,10 +102,6 @@ export struct VmWizard {
         promptAction.showToast({ message: '内置 ISO 下载失败' });
       }
     });
-  }
-
-  private isEdit(): boolean {
-    return this.param.mode === 'edit' && this.param.profile !== null;
   }
 
   private boards(): string[] {
@@ -280,7 +249,7 @@ export struct VmWizard {
         portForwards: this.portForwards.trim(),
         sharedFolder: this.sharedFolder,
       },
-      temporarySession: this.isEdit() ? (this.param.profile as VmProfile).temporarySession : false,
+      temporarySession: false,
       extraArgs: '',
     };
     return p;
@@ -292,7 +261,7 @@ export struct VmWizard {
       promptAction.showToast({ message: '存在无效设置，请按红字提示修正' });
       return;
     }
-    const id = this.isEdit() ? (this.param.profile as VmProfile).id : newProfileId();
+    const id = newProfileId();
     const p = this.assemble(id);
     if (p.media.diskPath.length > 0) {
       if (!pathExists(p.media.diskPath)) {
@@ -331,14 +300,11 @@ export struct VmWizard {
   @Builder
   stepArch() {
     Column({ space: 12 }) {
-      if (this.isEdit()) {
-        Text('架构在创建后不可更改').fontSize(tSub).fontColor(cWarn)
-      }
       Row({ space: 10 }) {
         ForEach(ARCH_OPTIONS, (a: VmArch) => {
           Column() {
             Text(this.archLabel(a)).fontSize(tCard).fontWeight(FontWeight.Medium)
-              .fontColor(this.arch === a ? Color.White : (this.isEdit() ? cWeak : cText))
+              .fontColor(this.arch === a ? Color.White : cText)
             if (a === 'aarch64') { Text('ARM 64 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
             if (a === 'arm') { Text('ARM 32 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
             if (a === 'x86_64') { Text('64 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
@@ -351,10 +317,8 @@ export struct VmWizard {
           .backgroundColor(this.arch === a ? cPrimary : Color.White)
           .borderRadius(8)
           .onClick(() => {
-            if (!this.isEdit()) {
-              this.arch = a;
-              this.board = fitBoard(a, this.board);
-            }
+            this.arch = a;
+            this.board = fitBoard(a, this.board);
           })
         }, (a: VmArch) => a)
       }
@@ -598,7 +562,6 @@ export struct VmWizard {
       Row() {
         Text('qemu 参数预览').fontSize(tSub).fontColor(cSub)
         Blank()
-        Text('只读').fontSize(tSub).fontColor(cWeak)
       }
       Text(buildArgs(this.assemble(newProfileId()), this.vmDataDir, sharedDir(this.filesDir)).join(' '))
         .fontSize(tMono)

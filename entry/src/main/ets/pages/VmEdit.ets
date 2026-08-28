@@ -1,12 +1,11 @@
 // 虚拟机配置页：普通字段 + 高级折叠区（TCG/自定义参数）。
 // 只编辑 VmProfile JSON，保存后由列表页/console 窗口消费。
 import { promptAction } from '@kit.ArkUI';
-import { pathExists } from '../lib/fsutil';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
 import { VmProfile, VmStore, VmArch, VgaType, SCHEMA_VERSION, fitBoard, builtinIsoFor } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
-import { cPrimary, cDanger, cRunning, cWarn, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp2 } from '../lib/uiTokens';
+import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp2 } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -16,9 +15,6 @@ interface DiskNapi {
 const napi = napiModule as DiskNapi;
 
 const VGA_OPTIONS: VgaType[] = ['std', 'virtio'];
-/* 系统盘容量档位（GB）：指数翻倍进档，1→256 覆盖三个数量级。
- * Slider 滑的是索引（线性），显示的是档位值（指数），见磁盘块。 */
-const DISK_SIZES: number[] = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 const GB = 1024 * 1024 * 1024;
 
 @Component
@@ -36,8 +32,6 @@ export struct VmEdit {
   @State memoryMB: number = 1024;
   @State cpus: number = 2;
   @State diskPath: string = '';
-  @State diskGB: number = 8;
-  @State diskAlloc: string = 'dynamic'; /* dynamic|fixed → qemu-img preallocation=off|falloc */
   @State cdromPath: string = '';
   @State bootFromCdrom: boolean = false;
   @State vga: VgaType = 'std';
@@ -105,31 +99,11 @@ export struct VmEdit {
     return i >= 0 ? path.substring(i + 1) : path;
   }
 
-  /* 用户打开「启用系统盘」开关；真正创建在点「保存」时发生，取消不留孤儿盘 */
-  private createDiskNow(): boolean {
-    if (!this.profile) {
-      return false;
-    }
-    const store = new VmStore(this.filesDir);
-    const path = `${store.dir}/${this.profile.id}.qcow2`;
-    const ret = napi.createDisk(path, Math.round(this.diskGB * 1024), this.diskAlloc);
-    if (ret !== 0) {
-      promptAction.showToast({ message: '创建磁盘失败' });
-      return false;
-    }
-    this.diskPath = path;
-    this.readDiskMeta();
-    return true;
-  }
-
   /* 读取已建磁盘的格式/虚拟大小/实占大小（qemu-img info），供「系统盘」行直接展示 */
   private readDiskMeta(): void {
     this.diskFmt = '?';
     this.diskVirtualGB = 0;
     this.diskActualGB = 0;
-    if (!this.diskPath) {
-      return;
-    }
     const s = napi.diskInfo(this.diskPath);
     if (s.length === 0) {
       return;
@@ -152,12 +126,7 @@ export struct VmEdit {
     if (!this.profile) {
       return;
     }
-    /* 系统盘必配：无盘时保存即建盘（建失败不保存，避免半成品配置）。 */
-    if (!this.diskPath) {
-      if (!this.createDiskNow()) {
-        return;
-      }
-    }
+    /* 系统盘必配（由向导/编辑流程保证）：配置直接使用既有盘路径，不在保存侧再建盘 */
     const tbSize = Number(this.tbSizeText);
     const p: VmProfile = {
       schemaVersion: SCHEMA_VERSION,
@@ -259,59 +228,28 @@ export struct VmEdit {
           Column({ space: 6 }) {
             Row() {
               Text('系统盘').fontSize(tLabel).width(72)
-              if (this.diskPath) {
-                Column({ space: 2 }) {
-                  Text(this.baseName(this.diskPath))
-                    .fontSize(tSub)
-                    .fontColor(cSub)
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Text(`${this.diskFmt} · 虚拟${this.diskVirtualGB.toFixed(1)}G · 实占${this.diskActualGB.toFixed(1)}G`)
-                    .fontSize(tMono)
-                    .fontColor(cWeak)
-                }
-                .alignItems(HorizontalAlign.Start)
-                .layoutWeight(1)
-                Button('存储管理').focusable(false).fontSize(tBody)
-                  .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-                  .backgroundColor(Color.Transparent).fontColor(cPrimary)
-                  .onClick(() => {
-                    const p = this.profile;
-                    if (p) {
-                      this.storageParam = p;
-                      this.showStorage = true;
-                    }
-                  })
-              } else {
-                Text('保存时创建').fontSize(tSub).fontColor(cSub).layoutWeight(1)
+              Column({ space: 2 }) {
+                Text(this.baseName(this.diskPath))
+                  .fontSize(tSub)
+                  .fontColor(cSub)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(`${this.diskFmt} · 虚拟${this.diskVirtualGB.toFixed(1)}G · 实占${this.diskActualGB.toFixed(1)}G`)
+                  .fontSize(tMono)
+                  .fontColor(cWeak)
               }
-            }
-            if (!this.diskPath) {
-              Row({ space: 8 }) {
-                Text('分配方式').fontSize(tSub).fontColor(cSub)
-                Text('动态分配').fontSize(tLabel)
-                  .fontColor(this.diskAlloc === 'dynamic' ? cPrimary : Color.Black)
-                  .onClick(() => this.diskAlloc = 'dynamic')
-                Text('固定大小').fontSize(tLabel)
-                  .fontColor(this.diskAlloc === 'fixed' ? cPrimary : Color.Black)
-                  .onClick(() => this.diskAlloc = 'fixed')
-              }
-              Row({ space: 8 }) {
-                Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
-                  min: 0, max: DISK_SIZES.length - 1, step: 1 })
-                  .layoutWeight(1)
-                  .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
-                Text(`${Math.round(this.diskGB)}GB`).fontSize(tLabel)
-              }
-              Text('保存时创建 ' + Math.round(this.diskGB) + 'GB ' +
-                (this.diskAlloc === 'fixed' ? '固定大小' : '动态分配') + ' 系统盘')
-                .fontSize(tBody)
-                .fontColor(cRunning)
-              if (this.diskAlloc === 'fixed') {
-                Text('固定大小：保存时立即预留整块空间，大容量请优先动态分配')
-                  .fontSize(tBody)
-                  .fontColor(cWarn)
-              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+              Button('存储管理').focusable(false).fontSize(tBody)
+                .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                .backgroundColor(Color.Transparent).fontColor(cPrimary)
+                .onClick(() => {
+                  const p = this.profile;
+                  if (p) {
+                    this.storageParam = p;
+                    this.showStorage = true;
+                  }
+                })
             }
           }.alignItems(HorizontalAlign.Start).padding(12)
         }
