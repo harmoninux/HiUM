@@ -20,6 +20,9 @@ const FIRMWARE_FILES: string[] = [
   'vgabios-virtio.bin',
   'vgabios-ramfb.bin',
   'efi-virtio.rom',
+  'edk2-x86_64-code.fd', /* Windows x64 OVMF CODE（pflash） */
+  'edk2-i386-vars.fd',   /* x86 OVMF VARS 模板（复制成每 VM VARS） */
+  'edk2-arm-vars.fd',    /* aarch64 AAVMF VARS 模板 */
   'edk2-aarch64-code.fd', /* aarch64 客户机 UEFI 固件（virt 机器经 -bios 加载） */
   'edk2-arm-code.fd', /* arm(32位) 客户机 UEFI 固件（virt 机器经 -bios 加载） */
   'edk2-loongarch64-code.fd', /* loongarch64 客户机 UEFI 固件（virt 机器经 -bios 加载） */

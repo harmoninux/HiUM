@@ -15,7 +15,7 @@ FIRMWARE := bios-256k.bin bios.bin kvmvapic.bin linuxboot.bin linuxboot_dma.bin 
 	vgabios-stdvga.bin vgabios-virtio.bin vgabios-ramfb.bin \
 	efi-virtio.rom keymaps/en-us
 # optional blobs (present only when the corresponding firmware is shipped)
-FIRMWARE_OPT := edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd
+FIRMWARE_OPT := edk2-x86_64-code.fd edk2-i386-vars.fd edk2-arm-vars.fd edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd
 
 all: download/qemu
 	rm -rf temp build

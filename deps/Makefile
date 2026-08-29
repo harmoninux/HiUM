@@ -48,7 +48,7 @@ output/.stamp: $(STAMP) Makefile
 	mkdir -p ../entry/src/main/resources/rawfile/vm/firmware
 	for fw in bios-256k.bin bios.bin kvmvapic.bin linuxboot.bin linuxboot_dma.bin \
 		vgabios-stdvga.bin vgabios-virtio.bin vgabios-ramfb.bin \
-		efi-virtio.rom edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd; do cp output/$$fw ../entry/src/main/resources/rawfile/vm/firmware/ 2>/dev/null || true; done
+		efi-virtio.rom edk2-x86_64-code.fd edk2-i386-vars.fd edk2-arm-vars.fd edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd; do cp output/$$fw ../entry/src/main/resources/rawfile/vm/firmware/ 2>/dev/null || true; done
 	touch output/.stamp
 
 %/.stamp: %/Makefile
