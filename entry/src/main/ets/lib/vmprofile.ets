@@ -8,6 +8,7 @@ import { util } from '@kit.ArkTS';
 export const SCHEMA_VERSION = 2;
 
 export type VmArch = 'x86_64' | 'i386' | 'aarch64' | 'arm' | 'loongarch64' | 'riscv64';
+export type GuestOs = 'linux' | 'windows11';
 export type VgaType = 'std' | 'virtio';
 export type VmBoard = 'pc' | 'q35' | 'virt' | 'raspi2' | 'raspi3';
 export type VmFirmware = 'seabios' | 'ovmf';
@@ -49,6 +50,38 @@ export function builtinIsoFor(arch: VmArch): string {
   }
 }
 
+/* Windows UEFI 固件组：CODE（只读 pflash 镜像）+ VARS 模板（可写 NVRAM 模板） */
+export interface VmWinFirmware {
+  code: string;
+  varsTemplate: string;
+}
+
+/* Windows 11 UEFI 固件：x64 用 x86_64 OVMF CODE + i386 VARS 模板；aarch64 用 AAVMF(aarch64 CODE) + arm VARS 模板。
+ * CODE=fork pc-bios 现成；VARS 模板复制成每 VM 一份可写 VARS（qemu pflash 会改写 NVRAM）。 */
+export function winFirmware(arch: VmArch): VmWinFirmware {
+  if (arch === 'aarch64') {
+    return { code: 'edk2-aarch64-code.fd', varsTemplate: 'edk2-arm-vars.fd' };
+  }
+  return { code: 'edk2-x86_64-code.fd', varsTemplate: 'edk2-i386-vars.fd' };
+}
+
+/* 每 VM 的可写 VARS 路径（模板复制至此，qemu pflash 挂它） */
+export function winVarsPath(vmDataDir: string, id: string, arch: VmArch): string {
+  const suffix = arch === 'aarch64' ? 'aavmf' : 'ovmf';
+  return `${vmDataDir}/${id}-${suffix}-vars.fd`;
+}
+
+/* swtpm 控制 socket / pid 路径（qemu -chardev socket 与 native 共用） */
+export function swtpmSockPath(vmDataDir: string, id: string): string {
+  return `${vmDataDir}/swtpm-${id}.sock`;
+}
+export function swtpmPidPath(vmDataDir: string, id: string): string {
+  return `${vmDataDir}/swtpm-${id}.pid`;
+}
+export function swtpmDir(vmDataDir: string, id: string): string {
+  return `${vmDataDir}/tpm-${id}`;
+}
+
 /* 运行时层：可被 JIT 性能预设覆盖（memory/cpus/accel） */
 export interface VmRuntime {
   memoryMB: number;
@@ -75,6 +108,7 @@ export interface VmProfile {
   schemaVersion: number;  /* = SCHEMA_VERSION */
   id: string;
   name: string;
+  guestOS: GuestOs;   /* 驱动 buildArgs 设备组（linux/windows11） */
   machine: VmMachine;
   runtime: VmRuntime;
   media: VmMedia;
@@ -92,6 +126,7 @@ export function blankProfile(id: string): VmProfile {
     schemaVersion: SCHEMA_VERSION,
     id: id,
     name: '新虚拟机',
+    guestOS: 'linux',
     machine: { arch: 'x86_64', vga: 'std', machine: 'pc', firmware: 'seabios', cpuModel: '' },
     runtime: { memoryMB: 1024, cpus: 2, mttcg: true, tbSize: 1024 },
     media: { diskPath: '', cdromPath: '', bootFromCdrom: false },
@@ -204,6 +239,7 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
     p.net.sharedFolder = jBool(n, 'sharedFolder', p.net.sharedFolder);
   }
   p.temporarySession = jBool(o, 'temporarySession', false);
+  p.guestOS = jStr(o, 'guestOS') === 'windows11' ? 'windows11' : 'linux';
   p.extraArgs = jStr(o, 'extraArgs');
   return p;
 }
