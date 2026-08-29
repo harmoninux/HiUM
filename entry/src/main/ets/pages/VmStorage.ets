@@ -390,6 +390,10 @@ export struct VmStorage {
         Column({ space: sp1 }) {
           Text('未引用光盘').fontSize(tSub).fontColor(cWeak)
             .padding({ top: sp1, bottom: sp1 })
+          Text(this.profile && this.profile.guestOS === 'windows11'
+            ? 'Windows 11 安装请使用官方 ISO（光盘经 USB 存储挂载）'
+            : '选择本地 ISO 或内置 Alpine')
+            .fontSize(tSub).fontColor(cWeak)
           Row({ space: sp2 }) {
             Button('选择文件').focusable(false).fontSize(tBody)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
