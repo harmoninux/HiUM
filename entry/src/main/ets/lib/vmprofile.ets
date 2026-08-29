@@ -104,11 +104,17 @@ export interface VmNet {
   sharedFolder: boolean; /* 9p 共享宿主目录 filesDir/shared → guest /shared（默认关） */
 }
 
+/* 安全层 */
+export interface VmSecurity {
+  tpm: boolean; /* 真 TPM 2.0：启动时额外 spawn swtpm 并挂 tpm-tis（默认 false） */
+}
+
 export interface VmProfile {
   schemaVersion: number;  /* = SCHEMA_VERSION */
   id: string;
   name: string;
   guestOS: GuestOs;   /* 驱动 buildArgs 设备组（linux/windows11） */
+  security: VmSecurity;
   machine: VmMachine;
   runtime: VmRuntime;
   media: VmMedia;
@@ -127,6 +133,7 @@ export function blankProfile(id: string): VmProfile {
     id: id,
     name: '新虚拟机',
     guestOS: 'linux',
+    security: { tpm: false },
     machine: { arch: 'x86_64', vga: 'std', machine: 'pc', firmware: 'seabios', cpuModel: '' },
     runtime: { memoryMB: 1024, cpus: 2, mttcg: true, tbSize: 1024 },
     media: { diskPath: '', cdromPath: '', bootFromCdrom: false },
@@ -240,6 +247,10 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
   }
   p.temporarySession = jBool(o, 'temporarySession', false);
   p.guestOS = jStr(o, 'guestOS') === 'windows11' ? 'windows11' : 'linux';
+  const sec = jObj(o, 'security');
+  if (sec) {
+    p.security.tpm = jBool(sec, 'tpm', false);
+  }
   p.extraArgs = jStr(o, 'extraArgs');
   return p;
 }
