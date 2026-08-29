@@ -14,7 +14,7 @@ import { ensureBuiltinIso } from '../lib/isoDl';
 import {
   cPrimary, cSub, cWeak, cText, cBorder, cDanger, cBg, cBlock,
   tPage, tCard, tBody, tSub, tLabel, tMono,
-  sp1, sp2, sp3, sp4, bw, rBtn, btnH, btnSh, btnPadX,
+  sp1, sp2, sp3, sp4, sp8, spCard, bw, rElem, rBtn, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
@@ -196,7 +196,7 @@ export struct VmWizard {
   /* 分组标题 + 分割线（组头）：灰字在左，细线延伸至右；组间留距 */
   @Builder
   groupHeader(label: string) {
-    Row({ space: 8 }) {
+    Row({ space: sp8 }) {
       Text(label).fontSize(tLabel).fontColor(cSub)
       Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
     }
@@ -276,7 +276,7 @@ export struct VmWizard {
   stepHeader() {
     Row() {
       ForEach(STEPS, (s: string, i: number) => {
-        Row({ space: 6 }) {
+        Row({ space: sp1 }) {
           Text(String(i + 1)).fontSize(tMono)
             .fontColor(this.step === i ? Color.White : cSub)
             .width(20).height(20).textAlign(TextAlign.Center)
@@ -294,8 +294,8 @@ export struct VmWizard {
 
   @Builder
   stepArch() {
-    Column({ space: 12 }) {
-      Row({ space: 10 }) {
+    Column({ space: spCard }) {
+      Row({ space: sp2 }) {
         ForEach(ARCH_OPTIONS, (a: VmArch) => {
           Column() {
             Text(this.archLabel(a)).fontSize(tCard).fontWeight(FontWeight.Medium)
@@ -308,9 +308,9 @@ export struct VmWizard {
             if (a === 'riscv64') { Text('RISC-V').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
           }
           .layoutWeight(1)
-          .padding(12)
+          .padding(spCard)
           .backgroundColor(this.arch === a ? cPrimary : Color.White)
-          .borderRadius(8)
+          .borderRadius(rElem)
           .onClick(() => {
             this.arch = a;
             this.board = fitBoard(a, this.board);
@@ -325,9 +325,9 @@ export struct VmWizard {
 
   @Builder
   stepBoard() {
-    Column({ space: 12 }) {
+    Column({ space: spCard }) {
       this.groupHeader('机器类型')
-      Row({ space: 10 }) {
+      Row({ space: sp2 }) {
         ForEach(this.boards(), (b: string) => {
           Column() {
             Text(b).fontSize(tCard).fontWeight(FontWeight.Medium)
@@ -335,9 +335,9 @@ export struct VmWizard {
             Text(this.boardName(b)).fontSize(tSub).fontColor(this.board === b ? Color.White : cWeak)
           }
           .layoutWeight(1)
-          .padding(12)
+          .padding(spCard)
           .backgroundColor(this.board === b ? cPrimary : Color.White)
-          .borderRadius(8)
+          .borderRadius(rElem)
           .onClick(() => this.board = b as VmBoard)
         }, (b: string) => b)
       }
@@ -349,7 +349,7 @@ export struct VmWizard {
       /* CPU 机型组：默认折叠，点组头展开/收起。
        * 标题+提示合成同一 Text 的 Span（单行盒排版），避免两个独立 Text
        * 因符号字符(▸)字体度量不同而垂直错位 */
-      Row({ space: 8 }) {
+      Row({ space: sp8 }) {
         Text() {
           Span('CPU 机型').fontColor(cSub)
           Span(this.cpuModelCollapsed ? ' ▸ 展开' : ' ▾ 收起').fontColor(cWeak).fontSize(tSub)
@@ -401,7 +401,7 @@ export struct VmWizard {
 
   @Builder
   stepCpuMem() {
-    Column({ space: 12 }) {
+    Column({ space: spCard }) {
       this.groupHeader('内存与核数')
       Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
       Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
@@ -410,7 +410,7 @@ export struct VmWizard {
       Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
         .onChange((v: number) => this.cpus = v)
       /* TCG 模拟组：默认折叠，点组头展开/收起 */
-      Row({ space: 8 }) {
+      Row({ space: sp8 }) {
         Text() {
           Span('TCG 模拟').fontColor(cSub)
           Span(this.tcgCollapsed ? ' ▸ 展开' : ' ▾ 收起').fontColor(cWeak).fontSize(tSub)
@@ -447,7 +447,7 @@ export struct VmWizard {
 
   @Builder
   stepMedia() {
-    Column({ space: 12 }) {
+    Column({ space: spCard }) {
       /* 系统盘必配（无开关）：每台 VM 都带系统盘，保存时建在标准位置 */
       this.groupHeader('系统盘')
       Text(`磁盘大小: ${Math.round(this.diskGB)}GB`).fontSize(tLabel)
@@ -455,7 +455,7 @@ export struct VmWizard {
         min: 0, max: DISK_SIZES.length - 1, step: 1 })
         .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
       Row({ space: sp3 }) {
-        Row({ space: 6 }) {
+        Row({ space: sp1 }) {
           Radio({ value: 'dynamic', group: 'diskAlloc' })
             .checked(this.diskAlloc === 'dynamic')
             .onChange((isChecked: boolean) => {
@@ -463,7 +463,7 @@ export struct VmWizard {
             })
           Text('动态分配').fontSize(tBody).fontColor(cText)
         }
-        Row({ space: 6 }) {
+        Row({ space: sp1 }) {
           Radio({ value: 'fixed', group: 'diskAlloc' })
             .checked(this.diskAlloc === 'fixed')
             .onChange((isChecked: boolean) => {
@@ -485,7 +485,7 @@ export struct VmWizard {
         }
       }
       if (this.cdromPath.length === 0) {
-        Row({ space: 8 }) {
+        Row({ space: sp8 }) {
           TextInput({ placeholder: 'ISO 完整路径', text: this.cdromPath })
             .layoutWeight(1).fontSize(tBody)
             .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
@@ -511,7 +511,7 @@ export struct VmWizard {
 
   @Builder
   stepNet() {
-    Column({ space: 12 }) {
+    Column({ space: spCard }) {
       this.groupHeader('网络')
       Row() {
         Text('启用网络').fontSize(tLabel).layoutWeight(1)
@@ -542,15 +542,13 @@ export struct VmWizard {
 
   @Builder
   stepPreview() {
-    Column({ space: 12 }) {
+    Column({ space: spCard }) {
       Text('名称').fontSize(tLabel).width(72)
       TextInput({ text: this.name, placeholder: '必填' })
         .fontSize(tBody)
         .maxLength(60)
         .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
         .onChange((v: string) => this.name = v)
-      Text('1-60 字符，保存后仍可在列表编辑').fontSize(tSub).fontColor(cWeak)
-
       this.stepErrorMsg()
       Row() {
         Text('qemu 参数预览').fontSize(tSub).fontColor(cSub)
@@ -559,10 +557,10 @@ export struct VmWizard {
       Text(buildArgs(this.assemble(newProfileId()), this.vmDataDir, sharedDir(this.filesDir)).join(' '))
         .fontSize(tMono)
         .fontColor(cText)
-        .padding(8)
+        .padding(sp8)
         .width('100%')
         .backgroundColor(cBlock)
-        .borderRadius(6)
+        .borderRadius(rElem)
     }
     .alignItems(HorizontalAlign.Start)
     .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })

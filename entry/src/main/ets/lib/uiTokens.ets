@@ -23,7 +23,8 @@ export const tCard  = 14; /* 卡片/行标题 600 */
 export const tLabel = 14; /* 设置行标签 400 */
 export const tBody  = 14; /* 正文/按钮 400 */
 export const tSub   = 12; /* 次级说明 400 */
-export const tMono  = 11; /* mono 小字：状态/指纹/日期/步骤圆点 */
+export const tSubL  = 13; /* 次级信息大档（tSub 与 tBody 之间的档位）：详情页主体信息 */
+export const tMono  = 12; /* mono 小字：状态/指纹/日期/步骤圆点 */
 
 /* ---- 间距 ---- */
 export const sp1 = 6;
@@ -31,6 +32,8 @@ export const sp2 = 10;
 export const sp3 = 16;
 export const sp4 = 22;
 export const sp5 = 32;
+export const sp8 = 8;      /* 组头/卡片行间隙 + 紧凑块内边距（介于 sp1 与 sp2 之间的档） */
+export const spCard = 12;  /* 卡/设置行内边距与卡内沟（历史约定 12，介于 sp2 与 sp3 之间） */
 
 /* ---- 圆角 / 边框 ---- */
 export const rCard = 10;  /* 卡/按钮 */

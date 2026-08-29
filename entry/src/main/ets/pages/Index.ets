@@ -10,7 +10,7 @@ import { VmManage } from './VmManage';
 import { VmStorage } from './VmStorage';
 import { VmWizard } from './VmWizard';
 import { VmProfile } from '../lib/vmprofile';
-import { tBody, tSub, tCard, cSub, cWeak, cPrimary, cCard, cBorder, rCard, bw, sp2, rBtn, btnH, btnPadX } from '../lib/uiTokens';
+import { tBody, tSub, tCard, cSub, cWeak, cPrimary, cCard, cBorder, rCard, bw, sp2, spCard, rBtn, btnH, btnPadX } from '../lib/uiTokens';
 
 @Entry
 @Component
@@ -31,7 +31,7 @@ struct Index {
         VmEdit({ profile: param as VmProfile })
       } else if (name === 'idle') {
         /* 未选中任何虚拟机时的内容区占位：居中引导，避免右侧留白 */
-        Column({ space: 12 }) {
+        Column({ space: spCard }) {
           Text('🖥').fontSize(56)
           Text('未选择虚拟机')
             .fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cSub)
@@ -100,7 +100,7 @@ struct Index {
       .width('88%').constraintSize({ maxWidth: 640 })
       .height(540)
       .backgroundColor(cCard)
-      .border({ width: 1, color: cBorder })
+      .border({ width: bw, color: cBorder })
       .borderRadius(rCard)
       .clip(true) /* 裁掉子组件(直角背景)超出圆角的部分 */
       .onClick(() => { /* 吃掉卡片区点击，避免透传遮罩误关 */ })

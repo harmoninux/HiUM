@@ -5,7 +5,7 @@ import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
 import { VmProfile, VmStore, VmArch, VgaType, SCHEMA_VERSION, fitBoard, builtinIsoFor } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
-import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp2 } from '../lib/uiTokens';
+import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp8, spCard } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -168,7 +168,7 @@ export struct VmEdit {
     Column() {
       Row() {
         Button('取消').focusable(false).fontSize(tBody)
-          .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
           .backgroundColor(Color.Transparent)
           .fontColor(cPrimary)
           .onClick(() => this.navStack.pop())
@@ -176,13 +176,13 @@ export struct VmEdit {
         Text('虚拟机配置').fontSize(tPage).fontWeight(FontWeight.Medium)
         Blank()
         Button('保存').focusable(false).fontSize(tBody)
-          .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
           .backgroundColor(Color.Transparent)
           .fontColor(cPrimary)
           .onClick(() => this.save())
       }
       .width('100%')
-      .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+      .padding({ left: sp8, right: sp8, top: sp8, bottom: sp8 })
 
       List({ space: 1 }) {
         ListItem() {
@@ -193,7 +193,7 @@ export struct VmEdit {
               .fontSize(tBody)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
               .onChange((v: string) => this.name = v)
-          }.padding(12)
+          }.padding(spCard)
         }
 
         ListItem() {
@@ -205,27 +205,31 @@ export struct VmEdit {
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).layoutWeight(1)
               .padding({ left: inpPadX, right: inpPadX })
               .textAlign(TextAlign.Start)
-          }.padding(12)
+          }.padding(spCard)
         }
 
         ListItem() {
-          Column({ space: 4 }) {
-            Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
-            Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
-              .onChange((v: number) => this.memoryMB = v)
-          }.alignItems(HorizontalAlign.Start).padding(12)
-        }
-
-        ListItem() {
-          Column({ space: 4 }) {
+          Row({ space: 4 }) {
             Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
+              .width(120)
             Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
               .onChange((v: number) => this.cpus = v)
-          }.alignItems(HorizontalAlign.Start).padding(12)
+              .layoutWeight(1)
+          }.alignItems(VerticalAlign.Center).padding(spCard)
         }
 
         ListItem() {
-          Column({ space: 6 }) {
+          Row() {
+            Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
+              .width(120)
+            Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
+              .onChange((v: number) => this.memoryMB = v)
+              .layoutWeight(1)
+          }.alignItems(VerticalAlign.Center).padding(spCard)
+        }
+
+        ListItem() {
+          Column({ space: sp1 }) {
             Row() {
               Text('系统盘').fontSize(tLabel).width(72)
               Column({ space: 2 }) {
@@ -251,11 +255,11 @@ export struct VmEdit {
                   }
                 })
             }
-          }.alignItems(HorizontalAlign.Start).padding(12)
+          }.alignItems(HorizontalAlign.Start).padding(spCard)
         }
 
         ListItem() {
-          Column({ space: 6 }) {
+          Column({ space: sp1 }) {
             Row() {
               Text('光盘 ISO').fontSize(tLabel).width(72)
               Text(this.cdromPath ? this.baseName(this.cdromPath) : '无')
@@ -264,13 +268,13 @@ export struct VmEdit {
                 .layoutWeight(1)
               if (this.cdromPath) {
                 Button('移除').focusable(false).fontSize(tBody)
-                  .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
+                  .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
                   .backgroundColor(Color.Transparent).fontColor(cDanger)
                   .onClick(() => this.cdromPath = '')
               }
             }
             if (!this.cdromPath) {
-              Row({ space: 8 }) {
+              Row({ space: sp8 }) {
                 TextInput({ placeholder: 'ISO 完整路径', text: this.cdromPath })
                   .layoutWeight(1)
                   .fontSize(tBody)
@@ -278,12 +282,12 @@ export struct VmEdit {
                   .onChange((v: string) => this.cdromPath = v)
                 Button(this.ensureIsoLoading ? `下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
                   .focusable(false).fontSize(tBody)
-                  .height(btnSh).borderRadius(rBtn).padding({ left: 10, right: 10 })
+                  .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
                   .enabled(!this.ensureIsoLoading)
                   .onClick(() => this.pickBuiltinIso())
               }
             }
-          }.alignItems(HorizontalAlign.Start).padding(12)
+          }.alignItems(HorizontalAlign.Start).padding(spCard)
         }
 
         ListItem() {
@@ -291,7 +295,7 @@ export struct VmEdit {
             Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
               .onChange((v: boolean) => this.bootFromCdrom = v)
-          }.padding(12)
+          }.padding(spCard)
         }
 
         ListItem() {
@@ -307,7 +311,7 @@ export struct VmEdit {
               .onSelect((index: number) => {
                 this.vga = VGA_OPTIONS[index];
               })
-          }.padding(12)
+          }.padding(spCard)
         }
 
         ListItem() {
@@ -315,28 +319,29 @@ export struct VmEdit {
             Text('网络').fontSize(tLabel).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.netEnabled })
               .onChange((v: boolean) => this.netEnabled = v)
-          }.padding(12)
+          }.padding(spCard)
         }
 
         if (this.netEnabled) {
           ListItem() {
             Column({ space: 4 }) {
-              Text('端口转发（宿主端口:客机端口，逗号分隔）').fontSize(tSub).fontColor(cSub)
+              Text('端口映射').fontSize(tLabel)
+              Text('宿主端口:客机端口，逗号分隔').fontSize(tSub).fontColor(cWeak)
               TextInput({ placeholder: '如 2222:22,8080:80', text: this.portForwards })
                 .fontSize(tBody)
                 .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.portForwards = v)
-            }.alignItems(HorizontalAlign.Start).padding(12)
+            }.alignItems(HorizontalAlign.Start).padding(spCard)
           }
           ListItem() {
             Column({ space: 4 }) {
               Row() {
-                Text('9p 共享目录').fontSize(tLabel).layoutWeight(1)
+                Text('共享目录').fontSize(tLabel).layoutWeight(1)
                 Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
                   .onChange((v: boolean) => this.sharedFolder = v)
               }.padding({ left: 0, right: 0 })
               Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
-            }.alignItems(HorizontalAlign.Start).padding({ left: 12, right: 12, bottom: 12 })
+            }.alignItems(HorizontalAlign.Start).padding(spCard)
           }
         }
 
@@ -347,36 +352,37 @@ export struct VmEdit {
               .fontColor(cPrimary)
               .layoutWeight(1)
           }
-          .padding(12)
+          .padding(spCard)
           .onClick(() => this.showAdvanced = !this.showAdvanced)
         }
 
         if (this.showAdvanced) {
           ListItem() {
-            Row() {
-              Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)
-              Toggle({ type: ToggleType.Switch, isOn: this.mttcg })
-                .onChange((v: boolean) => this.mttcg = v)
-            }.padding(12)
-          }
-          ListItem() {
-            Row() {
-              Text('tb-size').fontSize(tLabel).width(96)
-              TextInput({ text: this.tbSizeText })
-                .layoutWeight(1)
-                .fontSize(tBody)
-                .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-                .onChange((v: string) => this.tbSizeText = v)
-            }.padding(12)
+            Column() {
+              Row() {
+                Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)
+                Toggle({ type: ToggleType.Switch, isOn: this.mttcg })
+                  .onChange((v: boolean) => this.mttcg = v)
+              }.padding(spCard)
+              Row() {
+                Text('tb-size').fontSize(tLabel).width(96)
+                TextInput({ text: this.tbSizeText })
+                  .layoutWeight(1)
+                  .fontSize(tBody)
+                  .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+                  .onChange((v: string) => this.tbSizeText = v)
+              }.padding({ left: spCard, right: spCard, bottom: spCard })
+            }
           }
           ListItem() {
             Column({ space: 4 }) {
-              Text('自定义 qemu 参数（追加到命令行末尾）').fontSize(tSub).fontColor(cSub)
+              Text('自定义 QEMU 参数').fontSize(tLabel)
+              Text('追加到命令行末尾').fontSize(tSub).fontColor(cWeak)
               TextArea({ placeholder: '如 -device usb-kbd', text: this.extraArgs })
                 .fontSize(tBody)
                 .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.extraArgs = v)
-            }.alignItems(HorizontalAlign.Start).padding(12)
+            }.alignItems(HorizontalAlign.Start).padding(spCard)
           }
         }
       }

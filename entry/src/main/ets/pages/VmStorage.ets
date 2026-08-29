@@ -12,7 +12,7 @@ import {
   cPrimary, cDanger, cRunning, cSuccess, cText, cSub, cWeak,
   cCard, cBlock, cChip, cBorder,
   tCard, tLabel, tBody, tSub,
-  sp1, sp2, sp3, sp4, sp5, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
+  sp1, sp2, sp3, sp4, sp5, sp8, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
@@ -226,7 +226,7 @@ export struct VmStorage {
   /* 分区标题（与 VmWizard groupHeader 同款：灰字在左，细线延伸至右） */
   @Builder
   secHead(t: string) {
-    Row({ space: 8 }) {
+    Row({ space: sp8 }) {
       Text(t).fontSize(tSub).fontColor(cSub)
       Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
     }

@@ -9,6 +9,7 @@ import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import napiModule from 'libentry.so';
+import { rElem, sp1, sp8 } from './uiTokens';
 
 const DOMAIN = 0x0002;
 const TAG = 'KbdOverlay';
@@ -177,7 +178,7 @@ export struct VirtualKeyboard {
       .width('100%')
       .height(42)
       .backgroundColor($$.pressed || $$.latched ? '#ff0563ff' : '#1A000000')
-      .borderRadius(8)
+      .borderRadius(rElem)
       .border({ width: 1, color: '#66FFFFFF' })
       .layoutWeight($$.k.w)
       .onTouch((ev: TouchEvent) => {
@@ -188,7 +189,7 @@ export struct VirtualKeyboard {
   build() {
     Stack() {
       if (this.showKbd) {
-        Column({ space: 6 }) {
+        Column({ space: sp1 }) {
           /* 顶部把手：拖动挪位。手势只挂把手——挂整个面板会和键帽 onTouch 抢事件
            * （按键微动即拖走面板）。拖动中直接改 relX/relY（position 的数据源），
            * 面板逐帧跟手；落盘在 onEnd。 */
@@ -238,7 +239,7 @@ export struct VirtualKeyboard {
           }, (row: KbKey[], idx: number) => idx.toString())
         }
         .width(this.kbdW())
-        .padding({ left: 8, right: 8, top: 2, bottom: 8 })
+        .padding({ left: sp8, right: sp8, top: 2, bottom: sp8 })
         /* 半透明面板：压低不透明度让 VM 画面透出来（键帽同理） */
         .backgroundColor('#4D000000')
         .borderRadius(12)
