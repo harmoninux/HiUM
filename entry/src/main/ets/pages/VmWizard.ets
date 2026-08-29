@@ -168,7 +168,7 @@ export struct VmWizard {
    * q35 再自动切 UEFI）；virt 按架构固定 EDK2；树莓派 SoC 自带、无外部固件 */
   private firmwareHint(): string {
     /* Windows 恒走 OVMF pflash（buildWinArgs 硬编码），固件项对用户关闭 */
-    if (this.guestOS === 'windows11') { return '引导固件：OVMF UEFI（固定，Windows 必需）'; }
+    if (this.guestOS === 'windows11') { return '引导固件：OVMF UEFI + Secure Boot（固定，Windows 必需）'; }
     const b = fitBoard(this.arch, this.board);
     if (b === 'pc' || b === 'q35') { return '引导固件：SeaBIOS（自动）'; }
     if (b === 'virt') { return '引导固件：EDK2 UEFI（按架构固定）'; }

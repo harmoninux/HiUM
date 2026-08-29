@@ -23,6 +23,8 @@ const FIRMWARE_FILES: string[] = [
   'efi-e1000.rom',       /* Windows x64 e1000 网卡 EFI option ROM */
   'pxe-e1000.rom',       /* e1000 网卡 legacy BIOS option ROM（-boot 非 UEFI 时） */
   'edk2-x86_64-code.fd', /* Windows x64 OVMF CODE（pflash） */
+  'edk2-x86_64-secure-code.fd', /* Windows x64 安全启动 OVMF CODE（pflash，secureboot + SMM） */
+  'edk2-x86_64-secure-vars.fd', /* Windows x64 已 enroll 微软密钥的 VARS 模板（SecureBoot=1，复制成每 VM VARS） */
   'edk2-i386-vars.fd',   /* x86 OVMF VARS 模板（复制成每 VM VARS） */
   'edk2-arm-vars.fd',    /* aarch64 AAVMF VARS 模板 */
   'edk2-aarch64-code.fd', /* aarch64 客户机 UEFI 固件（virt 机器经 -bios 加载） */

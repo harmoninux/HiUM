@@ -61,10 +61,12 @@ export interface VmWinFirmware {
   varsTemplate: string;
 }
 
-/* Windows 11 UEFI 固件（仅 x86_64/i386）：x86_64 OVMF CODE + i386 VARS 模板。
- * CODE=fork pc-bios 现成；VARS 模板复制成每 VM 一份可写 VARS（qemu pflash 会改写 NVRAM）。 */
+/* Windows 11 UEFI 固件（仅 x86_64/i386）：x86_64 OVMF CODE + x86_64 VARS 模板。
+ * CODE=fork pc-bios 现成；VARS 模板复制成每 VM 一份可写 VARS（qemu pflash 会改写 NVRAM）。
+ * varsTemplate 是「已 enroll 微软密钥（db 含 Microsoft Windows Production PCA 2011 / KEK CA 2011）
+ * + 运行时 SecureBoot=1（由 PK 存在推导，不出现在文件里）」的模板。 */
 export function winFirmware(arch: VmArch): VmWinFirmware {
-  return { code: 'edk2-x86_64-code.fd', varsTemplate: 'edk2-i386-vars.fd' };
+  return { code: 'edk2-x86_64-secure-code.fd', varsTemplate: 'edk2-x86_64-secure-vars.fd' };
 }
 
 /* 每 VM 的可写 VARS 路径（模板复制至此，qemu pflash 挂它） */
@@ -491,7 +493,8 @@ export function buildWinArgs(p: VmProfile, vmDataDir: string, isos: string[] = p
   /* 机器/CPU：q35（x86 全原生驱动）。Windows 11 的 bootmgr/winload 需较新指令集
    * （SSE4.2/POPCNT 等），QEMU 默认弱 CPU(qemu64) 缺特性会引导期三重故障复位回 shell，
    * 所以必须显式 -cpu max 暴露全部特性（TCG 下 Win11 标准配方）。 */
-  args.push('-machine', 'q35');
+  /* secure OVMF 需 SMM（requires-smm），Windows 安全启动必需 */
+  args.push('-machine', 'q35,smm=on');
   args.push('-cpu', p.machine.cpuModel.length > 0 ? p.machine.cpuModel : 'max');
   args.push('-m', mem, '-smp', `cpus=${cpus},sockets=1,cores=${cpus},threads=1`);
   /* UEFI pflash：CODE(ro) + 每 VM 可写 VARS(rw) */
