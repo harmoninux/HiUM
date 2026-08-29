@@ -286,6 +286,15 @@ function parseForwards(text: string): string[] {
   return out;
 }
 
+/* 组装 user 模式 netdev：自动挂 hostfwd（forward 条目由 parseForwards 产出） */
+function userNetdev(portForwards: string): string {
+  let netdev = 'user,id=n0';
+  for (const fwd of parseForwards(portForwards)) {
+    netdev += ',' + fwd;
+  }
+  return netdev;
+}
+
 /* 端口转发完整校验（向导即时提示用）：逐条检查 "宿主端口:客机端口" 格式、
  * 1-65535 范围、宿主端口不重复（多个 forward 抢同一宿主端口会 bind 失败），
  * 返回所有错误描述；空数组 = 全部合法。 */
@@ -335,6 +344,9 @@ export function sharedDir(filesDir: string): string {
 }
 
 export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = ''): string[] {
+  if (p.guestOS === 'windows11') {
+    return buildWinArgs(p, vmDataDir);
+  }
   let args: string[] = [
     '-L', vmDataDir,
     '-m', String(p.runtime.memoryMB),
@@ -399,11 +411,7 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     /* 树莓派无 PCI，virtio-net 不可用；网络在 qemu 树莓派模拟下受限（实验性） */
     args.push('-nic', 'none');
   } else if (p.net.enabled) {
-    let netdev = 'user,id=n0';
-    for (const fwd of parseForwards(p.net.portForwards)) {
-      netdev += ',' + fwd;
-    }
-    args.push('-netdev', netdev, '-device', 'virtio-net-pci,netdev=n0');
+    args.push('-netdev', userNetdev(p.net.portForwards), '-device', 'virtio-net-pci,netdev=n0');
   } else {
     args.push('-nic', 'none');
   }
@@ -411,6 +419,100 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     /* 9p 共享宿主目录到 guest /shared（宿主目录须已存在，由调用方 mkdir） */
     args.push('-virtfs', `local,path=${sharedDir},mount_tag=shared,security_model=none,multidevs=remap`);
   }
+  const extra = p.extraArgs.trim();
+  if (extra.length > 0) {
+    args = args.concat(extra.split(/\s+/));
+  }
+  return args;
+}
+
+/* Windows 11 命令行：按架构自动选 Windows 最优设备组。
+ *  x64   → q35 + SATA/AHCI 盘 + e1000 网卡 + std VGA（全 Windows 原生驱动，装时零驱动）
+ *  arm64 → virt(smmuv3/virtualization=on) + virtio-scsi 盘 + virtio-net + ramfb（须 virtio-win 驱动）
+ * 固件统一 OVMF/AAVMF pflash；TPM 由 swtpm（security.tpm）驱动。参考 HiVM startVm.ets。 */
+export function buildWinArgs(p: VmProfile, vmDataDir: string): string[] {
+  const mem = String(p.runtime.memoryMB);
+  const cpus = String(p.runtime.cpus);
+  const isArm = p.machine.arch === 'aarch64';
+  let args: string[] = [
+    '-L', vmDataDir,
+    '-accel', `tcg,thread=${p.runtime.mttcg ? 'multi' : 'single'},tb-size=${p.runtime.tbSize}`,
+    '-display', 'none',
+    '-qmp', `unix:${qmpSockPath(p, vmDataDir)},server=on,wait=off`,
+  ];
+  /* 机器/CPU */
+  if (isArm) {
+    args.push(
+      '-machine', 'virt,acpi=on,gic-version=max,iommu=smmuv3,virtualization=on,memory-backend=mem0,usb=on,its=off,dump-guest-core=off,hmat=off,mem-merge=off,compact-highmem=on',
+      '-cpu', p.machine.cpuModel.length > 0 ? p.machine.cpuModel : 'max,pauth=on,pauth-impdef=on,sve=off,pmu=on',
+      '-object', `memory-backend-ram,id=mem0,size=${mem}M,merge=off,prealloc=off`,
+    );
+  } else {
+    args.push('-machine', 'q35');
+    if (p.machine.cpuModel.length > 0) { args.push('-cpu', p.machine.cpuModel); }
+  }
+  args.push('-m', mem, '-smp', `cpus=${cpus},sockets=1,cores=${cpus},threads=1`);
+  /* UEFI pflash：CODE(ro) + 每 VM 可写 VARS(rw) */
+  const fw = winFirmware(p.machine.arch);
+  const codePath = vmDataDir + '/' + fw.code;
+  const varsPath = winVarsPath(vmDataDir, p.id, p.machine.arch);
+  if (isArm) {
+    args.push('-fw_cfg', 'name=opt/org.tianocore/UninstallMemAttrProtocol,string=y');
+  }
+  args.push(
+    '-drive', `if=pflash,format=raw,file=${codePath},readonly=on`,
+    '-drive', `if=pflash,format=raw,file=${varsPath}`,
+  );
+  /* 磁盘：x64 SATA/AHCI（原生驱动，免 virtio）；arm virtio-scsi 512 扇区（须 virtio-win） */
+  if (p.media.diskPath.length > 0) {
+    const fmt = p.media.diskPath.toLowerCase().endsWith('.qcow2') ? 'qcow2' : 'raw';
+    if (isArm) {
+      args.push(
+        '-global', 'virtio-blk-pci.scsi=off',
+        '-global', 'virtio-scsi-pci.cmd_per_lun=32',
+        '-global', 'virtio-scsi-pci.packed=off',
+        '-drive', `if=none,format=${fmt},file=${p.media.diskPath},id=hd0,cache=writeback,discard=unmap`,
+        '-object', 'iothread,id=iothread0',
+        '-device', `virtio-scsi-pci,id=scsi0,num_queues=${cpus},virtqueue_size=128,iothread=iothread0`,
+        '-device', 'scsi-hd,drive=hd0,bus=scsi0.0,logical_block_size=512,physical_block_size=4096,rotation_rate=1,bootindex=1',
+      );
+    } else {
+      args.push(
+        '-device', 'ich9-ahci,id=sata',
+        '-drive', `if=none,format=${fmt},file=${p.media.diskPath},id=hd0,cache=writeback`,
+        '-device', 'ide-hd,drive=hd0,bus=sata.0',
+      );
+    }
+  }
+  /* 光盘 ISO：usb-storage 挂到全局 USB 控制器（Windows 安装阶段认 U 盘/光驱） */
+  if (p.media.cdromPath.length > 0) {
+    args.push(
+      '-drive', `if=none,format=raw,file=${p.media.cdromPath},id=virtio_cd,media=cdrom,readonly=on`,
+      '-device', 'usb-storage,drive=virtio_cd,bus=usb.0,bootindex=2',
+    );
+  }
+  /* 键鼠：qemu-xhci + usb-kbd/tablet */
+  args.push('-device', 'qemu-xhci,id=usb', '-device', 'usb-kbd,bus=usb.0', '-device', 'usb-tablet,bus=usb.0');
+  /* 显示：x64 std VGA（原生驱动）；arm ramfb（HiVM 配方） */
+  args.push(isArm ? '-device' : '-vga', isArm ? 'ramfb' : 'std');
+  /* 网络：x64 e1000（原生驱动）；arm virtio-net（须 virtio-win） */
+  if (p.net.enabled) {
+    const netdev = userNetdev(p.net.portForwards);
+    args.push('-netdev', netdev, '-device', isArm ? 'virtio-net-pci,netdev=n0' : 'e1000,netdev=n0');
+  } else {
+    args.push('-nic', 'none');
+  }
+  /* 真 TPM 2.0：外接 swtpm（qemu -tpmdev emulator 走 chardev socket 连 swtpm ctrl socket） */
+  if (p.security && p.security.tpm) {
+    const sock = swtpmSockPath(vmDataDir, p.id);
+    const dev = isArm ? 'tpm-tis-device' : 'tpm-tis';
+    args.push(
+      '-chardev', `socket,id=chrtpm,path=${sock}`,
+      '-tpmdev', 'emulator,id=tpm0,chardev=chrtpm',
+      '-device', `${dev},tpmdev=tpm0`,
+    );
+  }
+  /* Windows 不用 9p 共享（需 virtio-win 驱动），不挂 virtfs。自定义参数(escape hatch)追加到末尾。 */
   const extra = p.extraArgs.trim();
   if (extra.length > 0) {
     args = args.concat(extra.split(/\s+/));
