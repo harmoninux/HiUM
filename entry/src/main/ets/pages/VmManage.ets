@@ -445,14 +445,11 @@ export struct VmManage {
   secNet() {
     this.secHead('网络')
     Column() {
-      Row() {
-        Column({ space: 1 }) {
-          Text(this.netEnabled ? '已启用' : '已关闭').fontSize(tLabel)
-          Text(`端口转发 ${(this.profile && this.profile.net.portForwards.length > 0) ? this.profile.net.portForwards : '无'} · 9p 共享${(this.profile && this.profile.net.sharedFolder) ? '开' : '关'}`)
-            .fontSize(tSubL).fontColor(cSub)
-        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.netEnabled }).enabled(false)
-      }.width('100%').padding({ top: sp1, bottom: sp2 })
+      Column({ space: 1 }) {
+        Text(this.netEnabled ? '已启用' : '已关闭').fontSize(tLabel)
+        Text(`端口转发 ${(this.profile && this.profile.net.portForwards.length > 0) ? this.profile.net.portForwards : '无'} · 9p 共享${(this.profile && this.profile.net.sharedFolder) ? '开' : '关'}`)
+          .fontSize(tSubL).fontColor(cSub)
+      }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp2 })
     }.alignItems(HorizontalAlign.Start)
   }
 
