@@ -6,6 +6,7 @@ import { common } from '@kit.AbilityKit';
 import { VmProfile, VmStore, VmArch, SCHEMA_VERSION, fitBoard, builtinIsoFor, forwardErrors } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { pathExists } from '../lib/fsutil';
+import { pickIsoPath } from '../lib/isoPick';
 import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp5, sp8, spCard } from '../lib/uiTokens';
 
 interface DiskNapi {
@@ -95,6 +96,20 @@ export struct VmEdit {
   private baseName(path: string): string {
     const i = path.lastIndexOf('/');
     return i >= 0 ? path.substring(i + 1) : path;
+  }
+
+  /* 「选择文件」按钮：拉起系统选择器选 .iso，解析成真实路径后挂到光驱并默认从光盘启动。
+   * 原地引用（不拷贝）；路径不可读/取消则回退为「未选择文件」。 */
+  private pickLocalIso(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    pickIsoPath(ctx).then((p: string) => {
+      if (p.length === 0) {
+        promptAction.showToast({ message: '未选择文件 / 路径不可读' });
+        return;
+      }
+      this.cdromPath = p;
+      this.bootFromCdrom = true;
+    });
   }
 
   /* 读取已建磁盘的格式/虚拟大小/实占大小（qemu-img info），供「系统盘」行直接展示 */
@@ -320,13 +335,12 @@ export struct VmEdit {
               }
             }
             if (!this.cdromPath) {
-              Row({ space: sp8 }) {
-                TextInput({ placeholder: 'ISO 完整路径', text: this.cdromPath })
-                  .layoutWeight(1)
-                  .fontSize(tBody)
-                  .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-                  .onChange((v: string) => this.cdromPath = v)
-                Button(this.ensureIsoLoading ? `下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
+              Row({ space: sp2 }) {
+                Button('选择文件').focusable(false).fontSize(tBody)
+                  .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                  .backgroundColor(Color.Transparent).fontColor(cPrimary)
+                  .onClick(() => this.pickLocalIso())
+                Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
                   .focusable(false).fontSize(tBody)
                   .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
                   .enabled(!this.ensureIsoLoading)

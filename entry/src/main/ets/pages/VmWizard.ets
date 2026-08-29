@@ -11,6 +11,7 @@ import {
   forwardErrors,
 } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
+import { pickIsoPath } from '../lib/isoPick';
 import {
   cPrimary, cSub, cWeak, cText, cBorder, cDanger, cBg, cBlock,
   tPage, tCard, tBody, tSub, tLabel, tMono,
@@ -99,6 +100,20 @@ export struct VmWizard {
       } else {
         promptAction.showToast({ message: '内置 ISO 下载失败' });
       }
+    });
+  }
+
+  /* 「选择文件」按钮：拉起系统选择器选 .iso，解析成真实路径后挂到光驱并默认从光盘启动。
+   * 原地引用（不拷贝）；路径不可读/取消则回退为「未选择文件」。 */
+  private pickLocalIso(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    pickIsoPath(ctx).then((p: string) => {
+      if (p.length === 0) {
+        promptAction.showToast({ message: '未选择文件 / 路径不可读' });
+        return;
+      }
+      this.cdromPath = p;
+      this.bootFromCdrom = true;
     });
   }
 
@@ -488,12 +503,12 @@ export struct VmWizard {
         }
       }
       if (this.cdromPath.length === 0) {
-        Row({ space: sp8 }) {
-          TextInput({ placeholder: 'ISO 完整路径', text: this.cdromPath })
-            .layoutWeight(1).fontSize(tBody)
-            .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-            .onChange((v: string) => this.cdromPath = v)
-          Button(this.ensureIsoLoading ? `下载 ${this.isoPct}%` : `内置 Alpine (${this.archLabel(this.arch)})`)
+        Row({ space: sp2 }) {
+          Button('选择文件').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cPrimary)
+            .onClick(() => this.pickLocalIso())
+          Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.archLabel(this.arch)})`)
             .focusable(false).fontSize(tBody)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
             .enabled(!this.ensureIsoLoading)

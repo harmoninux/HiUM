@@ -82,8 +82,21 @@ export function pickIsoPath(ctx: common.UIAbilityContext): Promise<string> {
 ## 落位与已知限制（用户已接受）
 
 - `cdromPath` 直接存储外部真实路径，**不拷贝**。好处：大 ISO（>1GB）秒挂、不占应用存储、不重复。
-- 代价：① 文档选择器授权具**会话性**，App 重启后该外部路径可能失去读权限 → qemu `fopen` 失败 → 由 `qemu-<id>.log` 启动失败弹窗兜底提示；② 文件在可移动存储上被拔出 → 同 ①；③ 外部文件被移动/删除 → `pathExists` 校验在编辑/向导拦，启动时 qemu 报错兜底。
+- 代价：① 文档选择器授权具**会话性**，App 重启后该外部路径可能失去读权限 → qemu `fopen` 失败；② 文件在可移动存储上被拔出 → 同 ①；③ 外部文件被移动/删除。
 - 若用户希望长期稳定，用「内置 Alpine」（应用自有文件）即可。
+
+## 启动兜底：光盘不可读的两分支交互（`VmConsole`，用户已选）
+
+重启后 ISO 不可读时，`VmConsole.startVm` 在 `buildArgs` 前用 `pathExists(cdromPath)` 预检，**按是否启动源分支**（丢 `-cdrom` 只在辅助光盘安全）：
+
+| 场景 | 处理 |
+|---|---|
+| **ISO 是启动源**（`bootFromCdrom=true`） | 丢盘 = 无盘可启 → **不自动丢**。弹窗「启动光盘不可读：<basename>（可能已移动/失去权限）」给 `从系统盘启动`（`bootFromCdrom=false` 持久化后重试）/ `取消`；并可到配置页重新选 ISO |
+| **ISO 是辅助光盘**（`bootFromCdrom=false`，系统盘可启） | 启动前从 `buildArgs` 结果剥掉 `-cdrom`（`stripCdrom`）照常从硬盘启动，toast「光盘不可读，已跳过；可到配置页重新选择」 |
+
+- `stripCdrom(args)`：从 `string[]` 里删掉 `-cdrom` 及其紧随的值（`vmprofile.ets:337` push 的是 `args.push('-cdrom', path)`）。不动 `this.profile` 对象，避免污染后续配置页/下次结算。
+- `-boot` 随之仍按 `bootFromCdrom` 生成；两分支下 `bootFromCdrom` 均为 false → `-boot c`，不会出现「`-boot d` 却无盘」。
+- 兜底仍未变：真正的 qemu 语义错（自定义参数等）依旧走 `qemu-<id>.log` 弹窗（`VmConsole.failStart`）。
 
 ## 实现位置清单
 

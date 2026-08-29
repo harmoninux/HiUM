@@ -10,6 +10,7 @@ import { VmProfile, VmStore, VmArch, builtinIsoFor } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
 import { snapshotCreate } from '../lib/vmsnapshot';
 import { ensureBuiltinIso } from '../lib/isoDl';
+import { pickIsoPath } from '../lib/isoPick';
 import {
   cPrimary, cDanger, cRunning, cSuccess, cText, cSub, cWeak,
   cCard, cBlock, cChip, cBorder,
@@ -46,8 +47,6 @@ export struct VmStorage {
   @State snapCreateMode: boolean = false;
   @State cdromPath: string = '';
   @StorageLink('vmDataDir') vmDataDir: string = '';
-  @State isoPickMode: boolean = false;    /* 「选择 ISO」面板展开 */
-  @State isoPathText: string = '';        /* 完整路径输入 */
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine 下载中 */
   @State isoPct: number = 0;
   @State snack: string = '';
@@ -253,8 +252,6 @@ export struct VmStorage {
         p.media.cdromPath = this.cdromPath;
         p.media.bootFromCdrom = true;
         new VmStore(this.filesDir).save(p);
-        this.isoPickMode = false;
-        this.isoPathText = '';
         this.vmListVersion++;
         this.showSnack('已挂载内置 ISO');
       } else {
@@ -263,24 +260,26 @@ export struct VmStorage {
     });
   }
 
-  /* 用「完整路径」挂载光盘：保存到 profile（不强制改 bootFromCdrom） */
-  private applyIsoPath(): void {
-    const p = this.profile;
-    if (!p) {
-      return;
-    }
-    const path = this.isoPathText.trim();
-    if (path.length === 0) {
-      promptAction.showToast({ message: '请输入 ISO 路径' });
-      return;
-    }
-    p.media.cdromPath = path;
-    new VmStore(this.filesDir).save(p);
-    this.cdromPath = path;
-    this.isoPickMode = false;
-    this.isoPathText = '';
-    this.vmListVersion++;
-    this.showSnack('已挂载光盘');
+  /* 「选择文件」按钮：拉起系统选择器选 .iso，解析成真实路径后保存到 profile（原地引用，不拷贝）。
+   * 路径不可读/取消则回退为「未选择文件」；选中即默认从光盘启动。 */
+  private pickLocalIso(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    pickIsoPath(ctx).then((p: string) => {
+      if (p.length === 0) {
+        promptAction.showToast({ message: '未选择文件 / 路径不可读' });
+        return;
+      }
+      const prof = this.profile;
+      if (!prof) {
+        return;
+      }
+      prof.media.cdromPath = p;
+      prof.media.bootFromCdrom = true;
+      new VmStore(this.filesDir).save(prof);
+      this.cdromPath = p;
+      this.vmListVersion++;
+      this.showSnack('已挂载光盘');
+    });
   }
 
   /* 分区标题（与 VmWizard groupHeader 同款：灰字在左，细线延伸至右） */
@@ -387,42 +386,23 @@ export struct VmStorage {
             .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.clearCdrom())
         }.width('100%').padding({ top: sp1, bottom: sp2 })
-      } else if (!this.isoPickMode) {
-        Row() {
-          Text('未引用光盘').fontSize(tSub).fontColor(cWeak).layoutWeight(1).padding({ top: sp1, bottom: sp2 })
-          Button('＋ 选择 ISO').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-            .backgroundColor(Color.Transparent).fontColor(cPrimary)
-            .border({ width: 1, color: cBorder, style: BorderStyle.Dashed })
-            .onClick(() => this.isoPickMode = true)
-        }.width('100%').padding({ top: sp1, bottom: sp2 })
       } else {
         Column({ space: sp1 }) {
-          Row() {
-            TextInput({ placeholder: 'ISO 完整路径', text: this.isoPathText })
-              .layoutWeight(1).fontSize(tBody)
-              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-              .onChange((v: string) => this.isoPathText = v)
-            Button('取消').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-              .backgroundColor(Color.Transparent).fontColor(cSub)
-              .onClick(() => {
-                this.isoPickMode = false;
-                this.isoPathText = '';
-              })
-          }.width('100%')
+          Text('未引用光盘').fontSize(tSub).fontColor(cWeak)
+            .padding({ top: sp1, bottom: sp1 })
           Row({ space: sp2 }) {
-            Button(this.ensureIsoLoading ? `下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
+            Button('选择文件').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cPrimary)
+              .border({ width: 1, color: cBorder, style: BorderStyle.Dashed })
+              .onClick(() => this.pickLocalIso())
+            Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
               .focusable(false).fontSize(tBody)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
               .enabled(!this.ensureIsoLoading)
               .backgroundColor(Color.Transparent).fontColor(cPrimary)
               .onClick(() => this.pickBuiltinIso())
-            Button('确定路径').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-              .backgroundColor(Color.Transparent).fontColor(cPrimary)
-              .onClick(() => this.applyIsoPath())
-          }.width('100%').padding({ top: sp1 })
+          }.width('100%').padding({ top: sp1, bottom: sp2 })
         }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp2 })
       }
     }.alignItems(HorizontalAlign.Start).width('100%')

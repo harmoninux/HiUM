@@ -26,6 +26,20 @@ interface ScreenShotBuf {
   pixels: ArrayBuffer;
 }
 
+/* 从 buildArgs 产出的命令行里剥掉 -cdrom 及其值（光盘不可读时启动前丢盘用）。
+ * 不动 profile 对象自身的 cdromPath，避免污染后续配置/结算。 */
+function stripCdrom(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-cdrom') {
+      i++; /* 跳过紧随其后的路径值 */
+      continue;
+    }
+    out.push(args[i]);
+  }
+  return out;
+}
+
 interface QemuNapi {
   startVm: (vmId: string, arch: string, args: string[], surfaceId: bigint) => number;
   vmRunning: (vmId: string) => boolean;
@@ -202,6 +216,34 @@ struct VmConsole {
       });
       return;
     }
+    /* 光盘已配置但不可读（重启后选择器授权失效 / 文件被移动 / 可移动存储拔出）：
+     * 分两种——辅助光盘直接丢 -cdrom 从硬盘继续；启动源光盘必须拦截给出路（丢盘必哑火）。 */
+    if (cd.length > 0 && !pathExists(cd)) {
+      if (this.profile.media.bootFromCdrom) {
+        this.status = '启动光盘不可读';
+        const nm = cd.substring(cd.lastIndexOf('/') + 1);
+        AlertDialog.show({
+          title: '启动光盘不可读',
+          message: `光盘 ${nm} 可能已移动或失去访问权限。可改用系统盘启动，或到 VM 配置页重新选择 ISO。`,
+          buttons: [
+            { value: '取消', action: () => {
+            } },
+            { value: '从系统盘启动', action: () => {
+              if (!this.profile) { return; }
+              this.profile.media.bootFromCdrom = false;
+              new VmStore(this.filesDir).save(this.profile);
+              this.status = '已改为从系统盘启动';
+              this.doStart(true);
+            } },
+          ],
+        });
+        return;
+      }
+      this.status = '光盘不可读，已跳过';
+      promptAction.showToast({ message: '光盘不可读，已跳过；可到配置页重新选择 ISO' });
+      this.doStart(true);
+      return;
+    }
     this.doStart();
   }
 
@@ -252,7 +294,7 @@ struct VmConsole {
     });
   }
 
-  private doStart(): void {
+  private doStart(skipCdrom: boolean = false): void {
     if (!this.profile) {
       return;
     }
@@ -281,9 +323,13 @@ struct VmConsole {
       this.status = '临时会话打点失败: ' + tr;
       return;
     }
-    /* 每次启动都是一个新的 NCP 子进程；多实例按 vmId 各起各的 */
+    /* 每次启动都是一个新的 NCP 子进程；多实例按 vmId 各起各的。
+     * skipCdrom（光盘不可读的辅助盘）：启动前从 buildArgs 剥掉 -cdrom（-boot 仍按 bootFromCdrom），
+     * 不动 this.profile 对象，避免污染后续配置页/下次结算。 */
+    const args = buildArgs(this.profile, this.vmDataDir, share);
+    const launchArgs = skipCdrom ? stripCdrom(args) : args;
     const ret = napi.startVm(this.vmId, this.profile.machine.arch,
-      buildArgs(this.profile, this.vmDataDir, share), this.xcController.surfaceId);
+      launchArgs, this.xcController.surfaceId);
     if (ret !== 0) {
       this.failStart('启动失败');
       return;
