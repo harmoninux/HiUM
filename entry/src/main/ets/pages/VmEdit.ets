@@ -3,8 +3,9 @@
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
-import { VmProfile, VmStore, VmArch, SCHEMA_VERSION, fitBoard, builtinIsoFor } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmArch, SCHEMA_VERSION, fitBoard, builtinIsoFor, forwardErrors } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
+import { pathExists } from '../lib/fsutil';
 import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp5, sp8, spCard } from '../lib/uiTokens';
 
 interface DiskNapi {
@@ -119,8 +120,32 @@ export struct VmEdit {
     }
   }
 
+  /* 保存前静态校验：返回第一条错误描述（'' = 通过）。覆盖「从光盘启动但未指定 ISO」、
+   * 端口转发格式、ISO 路径存在性。cpuModel 编辑页无入口、tb-size 有整数兜底，交由向导
+   * 与构建时拦；自定义 qemu 参数(extraArgs)与资源型错误无法静态判定，由启动失败时的
+   * qemu.log 透出（VmConsole）。 */
+  private saveError(): string {
+    if (this.bootFromCdrom && this.cdromPath.trim().length === 0) {
+      return '从光盘启动需先指定 ISO';
+    }
+    if (this.cdromPath.trim().length > 0 && !pathExists(this.cdromPath.trim())) {
+      return 'ISO 路径不存在';
+    }
+    if (this.netEnabled && this.portForwards.trim().length > 0) {
+      const errs = forwardErrors(this.portForwards);
+      if (errs.length > 0) { return '端口转发：' + errs.join('；'); }
+    }
+    return '';
+  }
+
   private save(): void {
     if (!this.profile) {
+      return;
+    }
+    /* 保存前静态校验：拦下明显无效的组合，避免落盘后启动才暴露（与向导 calcError 对齐） */
+    const verr = this.saveError();
+    if (verr.length > 0) {
+      promptAction.showToast({ message: verr });
       return;
     }
     /* 系统盘必配（由向导/编辑流程保证）：配置直接使用既有盘路径，不在保存侧再建盘 */

@@ -159,6 +159,9 @@ export struct VmWizard {
       }
     }
     if (step === 3) {
+      if (this.bootFromCdrom && this.cdromPath.trim().length === 0) {
+        return '从光盘启动需先指定 ISO';
+      }
       if (this.cdromPath.trim().length > 0 && !pathExists(this.cdromPath.trim())) {
         return 'ISO 路径不存在';
       }
