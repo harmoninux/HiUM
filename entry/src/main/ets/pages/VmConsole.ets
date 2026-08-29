@@ -10,7 +10,7 @@ import { promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
-import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir, builtinIsoFor, seedWinVars, swtpmPidPath, swtpmSockPath, swtpmDir } from '../lib/vmprofile';
+import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir, builtinIsoFor, seedWinVars, swtpmSockPath, swtpmDir } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { pathExists, isoReadable } from '../lib/fsutil';
 import { prepareStart } from '../lib/tempSession';
@@ -42,8 +42,8 @@ interface QemuNapi {
   qmpCommand: (vmId: string, cmd: string) => string;
   setQmpEventCallback: (vmId: string, cb: ((evt: string) => void) | null) => void;
   captureScreen: (vmId: string) => ScreenShotBuf | null;
-  startSwtpm: (binPath: string, libDir: string, tpmDir: string, ctrlSock: string, logPath: string, pidPath: string) => number;
-  stopSwtpm: (pidPath: string) => void;
+  startSwtpm: (vmId: string, tpmDir: string, ctrlSock: string, logPath: string) => number;
+  stopSwtpm: (vmId: string) => void;
 }
 
 const napi: QemuNapi = napiModule as QemuNapi;
@@ -346,14 +346,11 @@ struct VmConsole {
       }
     }
     if (isWin && this.profile.security && this.profile.security.tpm) {
-      const binPath = this.vmDataDir + '/swtpm/bin/swtpm';
-      const libDir = this.vmDataDir + '/swtpm/lib';
       const tpmDir = swtpmDir(this.vmDataDir, this.profile.id);
       const sock = swtpmSockPath(this.vmDataDir, this.profile.id);
       const log = this.vmDataDir + '/swtpm-' + this.profile.id + '.log';
-      const pid = swtpmPidPath(this.vmDataDir, this.profile.id);
-      hilog.info(DOMAIN, TAG, 'doStart startSwtpm vm=%{public}s bin=%{public}s sock=%{public}s pid=%{public}s', this.vmId, binPath, sock, pid);
-      const rc = napi.startSwtpm(binPath, libDir, tpmDir, sock, log, pid);
+      hilog.info(DOMAIN, TAG, 'doStart startSwtpm vm=%{public}s sock=%{public}s', this.vmId, sock);
+      const rc = napi.startSwtpm(this.vmId, tpmDir, sock, log);
       hilog.info(DOMAIN, TAG, 'doStart startSwtpm vm=%{public}s rc=%{public}d', this.vmId, rc);
       if (rc !== 0) {
         this.status = 'TPM 启动失败';
@@ -377,7 +374,7 @@ struct VmConsole {
       this.vmId, this.profile.machine.arch, ret);
     if (ret !== 0) {
       if (isWin && this.profile.security && this.profile.security.tpm) {
-        napi.stopSwtpm(swtpmPidPath(this.vmDataDir, this.profile.id));
+        napi.stopSwtpm(this.vmId);
       }
       this.failStart('启动失败');
       return;
@@ -440,7 +437,7 @@ struct VmConsole {
     }
     this.closed = true;
     if (this.profile && this.profile.guestOS === 'windows11') {
-      napi.stopSwtpm(swtpmPidPath(this.vmDataDir, this.profile.id));
+      napi.stopSwtpm(this.vmId);
     }
     try {
       const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;

@@ -86,12 +86,9 @@ export function seedWinVars(vmDataDir: string, id: string, arch: VmArch): boolea
   return ok;
 }
 
-/* swtpm 控制 socket / pid 路径（qemu -chardev socket 与 native 共用） */
+/* swtpm 控制 socket / tpmstate 目录（qemu -chardev socket 与 native 共用） */
 export function swtpmSockPath(vmDataDir: string, id: string): string {
   return `${vmDataDir}/swtpm-${id}.sock`;
-}
-export function swtpmPidPath(vmDataDir: string, id: string): string {
-  return `${vmDataDir}/swtpm-${id}.pid`;
 }
 export function swtpmDir(vmDataDir: string, id: string): string {
   return `${vmDataDir}/tpm-${id}`;

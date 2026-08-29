@@ -16,7 +16,8 @@ PKGS=zstd \
     pcre2 \
     libglib \
     pixman \
-    libqemu
+    libqemu \
+    swtpm
 STAMP=$(patsubst %,%/.stamp,$(PKGS))
 
 # Default target
@@ -45,6 +46,8 @@ output/.stamp: $(STAMP) Makefile
 	rm -f ../entry/libs/$(OHOS_ABI)/*
 	cp output/*.so ../entry/libs/$(OHOS_ABI)/
 	cp output/*.so.* ../entry/libs/$(OHOS_ABI)/
+	# libswtpm.so + its prebuilt musl runtime libs (SONAME-resolved via dlopen)
+	cp baseline/swtpm-libs/* ../entry/libs/$(OHOS_ABI)/
 	mkdir -p ../entry/src/main/resources/rawfile/vm/keymaps
 	cp output/en-us ../entry/src/main/resources/rawfile/vm/keymaps/
 	mkdir -p ../entry/src/main/resources/rawfile/vm/firmware

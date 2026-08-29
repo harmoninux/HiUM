@@ -39,32 +39,31 @@ napi_value intResult(napi_env env, int v)
 
 } // namespace
 
-/* startSwtpm(binPath: string, libDir: string, tpmDir: string, ctrlSock: string, logPath: string, pidPath: string): number */
+/* startSwtpm(vmId: string, tpmDir: string, ctrlSock: string, logPath: string): number
+ * 拉起 libswtpm_child.so 子进程（dlopen libswtpm.so + swtpm_entry），轮询 ctrlSock 就绪 */
 static napi_value StartSwtpm(napi_env env, napi_callback_info info)
 {
-    size_t argc = 6;
-    napi_value args[6] = {nullptr};
+    size_t argc = 4;
+    napi_value args[4] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-    std::string bin = stringArg(env, args[0]);
-    std::string libDir = stringArg(env, args[1]);
-    std::string dir = stringArg(env, args[2]);
-    std::string ctrl = stringArg(env, args[3]);
-    std::string log = stringArg(env, args[4]);
-    std::string pid = stringArg(env, args[5]);
-    int rc = swtpm_start(bin, libDir, dir, ctrl, log, pid, 5000);
-    OH_LOG_INFO(LOG_APP, "startSwtpm rc=%{public}d bin=%{public}s sock=%{public}s tpmdir=%{public}s", rc, bin.c_str(), ctrl.c_str(), dir.c_str());
+    std::string vmId = stringArg(env, args[0]);
+    std::string dir = stringArg(env, args[1]);
+    std::string ctrl = stringArg(env, args[2]);
+    std::string log = stringArg(env, args[3]);
+    int rc = swtpm_start(vmId, dir, ctrl, log, 5000);
+    OH_LOG_INFO(LOG_APP, "startSwtpm vm=%{public}s rc=%{public}d sock=%{public}s tpmdir=%{public}s", vmId.c_str(), rc, ctrl.c_str(), dir.c_str());
     return intResult(env, rc);
 }
 
-/* stopSwtpm(pidPath: string) */
+/* stopSwtpm(vmId: string) */
 static napi_value StopSwtpm(napi_env env, napi_callback_info info)
 {
     size_t argc = 1;
     napi_value args[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-    std::string pid = stringArg(env, args[0]);
-    swtpm_stop(pid);
-    OH_LOG_INFO(LOG_APP, "stopSwtpm pidPath=%{public}s done", pid.c_str());
+    std::string vmId = stringArg(env, args[0]);
+    swtpm_stop(vmId);
+    OH_LOG_INFO(LOG_APP, "stopSwtpm vm=%{public}s done", vmId.c_str());
     return nullptr;
 }
 

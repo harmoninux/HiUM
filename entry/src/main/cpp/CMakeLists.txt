@@ -17,7 +17,8 @@ add_library(entry SHARED
     qmp.cpp
     ncp_client.cpp
     imgtool.cpp
-    swtpm.cpp)
+    swtpm.cpp
+    swtpm_client.cpp)
 
 target_link_libraries(entry PUBLIC
     libace_napi.z.so
@@ -40,5 +41,14 @@ target_link_libraries(qemu_child PUBLIC
     libEGL.so
     libGLESv3.so
     libnative_window.so
+    libipc_capi.so
+    libdl.so)
+
+# swtpm 子进程（NCP）：dlopen libswtpm.so 前台跑 swtpm_entry（与 qemu_child 对称）
+add_library(swtpm_child SHARED
+    swtpm_child.cpp)
+target_link_libraries(swtpm_child PUBLIC
+    libhilog_ndk.z.so
+    libchild_process.so
     libipc_capi.so
     libdl.so)
