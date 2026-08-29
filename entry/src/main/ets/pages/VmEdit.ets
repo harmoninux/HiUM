@@ -5,7 +5,7 @@ import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
 import { VmProfile, VmStore, VmArch, SCHEMA_VERSION, fitBoard, builtinIsoFor } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
-import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp8, spCard } from '../lib/uiTokens';
+import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp5, sp8, spCard } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -161,6 +161,30 @@ export struct VmEdit {
     this.navStack.pop();
   }
 
+  /* 分组标题 + 分割线（与 VmWizard groupHeader / VmManage secHead 同款：灰字在左，细线延伸至右） */
+  @Builder
+  groupHead(label: string) {
+    Row({ space: sp8 }) {
+      Text(label).fontSize(tLabel).fontColor(cSub)
+      Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
+    }
+    .width('100%')
+    .margin({ top: sp2, bottom: sp1 })
+  }
+
+  /* 高级折叠组头：点击展开/收起（原「▼ 高级选项」ListItem 改为组头即开关） */
+  @Builder
+  groupHeadAdvanced() {
+    Row({ space: sp8 }) {
+      Text('高级').fontSize(tLabel).fontColor(cSub)
+      Text(this.showAdvanced ? ' ▾ 收起' : ' ▸ 展开').fontSize(tSub).fontColor(cWeak)
+      Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
+    }
+    .width('100%')
+    .margin({ top: sp2, bottom: sp1 })
+    .onClick(() => this.showAdvanced = !this.showAdvanced)
+  }
+
   build() {
     Column() {
       Row() {
@@ -181,8 +205,11 @@ export struct VmEdit {
       .width('100%')
       .padding({ left: sp8, right: sp8, top: sp8, bottom: sp8 })
 
-      List({ space: 1 }) {
-        ListItem() {
+      Scroll() {
+        Column() {
+          /* —— 基础 —— */
+          this.groupHead('基础')
+
           Row() {
             Text('名称').fontSize(tLabel).width(72)
             TextInput({ text: this.name })
@@ -191,9 +218,7 @@ export struct VmEdit {
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
               .onChange((v: string) => this.name = v)
           }.padding(spCard)
-        }
 
-        ListItem() {
           Row() {
             Text('架构').fontSize(tLabel).width(72)
             Text(this.arch)
@@ -203,9 +228,7 @@ export struct VmEdit {
               .padding({ left: inpPadX, right: inpPadX })
               .textAlign(TextAlign.Start)
           }.padding(spCard)
-        }
 
-        ListItem() {
           Row({ space: 4 }) {
             Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
               .width(120)
@@ -213,9 +236,7 @@ export struct VmEdit {
               .onChange((v: number) => this.cpus = v)
               .layoutWeight(1)
           }.alignItems(VerticalAlign.Center).padding(spCard)
-        }
 
-        ListItem() {
           Row() {
             Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
               .width(120)
@@ -223,9 +244,10 @@ export struct VmEdit {
               .onChange((v: number) => this.memoryMB = v)
               .layoutWeight(1)
           }.alignItems(VerticalAlign.Center).padding(spCard)
-        }
 
-        ListItem() {
+          /* —— 存储 —— */
+          this.groupHead('存储')
+
           Column({ space: sp1 }) {
             Row() {
               Text('系统盘').fontSize(tLabel).width(72)
@@ -253,9 +275,7 @@ export struct VmEdit {
                 })
             }
           }.alignItems(HorizontalAlign.Start).padding(spCard)
-        }
 
-        ListItem() {
           Column({ space: sp1 }) {
             Row() {
               Text('光盘 ISO').fontSize(tLabel).width(72)
@@ -285,26 +305,23 @@ export struct VmEdit {
               }
             }
           }.alignItems(HorizontalAlign.Start).padding(spCard)
-        }
 
-        ListItem() {
           Row() {
             Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
               .onChange((v: boolean) => this.bootFromCdrom = v)
           }.padding(spCard)
-        }
 
-        ListItem() {
+          /* —— 网络 —— */
+          this.groupHead('网络')
+
           Row() {
-            Text('网络').fontSize(tLabel).layoutWeight(1)
+            Text('启用网络').fontSize(tLabel).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.netEnabled })
               .onChange((v: boolean) => this.netEnabled = v)
           }.padding(spCard)
-        }
 
-        if (this.netEnabled) {
-          ListItem() {
+          if (this.netEnabled) {
             Column({ space: 4 }) {
               Text('端口映射').fontSize(tLabel)
               Text('宿主端口:客机端口，逗号分隔').fontSize(tSub).fontColor(cWeak)
@@ -313,8 +330,6 @@ export struct VmEdit {
                 .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.portForwards = v)
             }.alignItems(HorizontalAlign.Start).padding(spCard)
-          }
-          ListItem() {
             Column({ space: 4 }) {
               Row() {
                 Text('共享目录').fontSize(tLabel).layoutWeight(1)
@@ -324,38 +339,23 @@ export struct VmEdit {
               Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).padding(spCard)
           }
-        }
 
-        ListItem() {
-          Row() {
-            Text(this.showAdvanced ? '▲ 高级选项' : '▼ 高级选项')
-              .fontSize(tLabel)
-              .fontColor(cPrimary)
-              .layoutWeight(1)
-          }
-          .padding(spCard)
-          .onClick(() => this.showAdvanced = !this.showAdvanced)
-        }
-
-        if (this.showAdvanced) {
-          ListItem() {
-            Column() {
-              Row() {
-                Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.mttcg })
-                  .onChange((v: boolean) => this.mttcg = v)
-              }.padding(spCard)
-              Row() {
-                Text('tb-size').fontSize(tLabel).width(96)
-                TextInput({ text: this.tbSizeText })
-                  .layoutWeight(1)
-                  .fontSize(tBody)
-                  .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-                  .onChange((v: string) => this.tbSizeText = v)
-              }.padding({ left: spCard, right: spCard, bottom: spCard })
-            }
-          }
-          ListItem() {
+          /* —— 高级（折叠组头） —— */
+          this.groupHeadAdvanced()
+          if (this.showAdvanced) {
+            Row() {
+              Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.mttcg })
+                .onChange((v: boolean) => this.mttcg = v)
+            }.padding(spCard)
+            Row() {
+              Text('tb-size').fontSize(tLabel).width(96)
+              TextInput({ text: this.tbSizeText })
+                .layoutWeight(1)
+                .fontSize(tBody)
+                .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+                .onChange((v: string) => this.tbSizeText = v)
+            }.padding({ left: spCard, right: spCard, bottom: spCard })
             Column({ space: 4 }) {
               Text('自定义 QEMU 参数').fontSize(tLabel)
               Text('追加到命令行末尾').fontSize(tSub).fontColor(cWeak)
@@ -366,10 +366,12 @@ export struct VmEdit {
             }.alignItems(HorizontalAlign.Start).padding(spCard)
           }
         }
+        .width('100%')
+        .padding({ left: sp3, right: sp3, bottom: sp5 })
       }
       .layoutWeight(1)
-      .divider({ strokeWidth: 1, color: cBorder })
-      .backgroundColor(Color.White)
+      .align(Alignment.Top)
+      .scrollBar(BarState.Off)
     }
     .width('100%')
     .height('100%')
