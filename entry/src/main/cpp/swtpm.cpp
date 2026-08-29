@@ -13,10 +13,12 @@
 
 static bool fileExists(const std::string &p) { return access(p.c_str(), F_OK) == 0; }
 
-int swtpm_start(const std::string &binPath, const std::string &tpmDir,
-                const std::string &ctrlSock, const std::string &logPath,
-                const std::string &pidPath, int timeoutMs)
+int swtpm_start(const std::string &binPath, const std::string &libDir,
+                const std::string &tpmDir, const std::string &ctrlSock,
+                const std::string &logPath, const std::string &pidPath, int timeoutMs)
 {
+    /* rawfile 解包不保留可执行位、且 @ohos.file.fs 无 chmod → 这里 best-effort 补 chmod 再校验。 */
+    chmod(binPath.c_str(), 0755);
     if (access(binPath.c_str(), X_OK) != 0) {
         OH_LOG_ERROR(LOG_APP, "swtpm bin not executable: %{public}s", binPath.c_str());
         return -1;
@@ -31,6 +33,7 @@ int swtpm_start(const std::string &binPath, const std::string &tpmDir,
     }
     if (pid == 0) {
         /* 子进程：exec swtpm（--daemon 自行再 fork，原 child 随之退出）。先物化临时串保证 c_str 稳定。 */
+        setenv("LD_LIBRARY_PATH", libDir.c_str(), 1);
         std::string tpmStateArg = "dir=" + tpmDir;
         std::string ctrlArg = "type=unixio,path=" + ctrlSock;
         std::string logArg = "file=" + logPath;

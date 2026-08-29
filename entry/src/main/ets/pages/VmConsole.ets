@@ -53,7 +53,7 @@ interface QemuNapi {
   qmpCommand: (vmId: string, cmd: string) => string;
   setQmpEventCallback: (vmId: string, cb: ((evt: string) => void) | null) => void;
   captureScreen: (vmId: string) => ScreenShotBuf | null;
-  startSwtpm: (binPath: string, tpmDir: string, ctrlSock: string, logPath: string, pidPath: string) => number;
+  startSwtpm: (binPath: string, libDir: string, tpmDir: string, ctrlSock: string, logPath: string, pidPath: string) => number;
   stopSwtpm: (pidPath: string) => void;
 }
 
@@ -355,12 +355,13 @@ struct VmConsole {
       return;
     }
     if (isWin && this.profile.security && this.profile.security.tpm) {
-      const binPath = this.vmDataDir + '/swtpm';
+      const binPath = this.vmDataDir + '/swtpm/bin/swtpm';
+      const libDir = this.vmDataDir + '/swtpm/lib';
       const tpmDir = swtpmDir(this.vmDataDir, this.profile.id);
       const sock = swtpmSockPath(this.vmDataDir, this.profile.id);
       const log = this.vmDataDir + '/swtpm-' + this.profile.id + '.log';
       const pid = swtpmPidPath(this.vmDataDir, this.profile.id);
-      const rc = napi.startSwtpm(binPath, tpmDir, sock, log, pid);
+      const rc = napi.startSwtpm(binPath, libDir, tpmDir, sock, log, pid);
       if (rc !== 0) {
         this.status = 'TPM 启动失败';
         this.profile.security.tpm = false; /* 降级：buildWinArgs 不再挂 tpm-tis */

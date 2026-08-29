@@ -39,18 +39,19 @@ napi_value intResult(napi_env env, int v)
 
 } // namespace
 
-/* startSwtpm(binPath: string, tpmDir: string, ctrlSock: string, logPath: string, pidPath: string): number */
+/* startSwtpm(binPath: string, libDir: string, tpmDir: string, ctrlSock: string, logPath: string, pidPath: string): number */
 static napi_value StartSwtpm(napi_env env, napi_callback_info info)
 {
-    size_t argc = 5;
-    napi_value args[5] = {nullptr};
+    size_t argc = 6;
+    napi_value args[6] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
     std::string bin = stringArg(env, args[0]);
-    std::string dir = stringArg(env, args[1]);
-    std::string ctrl = stringArg(env, args[2]);
-    std::string log = stringArg(env, args[3]);
-    std::string pid = stringArg(env, args[4]);
-    return intResult(env, swtpm_start(bin, dir, ctrl, log, pid, 5000));
+    std::string libDir = stringArg(env, args[1]);
+    std::string dir = stringArg(env, args[2]);
+    std::string ctrl = stringArg(env, args[3]);
+    std::string log = stringArg(env, args[4]);
+    std::string pid = stringArg(env, args[5]);
+    return intResult(env, swtpm_start(bin, libDir, dir, ctrl, log, pid, 5000));
 }
 
 /* stopSwtpm(pidPath: string) */
