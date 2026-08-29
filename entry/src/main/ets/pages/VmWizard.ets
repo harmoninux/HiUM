@@ -2,7 +2,7 @@
 // 新建 / 编辑统一主路径：新建直接进手工向导，无需模板磁贴；VmEdit 保留为高级入口。
 // 第⑥步实时 buildArgs 只读预览。
 import { promptAction } from '@kit.ArkUI';
-import { pathExists } from '../lib/fsutil';
+import { pathExists, isoReadable } from '../lib/fsutil';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
 import {
@@ -177,8 +177,8 @@ export struct VmWizard {
       if (this.bootFromCdrom && this.cdromPath.trim().length === 0) {
         return '从光盘启动需先指定 ISO';
       }
-      if (this.cdromPath.trim().length > 0 && !pathExists(this.cdromPath.trim())) {
-        return 'ISO 路径不存在';
+      if (this.cdromPath.trim().length > 0 && !isoReadable(this.cdromPath.trim())) {
+        return 'ISO 不可读或不存在';
       }
     }
     if (step === 4 && this.netEnabled && this.portForwards.trim().length > 0) {

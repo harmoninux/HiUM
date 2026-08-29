@@ -5,7 +5,7 @@ import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
 import { VmProfile, VmStore, VmArch, SCHEMA_VERSION, fitBoard, builtinIsoFor, forwardErrors } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
-import { pathExists } from '../lib/fsutil';
+import { isoReadable } from '../lib/fsutil';
 import { pickIsoPath } from '../lib/isoPick';
 import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp5, sp8, spCard } from '../lib/uiTokens';
 
@@ -143,8 +143,8 @@ export struct VmEdit {
     if (this.bootFromCdrom && this.cdromPath.trim().length === 0) {
       return '从光盘启动需先指定 ISO';
     }
-    if (this.cdromPath.trim().length > 0 && !pathExists(this.cdromPath.trim())) {
-      return 'ISO 路径不存在';
+    if (this.cdromPath.trim().length > 0 && !isoReadable(this.cdromPath.trim())) {
+      return 'ISO 不可读或不存在';
     }
     if (this.netEnabled && this.portForwards.trim().length > 0) {
       const errs = forwardErrors(this.portForwards);

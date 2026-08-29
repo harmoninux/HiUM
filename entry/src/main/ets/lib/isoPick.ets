@@ -4,7 +4,7 @@
 // 文件被挪/拔出）由启动失败时的 qemu-<id>.log 弹窗兜底（VmConsole.failStart），此处不做拷贝。
 import { picker, fileUri } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
-import { pathExists } from './fsutil';
+import { isoReadable } from './fsutil';
 
 /* 拉起文档选择器选 1 个 .iso，返回真实文件路径；取消 / 解析失败 / 文件不可读返回 ''。
  * 本 SDK 的 fileUri 无 getPathFromUri，用 EntryAbility:39-42 已验证的 new fileUri.FileUri(uri).path 取真实路径。 */
@@ -23,7 +23,7 @@ export function pickIsoPath(ctx: common.UIAbilityContext): Promise<string> {
         } catch {
           p = '';
         }
-        if (p.length === 0 || !pathExists(p)) {
+        if (p.length === 0 || !isoReadable(p)) {
           p = '';
         }
         resolve(p);

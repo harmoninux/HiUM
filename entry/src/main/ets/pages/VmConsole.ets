@@ -12,7 +12,7 @@ import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
 import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir, builtinIsoFor } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
-import { pathExists } from '../lib/fsutil';
+import { pathExists, isoReadable } from '../lib/fsutil';
 import { prepareStart } from '../lib/tempSession';
 import { takePendingVmId, isPadOrPhone } from '../lib/vmwindows';
 import { VirtualKeyboard } from '../lib/VirtualKeyboard';
@@ -217,8 +217,9 @@ struct VmConsole {
       return;
     }
     /* 光盘已配置但不可读（重启后选择器授权失效 / 文件被移动 / 可移动存储拔出）：
-     * 分两种——辅助光盘直接丢 -cdrom 从硬盘继续；启动源光盘必须拦截给出路（丢盘必哑火）。 */
-    if (cd.length > 0 && !pathExists(cd)) {
+     * 分两种——辅助光盘直接丢 -cdrom 从硬盘继续；启动源光盘必须拦截给出路（丢盘必哑火）。
+     * 用 isoReadable（真 open 读）而非 pathExists（accessSync 可能对读不了的路径返回 true）。 */
+    if (cd.length > 0 && !isoReadable(cd)) {
       if (this.profile.media.bootFromCdrom) {
         this.status = '启动光盘不可读';
         const nm = cd.substring(cd.lastIndexOf('/') + 1);

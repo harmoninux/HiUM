@@ -94,6 +94,8 @@ export function pickIsoPath(ctx: common.UIAbilityContext): Promise<string> {
 | **ISO 是启动源**（`bootFromCdrom=true`） | 丢盘 = 无盘可启 → **不自动丢**。弹窗「启动光盘不可读：<basename>（可能已移动/失去权限）」给 `从系统盘启动`（`bootFromCdrom=false` 持久化后重试）/ `取消`；并可到配置页重新选 ISO |
 | **ISO 是辅助光盘**（`bootFromCdrom=false`，系统盘可启） | 启动前从 `buildArgs` 结果剥掉 `-cdrom`（`stripCdrom`）照常从硬盘启动，toast「光盘不可读，已跳过；可到配置页重新选择」 |
 
+**预检探针用 `isoReadable`（真 `open(READ_ONLY)`），不是 `pathExists`（`accessSync`）。** 实测 `accessSync` 会对「存在但读不了」的盘返回 true 放行，把 EPERM 留给 qemu 子进程（用户复现过 qemu 报 "Operation not permitted"）；改成真 open 后能在 qemu 前拦下。同一教训适用于保存/向导的 ISO 校验（`VmEdit.saveError` / `VmWizard.calcError` 的「ISO 不可读或不存在」也走 `isoReadable`）；`diskPath` 存在性与列表清扫保留 `pathExists`（非启动读取门）。
+
 - `stripCdrom(args)`：从 `string[]` 里删掉 `-cdrom` 及其紧随的值（`vmprofile.ets:337` push 的是 `args.push('-cdrom', path)`）。不动 `this.profile` 对象，避免污染后续配置页/下次结算。
 - `-boot` 随之仍按 `bootFromCdrom` 生成；两分支下 `bootFromCdrom` 均为 false → `-boot c`，不会出现「`-boot d` 却无盘」。
 - 兜底仍未变：真正的 qemu 语义错（自定义参数等）依旧走 `qemu-<id>.log` 弹窗（`VmConsole.failStart`）。
