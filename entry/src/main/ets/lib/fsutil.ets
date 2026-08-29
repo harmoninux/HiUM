@@ -31,3 +31,27 @@ export function isoReadable(path: string): boolean {
   }
   return true;
 }
+
+/* 复制文件（内部复制固件模板 VARS → 每 VM 可写 VARS）。目标已存在则跳过；
+ * 源缺失/复制失败返回 false，不抛。 */
+export function copyFile(src: string, dst: string): boolean {
+  try {
+    if (!fs.accessSync(src)) { return false; }
+    if (fs.accessSync(dst)) { return true; } /* 已存在，视为已就绪 */
+    const inFd = fs.openSync(src, fs.OpenMode.READ_ONLY);
+    const outFd = fs.openSync(dst, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+    const buf = new ArrayBuffer(4 * 1024 * 1024);
+    let n = 0;
+    do {
+      n = fs.readSync(inFd.fd, buf);
+      if (n > 0) {
+        fs.writeSync(outFd.fd, buf.slice(0, n), { offset: 0 });
+      }
+    } while (n > 0);
+    fs.closeSync(inFd);
+    fs.closeSync(outFd);
+    return true;
+  } catch {
+    return false;
+  }
+}

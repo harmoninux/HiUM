@@ -4,6 +4,7 @@
 // 版本判定 + 缺字段回填，不再在 load() 里逐字段塞 if。
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
+import { copyFile } from './fsutil';
 
 export const SCHEMA_VERSION = 2;
 
@@ -69,6 +70,15 @@ export function winFirmware(arch: VmArch): VmWinFirmware {
 export function winVarsPath(vmDataDir: string, id: string, arch: VmArch): string {
   const suffix = arch === 'aarch64' ? 'aavmf' : 'ovmf';
   return `${vmDataDir}/${id}-${suffix}-vars.fd`;
+}
+
+/* 确保每 VM 的可写 VARS 存在：缺则从 winFirmware().varsTemplate 复制。
+ * qemu pflash 的 VARS 会被改写，必须每 VM 一份（代码/模板是只读资产）。 */
+export function seedWinVars(vmDataDir: string, id: string, arch: VmArch): boolean {
+  const fw = winFirmware(arch);
+  const src = vmDataDir + '/' + fw.varsTemplate;
+  const dst = winVarsPath(vmDataDir, id, arch);
+  return copyFile(src, dst);
 }
 
 /* swtpm 控制 socket / pid 路径（qemu -chardev socket 与 native 共用） */
