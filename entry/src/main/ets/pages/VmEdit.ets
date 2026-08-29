@@ -169,19 +169,23 @@ export struct VmEdit {
       Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
     }
     .width('100%')
-    .margin({ top: sp2, bottom: sp1 })
+    .margin({ top: sp2, bottom: sp2 })
   }
 
-  /* 高级折叠组头：点击展开/收起（原「▼ 高级选项」ListItem 改为组头即开关） */
+  /* 高级折叠组头：点击展开/收起。标题+展开提示合成同一 Text 的 Span（单行盒排版），
+   * 避免 ▸/▾ 符号与文字字体度量不同而垂直错位——同 VmWizard 折叠组头手法 */
   @Builder
   groupHeadAdvanced() {
     Row({ space: sp8 }) {
-      Text('高级').fontSize(tLabel).fontColor(cSub)
-      Text(this.showAdvanced ? ' ▾ 收起' : ' ▸ 展开').fontSize(tSub).fontColor(cWeak)
+      Text() {
+        Span('高级').fontColor(cSub)
+        Span(this.showAdvanced ? ' ▾ 收起' : ' ▸ 展开').fontColor(cWeak).fontSize(tSub)
+      }
+      .fontSize(tLabel)
       Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
     }
     .width('100%')
-    .margin({ top: sp2, bottom: sp1 })
+    .margin({ top: sp2, bottom: sp2 })
     .onClick(() => this.showAdvanced = !this.showAdvanced)
   }
 
@@ -217,7 +221,7 @@ export struct VmEdit {
               .fontSize(tBody)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
               .onChange((v: string) => this.name = v)
-          }.padding({ top: spCard, bottom: spCard })
+          }.padding({ top: sp1, bottom: sp1 })
 
           Row() {
             Text('架构').fontSize(tLabel).width(72)
@@ -227,7 +231,7 @@ export struct VmEdit {
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).layoutWeight(1)
               .padding({ left: inpPadX, right: inpPadX })
               .textAlign(TextAlign.Start)
-          }.padding({ top: spCard, bottom: spCard })
+          }.padding({ top: sp1, bottom: sp1 })
 
           Row({ space: 4 }) {
             Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
@@ -310,7 +314,7 @@ export struct VmEdit {
             Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
               .onChange((v: boolean) => this.bootFromCdrom = v)
-          }.padding({ top: spCard, bottom: spCard })
+          }.padding({ top: sp1, bottom: sp1 })
 
           /* —— 网络 —— */
           this.groupHead('网络')
@@ -319,7 +323,7 @@ export struct VmEdit {
             Text('启用网络').fontSize(tLabel).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.netEnabled })
               .onChange((v: boolean) => this.netEnabled = v)
-          }.padding({ top: spCard, bottom: spCard })
+          }.padding({ top: sp1, bottom: sp1 })
 
           if (this.netEnabled) {
             Column({ space: 4 }) {
@@ -347,7 +351,7 @@ export struct VmEdit {
               Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)
               Toggle({ type: ToggleType.Switch, isOn: this.mttcg })
                 .onChange((v: boolean) => this.mttcg = v)
-            }.padding({ top: spCard, bottom: spCard })
+            }.padding({ top: sp1, bottom: sp1 })
             Row() {
               Text('tb-size').fontSize(tLabel).width(96)
               TextInput({ text: this.tbSizeText })
@@ -355,13 +359,13 @@ export struct VmEdit {
                 .fontSize(tBody)
                 .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.tbSizeText = v)
-            }.padding({ bottom: spCard })
+            }.padding({ bottom: sp1 })
             Column({ space: 4 }) {
               Text('自定义 QEMU 参数').fontSize(tLabel)
               Text('追加到命令行末尾').fontSize(tSub).fontColor(cWeak)
               TextArea({ placeholder: '如 -device usb-kbd', text: this.extraArgs })
                 .fontSize(tBody)
-                .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+                .height(108).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.extraArgs = v)
             }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
           }
