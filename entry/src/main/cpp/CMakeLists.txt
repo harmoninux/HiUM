@@ -16,7 +16,8 @@ add_library(entry SHARED
     napi_init.cpp
     qmp.cpp
     ncp_client.cpp
-    imgtool.cpp)
+    imgtool.cpp
+    swtpm.cpp)
 
 target_link_libraries(entry PUBLIC
     libace_napi.z.so
