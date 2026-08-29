@@ -217,7 +217,7 @@ export struct VmEdit {
               .fontSize(tBody)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
               .onChange((v: string) => this.name = v)
-          }.padding(spCard)
+          }.padding({ top: spCard, bottom: spCard })
 
           Row() {
             Text('架构').fontSize(tLabel).width(72)
@@ -227,7 +227,7 @@ export struct VmEdit {
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).layoutWeight(1)
               .padding({ left: inpPadX, right: inpPadX })
               .textAlign(TextAlign.Start)
-          }.padding(spCard)
+          }.padding({ top: spCard, bottom: spCard })
 
           Row({ space: 4 }) {
             Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
@@ -235,7 +235,7 @@ export struct VmEdit {
             Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
               .onChange((v: number) => this.cpus = v)
               .layoutWeight(1)
-          }.alignItems(VerticalAlign.Center).padding(spCard)
+          }.alignItems(VerticalAlign.Center).padding({ top: spCard, bottom: spCard })
 
           Row() {
             Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
@@ -243,7 +243,7 @@ export struct VmEdit {
             Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
               .onChange((v: number) => this.memoryMB = v)
               .layoutWeight(1)
-          }.alignItems(VerticalAlign.Center).padding(spCard)
+          }.alignItems(VerticalAlign.Center).padding({ top: spCard, bottom: spCard })
 
           /* —— 存储 —— */
           this.groupHead('存储')
@@ -274,7 +274,7 @@ export struct VmEdit {
                   }
                 })
             }
-          }.alignItems(HorizontalAlign.Start).padding(spCard)
+          }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
 
           Column({ space: sp1 }) {
             Row() {
@@ -304,13 +304,13 @@ export struct VmEdit {
                   .onClick(() => this.pickBuiltinIso())
               }
             }
-          }.alignItems(HorizontalAlign.Start).padding(spCard)
+          }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
 
           Row() {
             Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
               .onChange((v: boolean) => this.bootFromCdrom = v)
-          }.padding(spCard)
+          }.padding({ top: spCard, bottom: spCard })
 
           /* —— 网络 —— */
           this.groupHead('网络')
@@ -319,7 +319,7 @@ export struct VmEdit {
             Text('启用网络').fontSize(tLabel).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.netEnabled })
               .onChange((v: boolean) => this.netEnabled = v)
-          }.padding(spCard)
+          }.padding({ top: spCard, bottom: spCard })
 
           if (this.netEnabled) {
             Column({ space: 4 }) {
@@ -329,7 +329,7 @@ export struct VmEdit {
                 .fontSize(tBody)
                 .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.portForwards = v)
-            }.alignItems(HorizontalAlign.Start).padding(spCard)
+            }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
             Column({ space: 4 }) {
               Row() {
                 Text('共享目录').fontSize(tLabel).layoutWeight(1)
@@ -337,7 +337,7 @@ export struct VmEdit {
                   .onChange((v: boolean) => this.sharedFolder = v)
               }.padding({ left: 0, right: 0 })
               Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
-            }.alignItems(HorizontalAlign.Start).padding(spCard)
+            }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
           }
 
           /* —— 高级（折叠组头） —— */
@@ -347,7 +347,7 @@ export struct VmEdit {
               Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)
               Toggle({ type: ToggleType.Switch, isOn: this.mttcg })
                 .onChange((v: boolean) => this.mttcg = v)
-            }.padding(spCard)
+            }.padding({ top: spCard, bottom: spCard })
             Row() {
               Text('tb-size').fontSize(tLabel).width(96)
               TextInput({ text: this.tbSizeText })
@@ -355,7 +355,7 @@ export struct VmEdit {
                 .fontSize(tBody)
                 .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.tbSizeText = v)
-            }.padding({ left: spCard, right: spCard, bottom: spCard })
+            }.padding({ bottom: spCard })
             Column({ space: 4 }) {
               Text('自定义 QEMU 参数').fontSize(tLabel)
               Text('追加到命令行末尾').fontSize(tSub).fontColor(cWeak)
@@ -363,7 +363,7 @@ export struct VmEdit {
                 .fontSize(tBody)
                 .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.extraArgs = v)
-            }.alignItems(HorizontalAlign.Start).padding(spCard)
+            }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
           }
         }
         .width('100%')
