@@ -58,6 +58,18 @@ int32_t onStart(const OHIPCParcel *data)
         }
         args.emplace_back(a);
     }
+    /* 子进程侧复刻关键设备组：确认 qemu 真正要跑的命令行（tpm/pflash/机器/显示）完整到达。 */
+    {
+        bool hasTpm = false, hasPflash = false, hasQmp = false, hasIso = false;
+        for (const auto &a : args) {
+            if (a.rfind("-tpmdev", 0) == 0) { hasTpm = true; }
+            if (a.rfind("-drive", 0) == 0 && a.find("pflash") != std::string::npos) { hasPflash = true; }
+            if (a == "-qmp") { hasQmp = true; }
+            if (a.rfind("-device", 0) == 0 && a.find("usb-storage") != std::string::npos) { hasIso = true; }
+        }
+        OH_LOG_INFO(LOG_APP, "child: START arch=%{public}s argc=%{public}d tpm=%{public}d pflash=%{public}d qmp=%{public}d iso=%{public}d",
+                    arch, argc, hasTpm ? 1 : 0, hasPflash ? 1 : 0, hasQmp ? 1 : 0, hasIso ? 1 : 0);
+    }
     OHNativeWindow *win = nullptr;
     if (OH_NativeWindow_ReadFromParcel(const_cast<OHIPCParcel *>(data), &win) != 0 ||
         win == nullptr) {

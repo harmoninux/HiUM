@@ -134,8 +134,11 @@ export struct VmList {
     if (p.media.diskPath.length > 0 && !pathExists(p.media.diskPath)) {
       bad.push('系统盘');
     }
-    if (p.media.cdromPath.length > 0 && !pathExists(p.media.cdromPath)) {
-      bad.push('光盘');
+    for (const iso of p.media.cdromPaths) {
+      if (!pathExists(iso)) {
+        bad.push('光盘');
+        break;
+      }
     }
     return bad.join('、');
   }

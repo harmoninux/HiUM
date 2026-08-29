@@ -20,6 +20,8 @@ const FIRMWARE_FILES: string[] = [
   'vgabios-virtio.bin',
   'vgabios-ramfb.bin',
   'efi-virtio.rom',
+  'efi-e1000.rom',       /* Windows x64 e1000 网卡 EFI option ROM */
+  'pxe-e1000.rom',       /* e1000 网卡 legacy BIOS option ROM（-boot 非 UEFI 时） */
   'edk2-x86_64-code.fd', /* Windows x64 OVMF CODE（pflash） */
   'edk2-i386-vars.fd',   /* x86 OVMF VARS 模板（复制成每 VM VARS） */
   'edk2-arm-vars.fd',    /* aarch64 AAVMF VARS 模板 */

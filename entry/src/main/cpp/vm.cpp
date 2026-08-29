@@ -10,7 +10,11 @@
 
 #include <atomic>
 #include <cstring>
+#include <execinfo.h>
+#include <fstream>
+#include <signal.h>
 #include <thread>
+#include <vector>
 
 #undef LOG_DOMAIN
 #undef LOG_TAG
@@ -65,6 +69,9 @@ bool resolveSym(void *so, const char *name, T *out)
     return true;
 }
 
+void installCrashHandlers(); /* 定义在文件尾（匿名命名空间内），此处前置声明供 vmMain 用 */
+void relayQemuLogThread(const std::string &logPath, std::atomic<bool> *stop);
+
 void vmMain(VmState *vm)
 {
     pthread_setname_np(pthread_self(), "qemu-main");
@@ -100,11 +107,46 @@ void vmMain(VmState *vm)
             }
         }
     }
+    /* logPath 供日志转发线程 + 退出时镜像读取 */
+    std::string logPath = dataDir.empty() ? std::string() :
+        (vmId.empty() ? dataDir + "/qemu.log" : dataDir + "/qemu-" + vmId + ".log");
+    installCrashHandlers();
+    std::atomic<bool> stopRelay{false};
+    std::thread relay;
+    if (!logPath.empty()) {
+        relay = std::thread(relayQemuLogThread, logPath, &stopRelay);
+    }
     int argc = (int)vm->argPtrs.size();
     OH_LOG_INFO(LOG_APP, "qemu_system_entry start, argc=%{public}d", argc);
     int ret = qe_system_entry(argc, vm->argPtrs.data());
     OH_LOG_INFO(LOG_APP, "qemu_system_entry exited, ret=%{public}d", ret);
     vm->running.store(false);
+    stopRelay.store(true);
+    if (relay.joinable()) {
+        relay.join();
+    }
+
+    /* 读回 qemu 日志尾部，抬到 hilog：qemu 的 stderr（fatal error/无法打开镜像等）
+     * 已被上面 dup2 重定向到 qemu-<vmId>.log（app 沙箱内，hdc shell 读不到），
+     * 这里补一条让崩溃原因直接进 hilog，供真机诊断。 */
+    std::ifstream flog(logPath);
+    if (flog.is_open()) {
+        std::string line;
+        std::vector<std::string> lines;
+        while (std::getline(flog, line)) {
+            if (!line.empty()) { lines.push_back(line); }
+        }
+        flog.close();
+        size_t start = lines.size() > 40 ? lines.size() - 40 : 0;
+        for (size_t i = start; i < lines.size(); i++) {
+            OH_LOG_ERROR(LOG_APP, "qemu-log[%{public}zu]: %{public}s", i, lines[i].c_str());
+        }
+        if (lines.empty()) {
+            OH_LOG_WARN(LOG_APP, "qemu log is empty (no stderr captured)");
+        }
+    } else {
+        OH_LOG_WARN(LOG_APP, "cannot open qemu log %{public}s", logPath.c_str());
+    }
 
     /* cleanup: drop our pointers into the qemu .so, then stop the bind
      * thread (it polls qemu symbols). no dlclose — TLS 析构会跳到已卸载
@@ -134,6 +176,73 @@ void bindDisplay(VmState *vm)
     }
     OH_LOG_ERROR(LOG_APP, "timed out waiting for qemu console");
 }
+
+/* SIGSEGV/SIGABRT/SIGBUS/FPE/ILL：把 backtrace 刷到 log fd（= qemu-*.log），由
+ * relayQemuLogThread 实时抬到 hilog，随后退出。backtrace_symbols_fd 打印到已被
+ * dup2 的 STDERR_FILENO，远端无需访问 app 沙箱即可看到崩溃栈。 */
+void crashSigHandler(int sig)
+{
+    void *bt[64];
+    int n = backtrace(bt, 64);
+    backtrace_symbols_fd(bt, n, STDERR_FILENO);
+    /* hold 一下让日志转发线程把上面的 backtrace / qemu abort 消息实时抬到 hilog，
+     * 再退出。仅崩溃路径用，短暂 sleep 可接受。 */
+    usleep(200 * 1000);
+    _exit(128 + sig);
+}
+
+void installCrashHandlers()
+{
+    struct sigaction sa{};
+    sa.sa_handler = crashSigHandler;
+    sa.sa_flags = SA_RESETHAND;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, nullptr);
+    sigaction(SIGABRT, &sa, nullptr);
+    sigaction(SIGBUS, &sa, nullptr);
+    sigaction(SIGFPE, &sa, nullptr);
+    sigaction(SIGILL, &sa, nullptr);
+}
+
+/* 后台线程：轮询读取 qemu-<vmId>.log 的新增内容，按行转发到 hilog（QemuVM 域）。
+ * qemu 的 stderr 已被 dup2 到该文件——正常退出的报错与崩溃时的 backtrace 都落在
+ * 这里；实时转发让 hdc 直接可见，无需访问 app 沙箱 nor 等 qemu 退出。 */
+void relayQemuLogThread(const std::string &logPath, std::atomic<bool> *stop)
+{
+    pthread_setname_np(pthread_self(), "qemu-log-relay");
+    off_t pos = 0;
+    std::string partial;
+    while (!stop->load()) {
+        std::ifstream f(logPath, std::ios::in | std::ios::binary);
+        if (f.is_open()) {
+            f.seekg(0, std::ios::end);
+            std::streamoff end = f.tellg();
+            if (end > pos) {
+                f.seekg(pos);
+                std::string chunk(static_cast<size_t>(end - pos), '\0');
+                if (!chunk.empty()) {
+                    f.read(&chunk[0], static_cast<std::streamsize>(end - pos));
+                }
+                pos = end;
+                partial += chunk;
+                std::string line;
+                size_t nl;
+                while ((nl = partial.find('\n')) != std::string::npos) {
+                    line = partial.substr(0, nl);
+                    partial.erase(0, nl + 1);
+                    if (!line.empty()) {
+                        OH_LOG_INFO(LOG_APP, "qemu-log: %{public}s", line.c_str());
+                    }
+                }
+            }
+            f.close();
+        }
+        usleep(60 * 1000); /* 快速轮询，捕捉崩溃瞬间写入的 abort/backtrace */
+    }
+    if (!partial.empty()) {
+        OH_LOG_INFO(LOG_APP, "qemu-log: %{public}s", partial.c_str());
+    }
+}
 } // namespace
 
 bool vm_running()
@@ -150,11 +259,14 @@ int vm_start(const std::string &arch, const std::vector<std::string> &args)
     }
 
     std::string soName = "libqemu-system-" + arch + ".so";
+    OH_LOG_INFO(LOG_APP, "vm_start arch=%{public}s dlopen %{public}s argc=%{public}zu",
+                arch.c_str(), soName.c_str(), args.size());
     void *so = dlopen(soName.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!so) {
         OH_LOG_ERROR(LOG_APP, "dlopen %{public}s failed: %{public}s", soName.c_str(), dlerror());
         return -1;
     }
+    OH_LOG_INFO(LOG_APP, "dlopen %{public}s ok, resolving symbols...", soName.c_str());
     g_vm.so = so;
 
     bool ok = true;

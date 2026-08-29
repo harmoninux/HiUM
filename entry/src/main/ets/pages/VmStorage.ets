@@ -45,7 +45,7 @@ export struct VmStorage {
   @State newGBText: string = '';
   @State snapNameText: string = '';
   @State snapCreateMode: boolean = false;
-  @State cdromPath: string = '';
+  @State cdromPaths: string[] = [];
   @StorageLink('vmDataDir') vmDataDir: string = '';
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine 下载中 */
   @State isoPct: number = 0;
@@ -59,7 +59,7 @@ export struct VmStorage {
     this.name = p.name;
     this.arch = p.machine.arch;
     this.diskPath = p.media.diskPath;
-    this.cdromPath = p.media.cdromPath;
+    this.cdromPaths = p.media.cdromPaths.length > 0 ? p.media.cdromPaths.slice() : [];
     this.refreshDisk();
   }
 
@@ -216,17 +216,46 @@ export struct VmStorage {
     });
   }
 
-  /* 清光盘引用（只改 profile，不删 ISO 文件；不校验路径，配置页没做过校验） */
+  /* 清空全部光盘引用（只改 profile，不删 ISO 文件；不校验路径，配置页没做过校验） */
   private clearCdrom(): void {
     const p = this.profile;
     if (!p) {
       return;
     }
-    p.media.cdromPath = '';
+    p.media.cdromPaths = [];
     new VmStore(this.filesDir).save(p);
-    this.cdromPath = '';
+    this.cdromPaths = [];
     this.vmListVersion++;
     this.showSnack('已清除光盘引用');
+  }
+
+  /* 移除第 idx 张 ISO（持久化） */
+  private removeIso(idx: number): void {
+    const p = this.profile;
+    if (!p) {
+      return;
+    }
+    const next = this.cdromPaths.slice();
+    next.splice(idx, 1);
+    this.cdromPaths = next;
+    p.media.cdromPaths = next;
+    new VmStore(this.filesDir).save(p);
+    this.vmListVersion++;
+  }
+
+  /* 追加一张 ISO（去重 + 持久化），默认从光盘启动 */
+  private addIso(pStr: string): void {
+    if (pStr.length === 0) { return; }
+    if (this.cdromPaths.indexOf(pStr) >= 0) { return; }
+    const next = this.cdromPaths.slice();
+    next.push(pStr);
+    const prof = this.profile;
+    if (!prof) { return; }
+    this.cdromPaths = next;
+    prof.media.cdromPaths = next;
+    prof.media.bootFromCdrom = true;
+    new VmStore(this.filesDir).save(prof);
+    this.vmListVersion++;
   }
 
   /* 「内置 Alpine」按钮：按当前架构确保内置 iso 就绪（缺失则按需下载），完成后挂到光驱 */
@@ -244,15 +273,7 @@ export struct VmStorage {
     }).then((ok: boolean) => {
       this.ensureIsoLoading = false;
       if (ok) {
-        const p = this.profile;
-        if (!p) {
-          return;
-        }
-        this.cdromPath = this.vmDataDir + '/' + name;
-        p.media.cdromPath = this.cdromPath;
-        p.media.bootFromCdrom = true;
-        new VmStore(this.filesDir).save(p);
-        this.vmListVersion++;
+        this.addIso(this.vmDataDir + '/' + name);
         this.showSnack('已挂载内置 ISO');
       } else {
         promptAction.showToast({ message: '内置 ISO 下载失败' });
@@ -260,8 +281,8 @@ export struct VmStorage {
     });
   }
 
-  /* 「选择文件」按钮：拉起系统选择器选 .iso，解析成真实路径后保存到 profile（原地引用，不拷贝）。
-   * 路径不可读/取消则回退为「未选择文件」；选中即默认从光盘启动。 */
+  /* 「选择文件」按钮：拉起系统选择器选 .iso，解析成真实路径后追加到 profile（原地引用，不拷贝）。
+   * 路径不可读/取消则回退为「未选择文件」；追加即默认从光盘启动。 */
   private pickLocalIso(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
     pickIsoPath(ctx).then((p: string) => {
@@ -269,15 +290,7 @@ export struct VmStorage {
         promptAction.showToast({ message: '未选择文件 / 路径不可读' });
         return;
       }
-      const prof = this.profile;
-      if (!prof) {
-        return;
-      }
-      prof.media.cdromPath = p;
-      prof.media.bootFromCdrom = true;
-      new VmStore(this.filesDir).save(prof);
-      this.cdromPath = p;
-      this.vmListVersion++;
+      this.addIso(p);
       this.showSnack('已挂载光盘');
     });
   }
@@ -372,42 +385,49 @@ export struct VmStorage {
     }
   }
 
-  /* 光盘 ISO：该 VM 的启动镜像引用（可清引用；无引用时提供「选择 ISO」重新添加） */
+  /* 光盘 ISO：该 VM 的 ISO 引用列表（可加/移除；第一张为启动盘候选） */
   @Builder
   secCdrom() {
     this.secHead('光盘 ISO')
     Column() {
-      if (this.cdromPath.length > 0) {
-        Row() {
-          Text(this.baseName(this.cdromPath)).fontSize(tSub).fontColor(cSub).layoutWeight(1)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          Button('清除').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-            .backgroundColor(Color.Transparent).fontColor(cDanger)
-            .onClick(() => this.clearCdrom())
-        }.width('100%').padding({ top: sp1, bottom: sp2 })
+      if (this.cdromPaths.length > 0) {
+        ForEach(this.cdromPaths, (p: string, idx: number) => {
+          Row({ space: sp2 }) {
+            Text(idx === 0 ? `${this.baseName(p)}（启动盘）` : this.baseName(p))
+              .fontSize(tSub).fontColor(idx === 0 ? cPrimary : cSub).layoutWeight(1)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            Button('移除').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cDanger)
+              .onClick(() => this.removeIso(idx))
+          }.width('100%').padding({ top: sp1, bottom: sp2 })
+        }, (p: string, idx: number) => `${idx}:${p}`)
       } else {
         Column({ space: sp1 }) {
           Text('未引用光盘').fontSize(tSub).fontColor(cWeak)
             .padding({ top: sp1, bottom: sp1 })
           Text(this.profile && this.profile.guestOS === 'windows11'
-            ? 'Windows 11 安装请使用官方 ISO（光盘经 USB 存储挂载）'
+            ? 'Windows 11 安装请使用官方 x64 ISO（光盘经 USB 存储挂载）'
             : '选择本地 ISO 或内置 Alpine')
             .fontSize(tSub).fontColor(cWeak)
-          Row({ space: sp2 }) {
-            Button('选择文件').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-              .backgroundColor(Color.Transparent).fontColor(cPrimary)
-              .border({ width: 1, color: cBorder, style: BorderStyle.Dashed })
-              .onClick(() => this.pickLocalIso())
-            Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
-              .focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-              .enabled(!this.ensureIsoLoading)
-              .backgroundColor(Color.Transparent).fontColor(cPrimary)
-              .onClick(() => this.pickBuiltinIso())
-          }.width('100%').padding({ top: sp1, bottom: sp2 })
-        }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp2 })
+        }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp1 })
+      }
+      Row({ space: sp2 }) {
+        Button('选择文件').focusable(false).fontSize(tBody)
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .backgroundColor(Color.Transparent).fontColor(cPrimary)
+          .border({ width: 1, color: cBorder, style: BorderStyle.Dashed })
+          .onClick(() => this.pickLocalIso())
+        Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
+          .focusable(false).fontSize(tBody)
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .enabled(!this.ensureIsoLoading)
+          .backgroundColor(Color.Transparent).fontColor(cPrimary)
+          .onClick(() => this.pickBuiltinIso())
+      }.width('100%').padding({ top: sp1, bottom: sp2 })
+      if (this.cdromPaths.length > 0) {
+        Text('第一张为启动盘候选（Windows 请把官方 x64 ISO 放第一张）')
+          .fontSize(tSub).fontColor(cWeak).width('100%').padding({ bottom: sp2 })
       }
     }.alignItems(HorizontalAlign.Start).width('100%')
   }

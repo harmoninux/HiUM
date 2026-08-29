@@ -41,7 +41,7 @@ export struct VmManage {
   @State name: string = '';
   @State arch: string = '';
   @State diskPath: string = '';
-  @State cdromPath: string = '';
+  @State cdromPaths: string[] = [];
   @State bootFromCdrom: boolean = false;
   @State diskFmt: string = '?';
   @State diskVirtualGB: number = 0;
@@ -88,7 +88,7 @@ export struct VmManage {
     this.name = p.name;
     this.arch = p.machine.arch;
     this.diskPath = p.media.diskPath;
-    this.cdromPath = p.media.cdromPath;
+    this.cdromPaths = p.media.cdromPaths;
     this.bootFromCdrom = p.media.bootFromCdrom;
     this.netEnabled = p.net.enabled;
     this.refreshDisk();
@@ -148,21 +148,25 @@ export struct VmManage {
       : '未配置';
   }
 
-  /* 光盘概览（未引用 → 未引用） */
+  /* 光盘概览（未引用 → 未引用）；多张时标注第一张 + 计数 */
   private cdromName(): string {
-    return this.cdromPath.length > 0 ? this.baseName(this.cdromPath) : '未引用';
+    if (this.cdromPaths.length === 0) {
+      return '未引用';
+    }
+    const first = this.baseName(this.cdromPaths[0]);
+    return this.cdromPaths.length > 1 ? `${first} 等${this.cdromPaths.length}张` : first;
   }
 
   /* 当前优先引导设备：-boot d(光驱)/c(硬盘)。仅标「启动」于实际引导的那个介质。
    * 边界：无系统盘时只能光盘；bootFromCdrom 但无光盘时 qemu 回退硬盘。 */
   private bootDevice(): 'cdrom' | 'disk' | 'none' {
-    if (this.cdromPath.length > 0 && this.bootFromCdrom) {
+    if (this.cdromPaths.length > 0 && this.bootFromCdrom) {
       return 'cdrom';
     }
     if (this.diskPath.length > 0) {
       return 'disk';
     }
-    if (this.cdromPath.length > 0) {
+    if (this.cdromPaths.length > 0) {
       return 'cdrom';
     }
     return 'none';

@@ -26,19 +26,8 @@ interface ScreenShotBuf {
   pixels: ArrayBuffer;
 }
 
-/* 从 buildArgs 产出的命令行里剥掉 -cdrom 及其值（光盘不可读时启动前丢盘用）。
- * 不动 profile 对象自身的 cdromPath，避免污染后续配置/结算。 */
-function stripCdrom(args: string[]): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '-cdrom') {
-      i++; /* 跳过紧随其后的路径值 */
-      continue;
-    }
-    out.push(args[i]);
-  }
-  return out;
-}
+/* 多 ISO 启动前的可读性过滤在 doStart 内做：把不可读盘从本次启动的 ISO 列表里剔除，
+ * 再经 buildArgs 的 isoOverride 传入（不动 profile 对象，避免污染后续配置/结算）。 */
 
 interface QemuNapi {
   startVm: (vmId: string, arch: string, args: string[], surfaceId: bigint) => number;
@@ -201,10 +190,10 @@ struct VmConsole {
       this.startPending = true;
       return;
     }
-    /* 若引导光盘是内置 Alpine ISO 且未下载：先按需下载，成功后继续启动 */
-    const cd = this.profile.media.cdromPath;
+    const isos = this.profile.media.cdromPaths;
     const builtin = this.vmDataDir + '/' + builtinIsoFor(this.profile.machine.arch);
-    if (cd.length > 0 && cd === builtin && !pathExists(cd)) {
+    /* 若引导光盘（第一张）是内置 Alpine ISO 且未下载：先按需下载，成功后继续启动 */
+    if (isos.length > 0 && isos[0] === builtin && !pathExists(isos[0])) {
       this.status = '下载系统盘...';
       const ctx = getContext(this) as common.UIAbilityContext;
       ensureBuiltinIso(ctx, this.vmDataDir, this.profile.machine.arch, (pct: number) => {
@@ -218,33 +207,28 @@ struct VmConsole {
       });
       return;
     }
-    /* 光盘已配置但不可读（重启后选择器授权失效 / 文件被移动 / 可移动存储拔出）：
-     * 分两种——辅助光盘直接丢 -cdrom 从硬盘继续；启动源光盘必须拦截给出路（丢盘必哑火）。
-     * 用 isoReadable（真 open 读）而非 pathExists（accessSync 可能对读不了的路径返回 true）。 */
-    if (cd.length > 0 && !isoReadable(cd)) {
-      if (this.profile.media.bootFromCdrom) {
-        this.status = '启动光盘不可读';
-        const nm = cd.substring(cd.lastIndexOf('/') + 1);
-        AlertDialog.show({
-          title: '启动光盘不可读',
-          message: `光盘 ${nm} 可能已移动或失去访问权限。可改用系统盘启动，或到 VM 配置页重新选择 ISO。`,
-          buttons: [
-            { value: '取消', action: () => {
-            } },
-            { value: '从系统盘启动', action: () => {
-              if (!this.profile) { return; }
-              this.profile.media.bootFromCdrom = false;
-              new VmStore(this.filesDir).save(this.profile);
-              this.status = '已改为从系统盘启动';
-              this.doStart(true);
-            } },
-          ],
-        });
-        return;
-      }
-      this.status = '光盘不可读，已跳过';
-      promptAction.showToast({ message: '光盘不可读，已跳过；可到配置页重新选择 ISO' });
-      this.doStart(true);
+    /* 光盘已配置但不可读（重启后选择器授权失效 / 文件被移动 / 可移动存储拔出）。
+     * 启动源盘（第一张）且需从光盘启动 → 必须拦截给出路（丢盘必哑火）；非启动源盘
+     * 不可读 → 启动时静默剔除（doStart 内过滤）。用 isoReadable（真 open 读）而非
+     * pathExists（accessSync 可能对读不了的路径返回 true）。 */
+    if (isos.length > 0 && this.profile.media.bootFromCdrom && !isoReadable(isos[0])) {
+      this.status = '启动光盘不可读';
+      const nm = isos[0].substring(isos[0].lastIndexOf('/') + 1);
+      AlertDialog.show({
+        title: '启动光盘不可读',
+        message: `光盘 ${nm} 可能已移动或失去访问权限。可改用系统盘启动，或到 VM 配置页重新选择 ISO。`,
+        buttons: [
+          { value: '取消', action: () => {
+          } },
+          { value: '从系统盘启动', action: () => {
+            if (!this.profile) { return; }
+            this.profile.media.bootFromCdrom = false;
+            new VmStore(this.filesDir).save(this.profile);
+            this.status = '已改为从系统盘启动';
+            this.doStart();
+          } },
+        ],
+      });
       return;
     }
     this.doStart();
@@ -300,10 +284,7 @@ struct VmConsole {
   /* Windows 11 首次启动提示（按架构给不同说明）。用户可能会卡在「不看提示装不上」。 */
   private showWinInstallHint(blocking: boolean): void {
     if (!this.profile) { return; }
-    const isArm = this.profile.machine.arch === 'aarch64';
-    const isoMsg = isArm
-      ? '1. 挂载官方 Win11ARM64 ISO + virtio-win 驱动 ISO（装盘时选「加载驱动程序」选 virtio-scsi）。'
-      : '1. 挂载官方 Win11 x64 ISO（x64 全用内置驱动，无需 virtio-win）。';
+    const isoMsg = '1. 挂载官方 Win11 x64 ISO（x64 全用内置驱动，无需 virtio-win）。';
     const bypassMsg = '2. 到安装界面按 Shift+F10 → regedit → HKEY_LOCAL_MACHINE\\SYSTEM\\Setup → 新建 LabConfig → BypassTPMCheck=1 / BypassSecureBootCheck=1，返回后下一步。';
     AlertDialog.show({
       title: 'Windows 11 安装提示',
@@ -316,10 +297,16 @@ struct VmConsole {
     });
   }
 
-  private doStart(skipCdrom: boolean = false): void {
+  private doStart(): void {
     if (!this.profile) {
       return;
     }
+    const pBack = this.profile;
+    hilog.info(DOMAIN, TAG, 'doStart vmId=%{public}s arch=%{public}s guestOS=%{public}s isWin=%{public}s tpm=%{public}s isoCount=%{public}d bootFromCdrom=%{public}s tempSession=%{public}s',
+      this.vmId, pBack.machine.arch, pBack.guestOS, String(pBack.guestOS === 'windows11'),
+      String(!!(pBack.security && pBack.security.tpm)),
+      pBack.media.cdromPaths.length, String(pBack.media.bootFromCdrom),
+      String(pBack.temporarySession));
     let share = '';
     if (this.profile.net.sharedFolder) {
       share = sharedDir(this.filesDir);
@@ -346,13 +333,17 @@ struct VmConsole {
       return;
     }
     /* 每次启动都是一个新的 NCP 子进程；多实例按 vmId 各起各的。
-     * skipCdrom（光盘不可读的辅助盘）：启动前从 buildArgs 剥掉 -cdrom（-boot 仍按 bootFromCdrom），
-     * 不动 this.profile 对象，避免污染后续配置页/下次结算。 */
+     * 不可读的辅助盘在下方按 isoReadable 过滤剔出本次启动列表（不动 this.profile），
+     * 避免污染后续配置页/下次结算。 */
     const isWin = this.profile.guestOS === 'windows11';
-    if (isWin && !seedWinVars(this.vmDataDir, this.profile.id, this.profile.machine.arch)) {
-      this.status = 'UEFI 变量文件缺失';
-      this.showWinInstallHint(true);
-      return;
+    if (isWin) {
+      const seeded = seedWinVars(this.vmDataDir, this.profile.id, this.profile.machine.arch);
+      hilog.info(DOMAIN, TAG, 'doStart seedWinVars vm=%{public}s ok=%{public}s', this.vmId, String(seeded));
+      if (!seeded) {
+        this.status = 'UEFI 变量文件缺失';
+        this.showWinInstallHint(true);
+        return;
+      }
     }
     if (isWin && this.profile.security && this.profile.security.tpm) {
       const binPath = this.vmDataDir + '/swtpm/bin/swtpm';
@@ -361,17 +352,29 @@ struct VmConsole {
       const sock = swtpmSockPath(this.vmDataDir, this.profile.id);
       const log = this.vmDataDir + '/swtpm-' + this.profile.id + '.log';
       const pid = swtpmPidPath(this.vmDataDir, this.profile.id);
+      hilog.info(DOMAIN, TAG, 'doStart startSwtpm vm=%{public}s bin=%{public}s sock=%{public}s pid=%{public}s', this.vmId, binPath, sock, pid);
       const rc = napi.startSwtpm(binPath, libDir, tpmDir, sock, log, pid);
+      hilog.info(DOMAIN, TAG, 'doStart startSwtpm vm=%{public}s rc=%{public}d', this.vmId, rc);
       if (rc !== 0) {
         this.status = 'TPM 启动失败';
         this.profile.security.tpm = false; /* 降级：buildWinArgs 不再挂 tpm-tis */
         promptAction.showToast({ message: 'TPM 启动失败，已改为注册表绕过安装' });
       }
     }
-    const args = buildArgs(this.profile, this.vmDataDir, share);
-    const launchArgs = skipCdrom ? stripCdrom(args) : args;
+    /* 多 ISO：把不可读盘从本次启动列表剔除（不动 profile），其余原样传给 buildArgs。 */
+    const allIsos = this.profile.media.cdromPaths;
+    const launchIsos = allIsos.filter((p: string): boolean => isoReadable(p));
+    if (launchIsos.length !== allIsos.length) {
+      hilog.warn(DOMAIN, TAG, 'doStart skip unreadable ISO vm=%{public}s %{public}d -> %{public}d',
+        this.vmId, allIsos.length, launchIsos.length);
+    }
+    const launchArgs = buildArgs(this.profile, this.vmDataDir, share, launchIsos);
+    hilog.info(DOMAIN, TAG, 'doStart buildArgs vm=%{public}s argc=%{public}d isoCount=%{public}d',
+      this.vmId, launchArgs.length, launchIsos.length);
     const ret = napi.startVm(this.vmId, this.profile.machine.arch,
       launchArgs, this.xcController.surfaceId);
+    hilog.info(DOMAIN, TAG, 'doStart startVm vm=%{public}s arch=%{public}s ret=%{public}d',
+      this.vmId, this.profile.machine.arch, ret);
     if (ret !== 0) {
       if (isWin && this.profile.security && this.profile.security.tpm) {
         napi.stopSwtpm(swtpmPidPath(this.vmDataDir, this.profile.id));
@@ -380,7 +383,8 @@ struct VmConsole {
       return;
     }
     this.status = '启动中...';
-    napi.qmpConnect(this.vmId, qmpSockPath(this.profile, this.vmDataDir));
+    const qmpRet = napi.qmpConnect(this.vmId, qmpSockPath(this.profile, this.vmDataDir));
+    hilog.info(DOMAIN, TAG, 'doStart qmpConnect vm=%{public}s ret=%{public}d', this.vmId, qmpRet);
     /* 首次启动 qemu 不发 RESUME 事件，按实际运行状态翻牌；长时间没起来
      * 说明子进程早夭（如参数/资源问题），给个可见的失败 */
     setTimeout(() => {

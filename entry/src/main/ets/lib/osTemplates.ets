@@ -100,7 +100,7 @@ export function buildTemplateProfile(tpl: OsTemplate, id: string, filesDir: stri
     p.media.diskPath = `${filesDir}/vms/${id}.qcow2`;
   }
   if (tpl.isoName.length > 0) {
-    p.media.cdromPath = `${vmDataDir}/${tpl.isoName}`;
+    p.media.cdromPaths = [`${vmDataDir}/${tpl.isoName}`];
   }
   p.media.bootFromCdrom = tpl.bootFromCdrom;
   p.net.enabled = true;

@@ -4,9 +4,13 @@
 // 版本判定 + 缺字段回填，不再在 load() 里逐字段塞 if。
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { copyFile } from './fsutil';
 
 export const SCHEMA_VERSION = 2;
+
+const DOMAIN = 0x0210;
+const TAG = 'QemuProf';
 
 export type VmArch = 'x86_64' | 'i386' | 'aarch64' | 'arm' | 'loongarch64' | 'riscv64';
 export type GuestOs = 'linux' | 'windows11';
@@ -57,19 +61,15 @@ export interface VmWinFirmware {
   varsTemplate: string;
 }
 
-/* Windows 11 UEFI 固件：x64 用 x86_64 OVMF CODE + i386 VARS 模板；aarch64 用 AAVMF(aarch64 CODE) + arm VARS 模板。
+/* Windows 11 UEFI 固件（仅 x86_64/i386）：x86_64 OVMF CODE + i386 VARS 模板。
  * CODE=fork pc-bios 现成；VARS 模板复制成每 VM 一份可写 VARS（qemu pflash 会改写 NVRAM）。 */
 export function winFirmware(arch: VmArch): VmWinFirmware {
-  if (arch === 'aarch64') {
-    return { code: 'edk2-aarch64-code.fd', varsTemplate: 'edk2-arm-vars.fd' };
-  }
   return { code: 'edk2-x86_64-code.fd', varsTemplate: 'edk2-i386-vars.fd' };
 }
 
 /* 每 VM 的可写 VARS 路径（模板复制至此，qemu pflash 挂它） */
 export function winVarsPath(vmDataDir: string, id: string, arch: VmArch): string {
-  const suffix = arch === 'aarch64' ? 'aavmf' : 'ovmf';
-  return `${vmDataDir}/${id}-${suffix}-vars.fd`;
+  return `${vmDataDir}/${id}-ovmf-vars.fd`;
 }
 
 /* 确保每 VM 的可写 VARS 存在：缺则从 winFirmware().varsTemplate 复制。
@@ -78,7 +78,10 @@ export function seedWinVars(vmDataDir: string, id: string, arch: VmArch): boolea
   const fw = winFirmware(arch);
   const src = vmDataDir + '/' + fw.varsTemplate;
   const dst = winVarsPath(vmDataDir, id, arch);
-  return copyFile(src, dst);
+  const ok = copyFile(src, dst);
+  hilog.info(DOMAIN, TAG, 'seedWinVars arch=%{public}s src=%{public}s dst=%{public}s ok=%{public}s',
+    arch, src, dst, String(ok));
+  return ok;
 }
 
 /* swtpm 控制 socket / pid 路径（qemu -chardev socket 与 native 共用） */
@@ -102,8 +105,8 @@ export interface VmRuntime {
 
 /* 介质层 */
 export interface VmMedia {
-  diskPath: string;   /* 系统盘必配：新建/编辑均在标准位置生成 qcow2 */
-  cdromPath: string;  /* '' = 无光盘 */
+  diskPath: string;     /* 系统盘必配：新建/编辑均在标准位置生成 qcow2 */
+  cdromPaths: string[];  /* 有序 ISO 列表；空数组 = 无光盘；第一张为启动盘候选 */
   bootFromCdrom: boolean;
 }
 
@@ -146,7 +149,7 @@ export function blankProfile(id: string): VmProfile {
     security: { tpm: false },
     machine: { arch: 'x86_64', vga: 'std', machine: 'pc', firmware: 'seabios', cpuModel: '' },
     runtime: { memoryMB: 1024, cpus: 2, mttcg: true, tbSize: 1024 },
-    media: { diskPath: '', cdromPath: '', bootFromCdrom: false },
+    media: { diskPath: '', cdromPaths: [], bootFromCdrom: false },
     net: { enabled: true, portForwards: '', sharedFolder: false },
     temporarySession: false,
     extraArgs: '',
@@ -188,6 +191,24 @@ function jObj(o: Record<string, Object>, k: string): Record<string, Object> | un
   const v = o[k];
   return typeof v === 'object' ? v as Record<string, Object> : undefined;
 }
+/* 读 string[]（动态 JSON 存的是 Object[]，逐项窄化；非法项丢弃） */
+function jStrArr(o: Record<string, Object>, k: string): string[] {
+  const v = o[k];
+  if (!Array.isArray(v)) {
+    return [];
+  }
+  const raw = v as Object[]; /* Array.isArray 会把 v 窄化成 any[]，显式转 Object[] 避免 any */
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      const s = item as string;
+      if (s.length > 0) {
+        out.push(s);
+      }
+    }
+  }
+  return out;
+}
 
 /* v1（开发期废弃）：旧扁平字段尽力映射进 v2 层，读不到的下默认。
  * 不承诺完整迁移（无线上历史数据），仅是「尽量捞、丢了不补」。 */
@@ -208,7 +229,11 @@ function migrateV1(o: Record<string, Object>): VmProfile {
   p.runtime.mttcg = jBool(o, 'mttcg', true);
   p.runtime.tbSize = jNum(o, 'tbSize', 1024);
   p.media.diskPath = jStr(o, 'diskPath');
-  p.media.cdromPath = jStr(o, 'cdromPath');
+  p.media.cdromPaths = jStrArr(o, 'cdromPaths');
+  if (p.media.cdromPaths.length === 0) {
+    const leg = jStr(o, 'cdromPath');
+    if (leg.length > 0) { p.media.cdromPaths = [leg]; }
+  }
   p.media.bootFromCdrom = jBool(o, 'bootFromCdrom', false);
   p.net.enabled = jBool(o, 'netEnabled', true);
   p.net.portForwards = jStr(o, 'portForwards');
@@ -247,7 +272,11 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
   }
   if (md) {
     p.media.diskPath = jStr(md, 'diskPath');
-    p.media.cdromPath = jStr(md, 'cdromPath');
+    p.media.cdromPaths = jStrArr(md, 'cdromPaths');
+    if (p.media.cdromPaths.length === 0) {
+      const leg = jStr(md, 'cdromPath');
+      if (leg.length > 0) { p.media.cdromPaths = [leg]; }
+    }
     p.media.bootFromCdrom = jBool(md, 'bootFromCdrom', p.media.bootFromCdrom);
   }
   if (n) {
@@ -257,6 +286,11 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
   }
   p.temporarySession = jBool(o, 'temporarySession', false);
   p.guestOS = jStr(o, 'guestOS') === 'windows11' ? 'windows11' : 'linux';
+  /* Windows 11 仅支持 x86_64/i386：归档里若出现其他架构，兜底降到 x86_64 */
+  if (p.guestOS === 'windows11' && p.machine.arch !== 'x86_64' && p.machine.arch !== 'i386') {
+    p.machine.arch = 'x86_64';
+    p.machine.machine = fitBoard('x86_64', p.machine.machine);
+  }
   const sec = jObj(o, 'security');
   if (sec) {
     p.security.tpm = jBool(sec, 'tpm', false);
@@ -343,10 +377,13 @@ export function sharedDir(filesDir: string): string {
   return (host && host.length > 0) ? host : filesDir + '/shared';
 }
 
-export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = ''): string[] {
+export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '', isoOverride?: string[]): string[] {
+  const isos = isoOverride !== undefined ? isoOverride : p.media.cdromPaths;
   if (p.guestOS === 'windows11') {
-    return buildWinArgs(p, vmDataDir);
+    return buildWinArgs(p, vmDataDir, isos);
   }
+  hilog.info(DOMAIN, TAG, 'buildArgs (linux) id=%{public}s arch=%{public}s memMB=%{public}d cpus=%{public}d isoCount=%{public}d',
+    p.id, p.machine.arch, p.runtime.memoryMB, p.runtime.cpus, isos.length);
   let args: string[] = [
     '-L', vmDataDir,
     '-m', String(p.runtime.memoryMB),
@@ -402,8 +439,19 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     args.push('-drive', `file=${p.media.diskPath},if=${bus},format=${fmt}`);
   }
   if (!isRaspi) {
-    if (p.media.cdromPath.length > 0) {
-      args.push('-cdrom', p.media.cdromPath);
+    /* 多 ISO：第一张保持 -cdrom（linux 单盘行为不变）；附加盘按板卡挂 CD 设备
+     * （pc/q35 用 ide-cd；virt 挂到已有 usb-ehci 的 usb-storage）。 */
+    if (isos.length > 0) {
+      args.push('-cdrom', isos[0]);
+      for (let i = 1; i < isos.length; i++) {
+        const id = 'cd' + i;
+        args.push('-drive', `if=none,format=raw,file=${isos[i]},id=${id},media=cdrom,readonly=on`);
+        if (board === 'virt') {
+          args.push('-device', `usb-storage,drive=${id},bus=usb.0`);
+        } else {
+          args.push('-device', `ide-cd,drive=${id}`);
+        }
+      }
     }
     args.push('-boot', p.media.bootFromCdrom ? 'd' : 'c');
   }
@@ -426,97 +474,85 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
   return args;
 }
 
-/* Windows 11 命令行：按架构自动选 Windows 最优设备组。
- *  x64   → q35 + SATA/AHCI 盘 + e1000 网卡 + std VGA（全 Windows 原生驱动，装时零驱动）
- *  arm64 → virt(smmuv3/virtualization=on) + virtio-scsi 盘 + virtio-net + ramfb（须 virtio-win 驱动）
- * 固件统一 OVMF/AAVMF pflash；TPM 由 swtpm（security.tpm）驱动。参考 HiVM startVm.ets。 */
-export function buildWinArgs(p: VmProfile, vmDataDir: string): string[] {
+/* Windows 11（仅 x86_64 / i386）命令行：q35 + SATA/AHCI 盘 + e1000 网卡 + std VGA，
+ * 全部 Windows 原生驱动（装时零驱动）。固件 OVMF pflash；TPM 由 swtpm（security.tpm）驱动。 */
+export function buildWinArgs(p: VmProfile, vmDataDir: string, isos: string[] = p.media.cdromPaths): string[] {
   const mem = String(p.runtime.memoryMB);
   const cpus = String(p.runtime.cpus);
-  const isArm = p.machine.arch === 'aarch64';
+  const tpm = !!(p.security && p.security.tpm);
+  hilog.info(DOMAIN, TAG, 'buildWinArgs id=%{public}s arch=%{public}s memMB=%{public}s cpus=%{public}s tpm=%{public}s isoCount=%{public}d bootFromCdrom=%{public}s',
+    p.id, p.machine.arch, mem, cpus, String(tpm), isos.length, String(p.media.bootFromCdrom));
   let args: string[] = [
     '-L', vmDataDir,
     '-accel', `tcg,thread=${p.runtime.mttcg ? 'multi' : 'single'},tb-size=${p.runtime.tbSize}`,
     '-display', 'none',
     '-qmp', `unix:${qmpSockPath(p, vmDataDir)},server=on,wait=off`,
   ];
-  /* 机器/CPU */
-  if (isArm) {
-    args.push(
-      '-machine', 'virt,acpi=on,gic-version=max,iommu=smmuv3,virtualization=on,memory-backend=mem0,usb=on,its=off,dump-guest-core=off,hmat=off,mem-merge=off,compact-highmem=on',
-      '-cpu', p.machine.cpuModel.length > 0 ? p.machine.cpuModel : 'max,pauth=on,pauth-impdef=on,sve=off,pmu=on',
-      '-object', `memory-backend-ram,id=mem0,size=${mem}M,merge=off,prealloc=off`,
-    );
-  } else {
-    args.push('-machine', 'q35');
-    if (p.machine.cpuModel.length > 0) { args.push('-cpu', p.machine.cpuModel); }
-  }
+  /* 机器/CPU：q35（x86 全原生驱动）。Windows 11 的 bootmgr/winload 需较新指令集
+   * （SSE4.2/POPCNT 等），QEMU 默认弱 CPU(qemu64) 缺特性会引导期三重故障复位回 shell，
+   * 所以必须显式 -cpu max 暴露全部特性（TCG 下 Win11 标准配方）。 */
+  args.push('-machine', 'q35');
+  args.push('-cpu', p.machine.cpuModel.length > 0 ? p.machine.cpuModel : 'max');
   args.push('-m', mem, '-smp', `cpus=${cpus},sockets=1,cores=${cpus},threads=1`);
   /* UEFI pflash：CODE(ro) + 每 VM 可写 VARS(rw) */
   const fw = winFirmware(p.machine.arch);
   const codePath = vmDataDir + '/' + fw.code;
   const varsPath = winVarsPath(vmDataDir, p.id, p.machine.arch);
-  if (isArm) {
-    args.push('-fw_cfg', 'name=opt/org.tianocore/UninstallMemAttrProtocol,string=y');
-  }
   args.push(
     '-drive', `if=pflash,format=raw,file=${codePath},readonly=on`,
     '-drive', `if=pflash,format=raw,file=${varsPath}`,
   );
-  /* 磁盘：x64 SATA/AHCI（原生驱动，免 virtio）；arm virtio-scsi 512 扇区（须 virtio-win） */
+  /* SATA/AHCI 控制器：系统盘(HDD, 端口0) 与启动光驱(ODD, 端口1) 都挂这里。
+   * 先创建控制器，后续 ide-hd/ide-cd 才能引用 sata.0/sata.1 总线。OVMF 对 SATA CD
+   * 的 UEFI 引导最可靠（Windows 安装 ISO 走 SATA 光驱，而非 USB 存储）。 */
+  args.push('-device', 'ich9-ahci,id=sata');
   if (p.media.diskPath.length > 0) {
     const fmt = p.media.diskPath.toLowerCase().endsWith('.qcow2') ? 'qcow2' : 'raw';
-    if (isArm) {
-      args.push(
-        '-global', 'virtio-blk-pci.scsi=off',
-        '-global', 'virtio-scsi-pci.cmd_per_lun=32',
-        '-global', 'virtio-scsi-pci.packed=off',
-        '-drive', `if=none,format=${fmt},file=${p.media.diskPath},id=hd0,cache=writeback,discard=unmap`,
-        '-object', 'iothread,id=iothread0',
-        '-device', `virtio-scsi-pci,id=scsi0,num_queues=${cpus},virtqueue_size=128,iothread=iothread0`,
-        '-device', 'scsi-hd,drive=hd0,bus=scsi0.0,logical_block_size=512,physical_block_size=4096,rotation_rate=1,bootindex=1',
-      );
-    } else {
-      args.push(
-        '-device', 'ich9-ahci,id=sata',
-        '-drive', `if=none,format=${fmt},file=${p.media.diskPath},id=hd0,cache=writeback`,
-        '-device', 'ide-hd,drive=hd0,bus=sata.0',
-      );
-    }
-  }
-  /* 光盘 ISO：usb-storage 挂到全局 USB 控制器（Windows 安装阶段认 U 盘/光驱） */
-  if (p.media.cdromPath.length > 0) {
     args.push(
-      '-drive', `if=none,format=raw,file=${p.media.cdromPath},id=virtio_cd,media=cdrom,readonly=on`,
-      '-device', 'usb-storage,drive=virtio_cd,bus=usb.0,bootindex=2',
+      '-drive', `if=none,format=${fmt},file=${p.media.diskPath},id=hd0,cache=writeback`,
+      '-device', 'ide-hd,drive=hd0,bus=sata.0',
     );
   }
-  /* 键鼠：qemu-xhci + usb-kbd/tablet */
-  args.push('-device', 'qemu-xhci,id=usb', '-device', 'usb-kbd,bus=usb.0', '-device', 'usb-tablet,bus=usb.0');
-  /* 显示：x64 std VGA（原生驱动）；arm ramfb（HiVM 配方） */
-  args.push(isArm ? '-device' : '-vga', isArm ? 'ramfb' : 'std');
-  /* 网络：x64 e1000（原生驱动）；arm virtio-net（须 virtio-win） */
+  /* USB 主机控制器（键鼠 + 附加光驱/驱动盘），须先于任何 bus=usb.0 设备创建 */
+  args.push('-device', 'qemu-xhci,id=usb');
+  /* 多 ISO：第一张(启动盘候选)挂 SATA 光驱(ide-cd, 端口1)；后续(驱动盘/数据盘)挂 USB。
+   * Windows 安装 ISO 走 SATA CD 才能被 OVMF 可靠 UEFI 引导。 */
+  for (let i = 0; i < isos.length; i++) {
+    const id = 'cd' + i;
+    const boot = (i === 0 && p.media.bootFromCdrom) ? ',bootindex=1' : '';
+    args.push(
+      '-drive', `if=none,format=raw,file=${isos[i]},id=${id},media=cdrom,readonly=on`,
+      '-device', i === 0 ? `ide-cd,drive=${id},bus=sata.1${boot}` : `usb-storage,drive=${id},bus=usb.0`,
+    );
+  }
+  /* 键鼠：挂到 USB 控制器 */
+  args.push('-device', 'usb-kbd,bus=usb.0', '-device', 'usb-tablet,bus=usb.0');
+  /* 显示：std VGA（x86 原生驱动） */
+  args.push('-vga', 'std');
+  /* 网络：e1000（x86 原生驱动） */
   if (p.net.enabled) {
     const netdev = userNetdev(p.net.portForwards);
-    args.push('-netdev', netdev, '-device', isArm ? 'virtio-net-pci,netdev=n0' : 'e1000,netdev=n0');
+    args.push('-netdev', netdev, '-device', 'e1000,netdev=n0');
   } else {
     args.push('-nic', 'none');
   }
   /* 真 TPM 2.0：外接 swtpm（qemu -tpmdev emulator 走 chardev socket 连 swtpm ctrl socket） */
   if (p.security && p.security.tpm) {
     const sock = swtpmSockPath(vmDataDir, p.id);
-    const dev = isArm ? 'tpm-tis-device' : 'tpm-tis';
     args.push(
       '-chardev', `socket,id=chrtpm,path=${sock}`,
       '-tpmdev', 'emulator,id=tpm0,chardev=chrtpm',
-      '-device', `${dev},tpmdev=tpm0`,
+      '-device', 'tpm-tis,tpmdev=tpm0',
     );
   }
-  /* Windows 不用 9p 共享（需 virtio-win 驱动），不挂 virtfs。自定义参数(escape hatch)追加到末尾。 */
+  /* Windows 暂不支持 9p 共享，不挂 virtfs。自定义参数(escape hatch)追加到末尾。 */
   const extra = p.extraArgs.trim();
   if (extra.length > 0) {
     args = args.concat(extra.split(/\s+/));
   }
+  const hasTpmArg = args.some((a) => a.includes('-tpmdev') || a.includes(',tpmdev=tpm0'));
+  hilog.info(DOMAIN, TAG, 'buildWinArgs done id=%{public}s argc=%{public}d hasTpmArg=%{public}s',
+    p.id, args.length, String(hasTpmArg));
   return args;
 }
 

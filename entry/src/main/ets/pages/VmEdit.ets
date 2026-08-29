@@ -33,7 +33,7 @@ export struct VmEdit {
   @State memoryMB: number = 1024;
   @State cpus: number = 2;
   @State diskPath: string = '';
-  @State cdromPath: string = '';
+  @State cdromPaths: string[] = [];
   @State bootFromCdrom: boolean = false;
   @State netEnabled: boolean = true;
   @State portForwards: string = '';
@@ -60,7 +60,7 @@ export struct VmEdit {
     this.memoryMB = p.runtime.memoryMB;
     this.cpus = p.runtime.cpus;
     this.diskPath = p.media.diskPath;
-    this.cdromPath = p.media.cdromPath;
+    this.cdromPaths = p.media.cdromPaths.length > 0 ? p.media.cdromPaths.slice() : [];
     this.bootFromCdrom = p.media.bootFromCdrom;
     this.netEnabled = p.net.enabled;
     this.portForwards = p.net.portForwards;
@@ -87,12 +87,25 @@ export struct VmEdit {
     }).then((ok: boolean) => {
       this.ensureIsoLoading = false;
       if (ok) {
-        this.cdromPath = this.vmDataDir + '/' + name;
+        this.addIso(this.vmDataDir + '/' + name);
         this.bootFromCdrom = true;
       } else {
         promptAction.showToast({ message: '内置 ISO 下载失败' });
       }
     });
+  }
+
+  /* 追加一张 ISO（去重）；列表顺序 = 启动顺序，第一张为启动盘候选 */
+  private addIso(pStr: string): void {
+    if (pStr.length === 0) { return; }
+    if (this.cdromPaths.indexOf(pStr) < 0) {
+      this.cdromPaths = this.cdromPaths.concat([pStr]);
+    }
+  }
+  private removeIso(idx: number): void {
+    const next = this.cdromPaths.slice();
+    next.splice(idx, 1);
+    this.cdromPaths = next;
   }
 
   private baseName(path: string): string {
@@ -109,7 +122,7 @@ export struct VmEdit {
         promptAction.showToast({ message: '未选择文件 / 路径不可读' });
         return;
       }
-      this.cdromPath = p;
+      this.addIso(p);
       this.bootFromCdrom = true;
     });
   }
@@ -142,11 +155,13 @@ export struct VmEdit {
    * 与构建时拦；自定义 qemu 参数(extraArgs)与资源型错误无法静态判定，由启动失败时的
    * qemu.log 透出（VmConsole）。 */
   private saveError(): string {
-    if (this.bootFromCdrom && this.cdromPath.trim().length === 0) {
+    if (this.bootFromCdrom && this.cdromPaths.length === 0) {
       return '从光盘启动需先指定 ISO';
     }
-    if (this.cdromPath.trim().length > 0 && !isoReadable(this.cdromPath.trim())) {
-      return 'ISO 不可读或不存在';
+    for (const p of this.cdromPaths) {
+      if (!isoReadable(p)) {
+        return 'ISO 不可读或不存在';
+      }
     }
     if (this.netEnabled && this.portForwards.trim().length > 0) {
       const errs = forwardErrors(this.portForwards);
@@ -188,7 +203,7 @@ export struct VmEdit {
       },
       media: {
         diskPath: this.diskPath,
-        cdromPath: this.cdromPath.trim(),
+        cdromPaths: this.cdromPaths,
         bootFromCdrom: this.bootFromCdrom,
       },
       net: {
@@ -338,31 +353,35 @@ export struct VmEdit {
           }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
 
           Column({ space: sp1 }) {
-            Row() {
-              Text('光盘 ISO').fontSize(tLabel).width(72)
-              Text(this.cdromPath ? this.baseName(this.cdromPath) : '无')
-                .fontSize(tSub)
-                .fontColor(cSub)
-                .layoutWeight(1)
-              if (this.cdromPath) {
-                Button('移除').focusable(false).fontSize(tBody)
-                  .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-                  .backgroundColor(Color.Transparent).fontColor(cDanger)
-                  .onClick(() => this.cdromPath = '')
-              }
+            Text('光盘 ISO').fontSize(tLabel)
+            if (this.cdromPaths.length > 0) {
+              ForEach(this.cdromPaths, (p: string, idx: number) => {
+                Row({ space: sp2 }) {
+                  Text(idx === 0 ? `${this.baseName(p)}（启动盘）` : this.baseName(p))
+                    .fontSize(tSub)
+                    .fontColor(idx === 0 ? cPrimary : cSub)
+                    .layoutWeight(1)
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Button('移除').focusable(false).fontSize(tBody)
+                    .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                    .backgroundColor(Color.Transparent).fontColor(cDanger)
+                    .onClick(() => this.removeIso(idx))
+                }
+                .width('100%')
+              }, (p: string, idx: number) => `${idx}:${p}`)
+            } else {
+              Text('无').fontSize(tSub).fontColor(cSub)
             }
-            if (!this.cdromPath) {
-              Row({ space: sp2 }) {
-                Button('选择文件').focusable(false).fontSize(tBody)
-                  .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-                  .backgroundColor(Color.Transparent).fontColor(cPrimary)
-                  .onClick(() => this.pickLocalIso())
-                Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
-                  .focusable(false).fontSize(tBody)
-                  .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-                  .enabled(!this.ensureIsoLoading)
-                  .onClick(() => this.pickBuiltinIso())
-              }
+            Row({ space: sp2 }) {
+              Button('选择文件').focusable(false).fontSize(tBody)
+                .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                .backgroundColor(Color.Transparent).fontColor(cPrimary)
+                .onClick(() => this.pickLocalIso())
+              Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
+                .focusable(false).fontSize(tBody)
+                .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                .enabled(!this.ensureIsoLoading)
+                .onClick(() => this.pickBuiltinIso())
             }
           }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
 
@@ -397,7 +416,7 @@ export struct VmEdit {
                   .enabled(this.guestOS !== 'windows11')
                   .onChange((v: boolean) => this.sharedFolder = v)
               }.padding({ left: 0, right: 0 })
-              Text(this.guestOS === 'windows11' ? 'Windows 需 virtio-win 驱动，暂不支持 9p' : '挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
+              Text(this.guestOS === 'windows11' ? 'Windows 暂不支持 9p 共享' : '挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
           }
 

@@ -46,7 +46,7 @@ export struct VmWizard {
   @State tbSizeText: string = '1024';
   @State diskGB: number = 8;
   @State diskAlloc: string = 'dynamic';
-  @State cdromPath: string = '';
+  @State cdromPaths: string[] = [];
   @State bootFromCdrom: boolean = false;
   @State netEnabled: boolean = true;
   @State portForwards: string = '';
@@ -72,7 +72,7 @@ export struct VmWizard {
     this.tbSizeText = '1024';
     this.diskGB = 8;
     this.diskAlloc = 'dynamic';
-    this.cdromPath = '';
+    this.cdromPaths = [];
     this.bootFromCdrom = false;
     this.netEnabled = true;
     this.portForwards = '';
@@ -97,7 +97,7 @@ export struct VmWizard {
     }).then((ok: boolean) => {
       this.ensureIsoLoading = false;
       if (ok) {
-        this.cdromPath = this.vmDataDir + '/' + name;
+        this.addIso(this.vmDataDir + '/' + name);
         this.bootFromCdrom = true;
       } else {
         promptAction.showToast({ message: '内置 ISO 下载失败' });
@@ -105,7 +105,7 @@ export struct VmWizard {
     });
   }
 
-  /* 「选择文件」按钮：拉起系统选择器选 .iso，解析成真实路径后挂到光驱并默认从光盘启动。
+  /* 「选择文件」按钮：拉起系统选择器选 .iso，解析成真实路径后追加到 ISO 列表并默认从光盘启动。
    * 原地引用（不拷贝）；路径不可读/取消则回退为「未选择文件」。 */
   private pickLocalIso(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
@@ -114,9 +114,20 @@ export struct VmWizard {
         promptAction.showToast({ message: '未选择文件 / 路径不可读' });
         return;
       }
-      this.cdromPath = p;
+      this.addIso(p);
       this.bootFromCdrom = true;
     });
+  }
+
+  /* 追加一张 ISO（去重；列表顺序 = 启动顺序，第一张为启动盘候选） */
+  private addIso(p: string): void {
+    if (p.length === 0) { return; }
+    if (this.cdromPaths.indexOf(p) < 0) {
+      this.cdromPaths.push(p);
+    }
+  }
+  private removeIso(idx: number): void {
+    this.cdromPaths.splice(idx, 1);
   }
 
   private boards(): string[] {
@@ -135,8 +146,11 @@ export struct VmWizard {
   private applyGuestOS(g: GuestOs): void {
     this.guestOS = g;
     if (g === 'windows11') {
-      if (this.arch !== 'x86_64' && this.arch !== 'aarch64') { this.arch = 'x86_64'; }
-      this.board = this.arch === 'aarch64' ? 'virt' : 'q35';
+      if (this.arch !== 'x86_64' && this.arch !== 'i386') { this.arch = 'x86_64'; }
+      this.board = 'q35';
+      /* Windows 固定 -cpu max（引导期需 SSE4.2/POPCNT，弱 CPU 会三重故障回 shell），
+       * 强制清空自定义机型，UI 该组直接显示固定提示（见 stepBoard）。 */
+      this.cpuModel = '';
       this.memoryMB = 8192;
       this.cpus = 4;
       this.diskGB = 64;
@@ -153,6 +167,8 @@ export struct VmWizard {
   /* 引导固件由板卡自动选择（向导不暴露）：x86 用 SeaBIOS（OVMF 固件产出后
    * q35 再自动切 UEFI）；virt 按架构固定 EDK2；树莓派 SoC 自带、无外部固件 */
   private firmwareHint(): string {
+    /* Windows 恒走 OVMF pflash（buildWinArgs 硬编码），固件项对用户关闭 */
+    if (this.guestOS === 'windows11') { return '引导固件：OVMF UEFI（固定，Windows 必需）'; }
     const b = fitBoard(this.arch, this.board);
     if (b === 'pc' || b === 'q35') { return '引导固件：SeaBIOS（自动）'; }
     if (b === 'virt') { return '引导固件：EDK2 UEFI（按架构固定）'; }
@@ -164,6 +180,16 @@ export struct VmWizard {
    * 填 seabios 仅为占位。 */
   private autoFirmware(): VmFirmware {
     return 'seabios';
+  }
+
+  /* Windows 关闭的无效/固定项：架构仅 x86_64/i386、板卡恒 q35（buildWinArgs 硬编码）。
+   * 返回 true = 该卡片禁用（灰化 + 不可点）。直接在 @Builder 内以方法调用求值，
+   * 避免在 UI 组件语法体内声明局部变量（ArkTS 不允许 @Builder 内 `const`）。 */
+  private archDisabled(a: VmArch): boolean {
+    return this.guestOS === 'windows11' && a !== 'x86_64' && a !== 'i386';
+  }
+  private boardDisabled(b: string): boolean {
+    return this.guestOS === 'windows11' && b !== 'q35';
   }
 
   /* ---- 输入约束：各步即时校验（红字提示 + 禁用下一步/完成），不再等运行时报错 ---- */
@@ -195,11 +221,13 @@ export struct VmWizard {
       }
     }
     if (step === 3) {
-      if (this.bootFromCdrom && this.cdromPath.trim().length === 0) {
+      if (this.bootFromCdrom && this.cdromPaths.length === 0) {
         return '从光盘启动需先指定 ISO';
       }
-      if (this.cdromPath.trim().length > 0 && !isoReadable(this.cdromPath.trim())) {
-        return 'ISO 不可读或不存在';
+      for (const p of this.cdromPaths) {
+        if (!isoReadable(p)) {
+          return 'ISO 不可读或不存在';
+        }
       }
     }
     if (step === 4 && this.netEnabled && this.portForwards.trim().length > 0) {
@@ -277,7 +305,7 @@ export struct VmWizard {
       },
       media: {
         diskPath: diskPath,
-        cdromPath: this.cdromPath.trim(),
+        cdromPaths: this.cdromPaths,
         bootFromCdrom: this.bootFromCdrom,
       },
       net: {
@@ -359,9 +387,10 @@ export struct VmWizard {
       .width('100%')
       Row({ space: sp2 }) {
         ForEach(ARCH_OPTIONS, (a: VmArch) => {
+          /* windows11 仅 x86_64/i386，其它架构禁用（灰化 + 不可点，archDisabled()） */
           Column() {
             Text(this.archLabel(a)).fontSize(tCard).fontWeight(FontWeight.Medium)
-              .fontColor(this.arch === a ? Color.White : cText)
+              .fontColor(this.arch === a ? Color.White : (this.archDisabled(a) ? cWeak : cText))
             if (a === 'aarch64') { Text('ARM 64 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
             if (a === 'arm') { Text('ARM 32 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
             if (a === 'x86_64') { Text('64 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
@@ -371,14 +400,16 @@ export struct VmWizard {
           }
           .layoutWeight(1)
           .padding(spCard)
-          .backgroundColor(this.arch === a ? cPrimary : Color.White)
+          .backgroundColor(this.archDisabled(a) ? cBg : (this.arch === a ? cPrimary : Color.White))
           .borderRadius(rElem)
+          .enabled(!this.archDisabled(a))
           .onClick(() => {
+            if (this.archDisabled(a)) {
+              promptAction.showToast({ message: 'Windows 11 仅支持 x86_64 / i386' });
+              return;
+            }
             this.arch = a;
             this.board = fitBoard(a, this.board);
-            if (this.guestOS === 'windows11' && a !== 'x86_64' && a !== 'aarch64') {
-              promptAction.showToast({ message: 'Windows 11 仅支持 x86_64 / aarch64' });
-            }
           })
         }, (a: VmArch) => a)
       }
@@ -394,16 +425,18 @@ export struct VmWizard {
       this.groupHeader('机器类型')
       Row({ space: sp2 }) {
         ForEach(this.boards(), (b: string) => {
+          /* windows11 固定 q35（buildWinArgs 硬编码），其它板卡禁用（灰化 + 不可点，boardDisabled()） */
           Column() {
             Text(b).fontSize(tCard).fontWeight(FontWeight.Medium)
-              .fontColor(this.board === b ? Color.White : cText)
+              .fontColor(this.board === b ? Color.White : (this.boardDisabled(b) ? cWeak : cText))
             Text(this.boardName(b)).fontSize(tSub).fontColor(this.board === b ? Color.White : cWeak)
           }
           .layoutWeight(1)
           .padding(spCard)
-          .backgroundColor(this.board === b ? cPrimary : Color.White)
+          .backgroundColor(this.boardDisabled(b) ? cBg : (this.board === b ? cPrimary : Color.White))
           .borderRadius(rElem)
-          .onClick(() => this.board = b as VmBoard)
+          .enabled(!this.boardDisabled(b))
+          .onClick(() => { if (!this.boardDisabled(b)) { this.board = b as VmBoard; } })
         }, (b: string) => b)
       }
       .width('100%')
@@ -426,7 +459,12 @@ export struct VmWizard {
       .margin({ top: sp2, bottom: sp1 })
       .onClick(() => this.cpuModelCollapsed = !this.cpuModelCollapsed)
 
-      if (!this.cpuModelCollapsed) {
+      if (this.guestOS === 'windows11') {
+        /* Windows 固定 -cpu max（buildWinArgs 恒 max 或用户值；识别弱 CPU 会引导期
+         * 三重故障回 shell），故不暴露预设/自定义输入，只显示固定提示。 */
+        Text('Windows 11 固定 -cpu max（系统要求 SSE4.2/POPCNT，不可自定义）')
+          .fontSize(tSub).fontColor(cWeak).width('100%')
+      } else if (!this.cpuModelCollapsed) {
         Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
           Text('自动')
             .fontSize(tBody)
@@ -540,28 +578,35 @@ export struct VmWizard {
       Text('动态分配：用到多少占多少；固定大小：创建时即占满该容量').fontSize(tSub).fontColor(cWeak)
 
       this.groupHeader('光盘')
-      Row() {
-        Text(this.cdromPath ? this.baseName(this.cdromPath) : '无')
-          .fontSize(tSub).fontColor(cSub).layoutWeight(1)
-        if (this.cdromPath.length > 0) {
-          Button('移除').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-            .onClick(() => this.cdromPath = '')
-        }
+      /* 多 ISO 有序列表：第一张为启动盘候选（从光盘启动时）；每张一行可独立移除 */
+      if (this.cdromPaths.length > 0) {
+        ForEach(this.cdromPaths, (p: string, idx: number) => {
+          Row({ space: sp2 }) {
+            Text(idx === 0 ? `${this.baseName(p)}（启动盘）` : this.baseName(p))
+              .fontSize(tSub).fontColor(idx === 0 ? cPrimary : cSub).layoutWeight(1)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            Button('移除').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .onClick(() => this.removeIso(idx))
+          }
+          .width('100%')
+        }, (p: string, idx: number) => `${idx}:${p}`)
+      } else {
+        Text('无').fontSize(tSub).fontColor(cSub).width('100%')
       }
-      if (this.cdromPath.length === 0) {
-        Row({ space: sp2 }) {
-          Button('选择文件').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-            .backgroundColor(Color.Transparent).fontColor(cPrimary)
-            .onClick(() => this.pickLocalIso())
-          Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.archLabel(this.arch)})`)
-            .focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
-            .enabled(!this.ensureIsoLoading)
-            .onClick(() => this.pickBuiltinIso())
-        }
+      Row({ space: sp2 }) {
+        Button('添加 ISO').focusable(false).fontSize(tBody)
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .backgroundColor(Color.Transparent).fontColor(cPrimary)
+          .onClick(() => this.pickLocalIso())
+        Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.archLabel(this.arch)})`)
+          .focusable(false).fontSize(tBody)
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .enabled(!this.ensureIsoLoading)
+          .onClick(() => this.pickBuiltinIso())
       }
+      Text('第一张为启动盘候选（Windows 请把官方 x64 ISO 放第一张）')
+        .fontSize(tSub).fontColor(cWeak).width('100%')
       Row() {
         Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
         Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
@@ -598,7 +643,7 @@ export struct VmWizard {
         }
         if (this.sharedFolder) {
           if (this.guestOS === 'windows11') {
-            Text('Windows 需 virtio-win 驱动，暂不支持 9p').fontSize(tSub).fontColor(cWeak)
+            Text('Windows 暂不支持 9p 共享').fontSize(tSub).fontColor(cWeak)
           } else {
             Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
           }
