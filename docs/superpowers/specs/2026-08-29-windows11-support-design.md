@@ -138,6 +138,14 @@ common（两态共用）：`-L vmDataDir -m -smp -accel tcg -display none -qmp .
 
 ## 风险点（实现前先验证）
 
+### 实测结论（2026-08-29 已完成验证）
+- **ARM 机器属性 + AAVMF pflash（风险 #4）**：宿主 `qemu-system-aarch64` 冒烟通过——`-machine virt,acpi=on,gic-version=max,iommu=smmuv3,virtualization=on,memory-backend=mem0,...` + `-cpu max,pauth=on,...` + pflash `edk2-aarch64-code.fd` + VARS 被 qemu 完整接受（无 `unsupported machine`/`unknown CPU`，进程跑满 25s）。真机上 windows VM 也用该命令行拉起成功。
+- **x86 OVMF pflash 配对（风险 #1）**：宿主无 `qemu-system-x86_64` 无法冒烟；真机 `edk2-x86_64-code.fd` 已正常解包。x64 OVMF 生效需真机装 Windows 时确认（已按 `edk2-i386-vars.fd` 作为 VARS 模板）。**属待真机验证项。**
+- **swtpm 交叉编译（风险 #2）**：**可行且已落地**——成功把 `swtpm`（aarch64, musl）连同 `libtpms.so.0`/`libswtpm_libtpms.so.0`/`libjson-glib-1.0.so.0`/`libcrypto.so.3`（+复制的 `libpcre2-8.so.0`/`libz.so.1`）交叉编译，打进 `rawfile/bin/swtpm/`，bootstrap 解包、native `swtpm_start` 设 `LD_LIBRARY_PATH`+`chmod`。QEMU 已内建 `-tpmdev emulator`+`tpm-tis`（只缺外部 swtpm 进程）。**真机解包成功（日志 `swtpm unpacked ok=true`）；swtpm 实际运行 + qemu tpm-tis 连接需用户启动一个 windows VM（security.tpm=true）验证——无法纯程序化自动做（需 UI 交互/4h 安装）。**
+- **QEMU 机器属性 parse**：宿主 qemu 冒烟通过，无报错。
+
+## 风险点（实现前先验证）
+
 1. **x86 OVMF 固件配对**：`edk2-x86_64-code.fd` + `edk2-i386-vars.fd` 是否被本 fork 接受。HiVM 只在 ARM 验证过。→ 用真 qemu 冒烟 `-machine q35 -drive if=pflash,...` 测 pflash 可 boot。若 i386-vars 不合，尝试 `edk2-i386-code.fd` 或自造空 VARS。
 2. **swtpm 能否在 HarmonyOS aarch64 交叉编译 + 沙箱 spawn**：这是 C 失败的最大可能处。→ 先在小棒上交叉编译 `swtpm socket --tpm2` 验证能起、能被 qemu `-tpmdev emulator` 连接。若失败，兜底：真 TPM 降级为「注册表绕过 + 无 TPM」跑 Win11（功能仍可用，仅安装多一步）。
 3. **x64 网卡驱动**：Windows 11 x64 用 `virtio-net` 需 virtio-win 驱动；`e1000` 有原生驱动但慢。→ 安装阶段默认 `e1000`（免驱动），装完可提示换 virtio。
