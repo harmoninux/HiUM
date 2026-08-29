@@ -2,7 +2,8 @@
 
 > 日期：2026-08-29
 > 类型：设计备忘（非 UI 重构 spec）
-> 触发：用户反馈光盘让手填完整路径「不太合适、太麻烦了」。原则：**要么拉起文件选择器让用户选 ISO，要么用内置 Alpine**——不要让用户敲路径。已在 AskUserQuestion 确认**原地引用外部路径**：选中的 ISO 不拷贝进应用存储，直接引用选择器解析出的真实路径（省空间、秒挂），接受「选择器授权会话性、重启后可能读不到」的代价。
+> 触发：用户反馈光盘让手填完整路径「不太合适、太麻烦了」。原则：**要么拉起文件选择器让用户选 ISO，要么用内置 Alpine**——不要让用户敲路径。
+> 落位已两次确认 **原地引用外部路径**（参考 `.temp/HiSH/feature/hish_main/src/main/ets/components/SharedFolderContent.ets` 的选择器用法后仍维持此选择）：不拷贝进应用存储，直接引用 `fileUri.getPathFromUri` 解出的真实路径。省空间、秒挂；接受「选择器授权会话性、`getPathFromUri` 对文档 URI 是否返回 qemu 可 fopen 路径未 100% 保证、重启后可能读不到」三重代价——失效时由第 3 层 qemu-<id>.log 弹窗兜底（`VmConsole.failStart`）。
 
 ## 结论一句话
 
@@ -29,8 +30,9 @@ import { picker, fileUri } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { pathExists } from './fsutil';
 
-/* 拉起文档选择器选 1 个 .iso，返回真实文件路径；取消/失败返回 ''。
- * 参考 EntryAbility:39-42 的 save() 先例：new fileUri.FileUri(uri).path 取真实路径。 */
+/* 拉起文档选择器选 1 个 .iso，解析成 qemu 可 fopen 的真实路径；取消/解析失败/文件不可读返回 ''。
+ * 选的是 grant-scoped URI（选择器授权），非可直接 fopen 的裸路径，故必须转真实路径并当场校验。
+ * getPathFromUri 失败时回退 EntryAbility:39-42 的 FileUri(uri).path 先例。 */
 export function pickIsoPath(ctx: common.UIAbilityContext): Promise<string> {
   return new Promise<string>((resolve) => {
     const dp = new picker.DocumentViewPicker(ctx);
@@ -39,6 +41,9 @@ export function pickIsoPath(ctx: common.UIAbilityContext): Promise<string> {
         if (uris.length === 0) { resolve(''); return; }
         let p = '';
         try { p = fileUri.getPathFromUri(uris[0]); } catch { p = ''; }
+        if (p.length === 0) {
+          try { p = new fileUri.FileUri(uris[0]).path; } catch { p = ''; }
+        }
         if (p.length === 0 || !pathExists(p)) { p = ''; }
         resolve(p);
       })
@@ -48,8 +53,8 @@ export function pickIsoPath(ctx: common.UIAbilityContext): Promise<string> {
 ```
 
 - `fileSuffixFilters: ['.iso']` 限定扩展名，避免用户误选非镜像文件。
-- 解析失败/取消 → `''`，调用方 toast「未选择文件」即可。
-- 不做拷贝（用户已选原地引用）。**依赖 `getPathFromUri` 返回 qemu 可 fopen 的真实路径**——若目标环境只返回虚拟/documents 路径导致 qemu 读不到，由第 2 层的启动失败兜底（`qemu-<id>.log` 弹窗，`VmConsole.failStart`）优雅收场，不崩。
+- 取消/解析失败/文件不存在 → `''`，调用方 toast「未选择文件」。
+- 不做拷贝（用户两次确认原地引用）。**依赖 `getPathFromUri` 返回 qemu 可 fopen 的真实路径**——若目标环境只返回虚拟/documents 路径导致 qemu 读不到，由第 3 层启动失败兜底（`qemu-<id>.log` 弹窗，`VmConsole.failStart`）优雅收场，不崩。
 
 ### 2. 三处 UI 改造（去手填，换成两种来源）
 
@@ -99,3 +104,4 @@ export function pickIsoPath(ctx: common.UIAbilityContext): Promise<string> {
 ## 相关文档
 
 - VM 参数校验生命周期：`2026-08-29-vm-param-validation-design.md`（第 3 层 qemu 兜底支撑本次引用型 ISO 的启动失败透出）
+- **参考实现（文件选择器）**：`.temp/HiSH/feature/hish_main/src/main/ets/components/SharedFolderContent.ets:568-590`（`new picker.DocumentViewPicker(ctx)` + `select({maxSelectNumber:1})` 取 URI）+ `.temp/HiSH/feature/hish_main/src/main/ets/lib/copyFile.ets`（`fs.open(uri)` 读 grant-scoped URI）。HiSH 走拷贝路线；本方走原地引用，仅复用其「选择器拿 URI、read 要经 fs.open 授权」这一事实作为参考。`EntryAbility.ets:39-42` 是 `FileUri(uri).path` 取真实路径的现有先例。
