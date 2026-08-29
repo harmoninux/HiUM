@@ -3,11 +3,13 @@
 // 由 VmManage（详情）顶部「存储」按钮以内容弹窗（bindContentCover）承载，onClose 关闭。
 // 快照依赖系统盘存在，但快照本身留在详情页（VmManage.secSnapshot），此处不做。
 import { promptAction } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import napiModule from 'libentry.so';
-import { VmProfile, VmStore } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmArch, builtinIsoFor } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
 import { snapshotCreate } from '../lib/vmsnapshot';
+import { ensureBuiltinIso } from '../lib/isoDl';
 import {
   cPrimary, cDanger, cRunning, cSuccess, cText, cSub, cWeak,
   cCard, cBlock, cChip, cBorder,
@@ -33,7 +35,7 @@ export struct VmStorage {
   @StorageLink('vmListVersion') vmListVersion: number = 0;
 
   @State name: string = '';
-  @State arch: string = '';
+  @State arch: VmArch = 'x86_64';
   @State diskPath: string = '';
   @State diskFmt: string = '?';
   @State diskVirtualGB: number = 0;
@@ -43,6 +45,11 @@ export struct VmStorage {
   @State snapNameText: string = '';
   @State snapCreateMode: boolean = false;
   @State cdromPath: string = '';
+  @StorageLink('vmDataDir') vmDataDir: string = '';
+  @State isoPickMode: boolean = false;    /* 「选择 ISO」面板展开 */
+  @State isoPathText: string = '';        /* 完整路径输入 */
+  @State ensureIsoLoading: boolean = false; /* 内置 Alpine 下载中 */
+  @State isoPct: number = 0;
   @State snack: string = '';
 
   aboutToAppear(): void {
@@ -223,6 +230,59 @@ export struct VmStorage {
     this.showSnack('已清除光盘引用');
   }
 
+  /* 「内置 Alpine」按钮：按当前架构确保内置 iso 就绪（缺失则按需下载），完成后挂到光驱 */
+  private pickBuiltinIso(): void {
+    const name = builtinIsoFor(this.arch);
+    if (name.length === 0) {
+      promptAction.showToast({ message: '该架构无内置 ISO' });
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    this.ensureIsoLoading = true;
+    this.isoPct = 0;
+    ensureBuiltinIso(ctx, this.vmDataDir, this.arch, (pct: number) => {
+      this.isoPct = pct;
+    }).then((ok: boolean) => {
+      this.ensureIsoLoading = false;
+      if (ok) {
+        const p = this.profile;
+        if (!p) {
+          return;
+        }
+        this.cdromPath = this.vmDataDir + '/' + name;
+        p.media.cdromPath = this.cdromPath;
+        p.media.bootFromCdrom = true;
+        new VmStore(this.filesDir).save(p);
+        this.isoPickMode = false;
+        this.isoPathText = '';
+        this.vmListVersion++;
+        this.showSnack('已挂载内置 ISO');
+      } else {
+        promptAction.showToast({ message: '内置 ISO 下载失败' });
+      }
+    });
+  }
+
+  /* 用「完整路径」挂载光盘：保存到 profile（不强制改 bootFromCdrom） */
+  private applyIsoPath(): void {
+    const p = this.profile;
+    if (!p) {
+      return;
+    }
+    const path = this.isoPathText.trim();
+    if (path.length === 0) {
+      promptAction.showToast({ message: '请输入 ISO 路径' });
+      return;
+    }
+    p.media.cdromPath = path;
+    new VmStore(this.filesDir).save(p);
+    this.cdromPath = path;
+    this.isoPickMode = false;
+    this.isoPathText = '';
+    this.vmListVersion++;
+    this.showSnack('已挂载光盘');
+  }
+
   /* 分区标题（与 VmWizard groupHeader 同款：灰字在左，细线延伸至右） */
   @Builder
   secHead(t: string) {
@@ -313,21 +373,58 @@ export struct VmStorage {
     }
   }
 
-  /* 光盘 ISO：该 VM 的启动镜像引用（只读展示，可清引用） */
+  /* 光盘 ISO：该 VM 的启动镜像引用（可清引用；无引用时提供「选择 ISO」重新添加） */
   @Builder
   secCdrom() {
     this.secHead('光盘 ISO')
     Column() {
-      Row() {
-        Text(this.cdromPath ? this.baseName(this.cdromPath) : '未引用光盘')
-          .fontSize(tSub).fontColor(this.cdromPath ? cSub : cWeak).layoutWeight(1)
-        if (this.cdromPath.length > 0) {
+      if (this.cdromPath.length > 0) {
+        Row() {
+          Text(this.baseName(this.cdromPath)).fontSize(tSub).fontColor(cSub).layoutWeight(1)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           Button('清除').focusable(false).fontSize(tBody)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
             .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.clearCdrom())
-        }
-      }.width('100%').padding({ top: sp1, bottom: sp2 })
+        }.width('100%').padding({ top: sp1, bottom: sp2 })
+      } else if (!this.isoPickMode) {
+        Row() {
+          Text('未引用光盘').fontSize(tSub).fontColor(cWeak).layoutWeight(1).padding({ top: sp1, bottom: sp2 })
+          Button('＋ 选择 ISO').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cPrimary)
+            .border({ width: 1, color: cBorder, style: BorderStyle.Dashed })
+            .onClick(() => this.isoPickMode = true)
+        }.width('100%').padding({ top: sp1, bottom: sp2 })
+      } else {
+        Column({ space: sp1 }) {
+          Row() {
+            TextInput({ placeholder: 'ISO 完整路径', text: this.isoPathText })
+              .layoutWeight(1).fontSize(tBody)
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+              .onChange((v: string) => this.isoPathText = v)
+            Button('取消').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cSub)
+              .onClick(() => {
+                this.isoPickMode = false;
+                this.isoPathText = '';
+              })
+          }.width('100%')
+          Row({ space: sp2 }) {
+            Button(this.ensureIsoLoading ? `下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
+              .focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .enabled(!this.ensureIsoLoading)
+              .backgroundColor(Color.Transparent).fontColor(cPrimary)
+              .onClick(() => this.pickBuiltinIso())
+            Button('确定路径').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cPrimary)
+              .onClick(() => this.applyIsoPath())
+          }.width('100%').padding({ top: sp1 })
+        }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp2 })
+      }
     }.alignItems(HorizontalAlign.Start).width('100%')
   }
 
