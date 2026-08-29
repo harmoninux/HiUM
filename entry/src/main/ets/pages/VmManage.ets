@@ -360,10 +360,6 @@ export struct VmManage {
     return this.profile ? this.profile.machine.firmware : '';
   }
 
-  private vgaLabel(): string {
-    return this.profile ? this.profile.machine.vga : '';
-  }
-
   /* ================= 分区 ================= */
 
   /* 分区标题（与 VmWizard groupHeader 同款：灰字在左，细线延伸至右） */
@@ -451,18 +447,11 @@ export struct VmManage {
     Column() {
       Row() {
         Column({ space: 1 }) {
-          Text('已启用').fontSize(tLabel)
+          Text(this.netEnabled ? '已启用' : '已关闭').fontSize(tLabel)
           Text(`端口转发 ${(this.profile && this.profile.net.portForwards.length > 0) ? this.profile.net.portForwards : '无'} · 9p 共享${(this.profile && this.profile.net.sharedFolder) ? '开' : '关'}`)
             .fontSize(tSubL).fontColor(cSub)
         }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.netEnabled })
-          .onChange((v: boolean) => {
-            this.netEnabled = v;
-            if (this.profile) {
-              this.profile.net.enabled = v;
-              this.saveTiny();
-            }
-          })
+        Toggle({ type: ToggleType.Switch, isOn: this.netEnabled }).enabled(false)
       }.width('100%').padding({ top: sp1, bottom: sp2 })
     }.alignItems(HorizontalAlign.Start)
   }
@@ -486,13 +475,6 @@ export struct VmManage {
       .backgroundColor(cBlock)
       .borderRadius(rElem)
       .textAlign(TextAlign.Start)
-  }
-
-  private saveTiny(): void {
-    if (this.profile) {
-      new VmStore(this.filesDir).save(this.profile);
-      this.vmListVersion++;
-    }
   }
 
   /* qemu 命令行预览：buildArgs 是纯函数，直接用当前 profile 派生（同 VmWizard 第⑥步）。
@@ -572,7 +554,8 @@ export struct VmManage {
 
         Scroll() {
           Column() {
-            /* 概览 chips 一行 */
+            this.secHead('概览')
+            /* 概览胶囊一排（内存/核/机型/固件；无 vga） */
             Row({ space: sp2 }) {
               if (this.memLabel().length > 0) {
                 Text(this.memLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
@@ -582,17 +565,17 @@ export struct VmManage {
                 Text(this.cpuLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
+              if (this.boardLabel().length > 0) {
+                Text(this.boardLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
               if (this.firmwareLabel().length > 0) {
                 Text(this.firmwareLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
-              if (this.vgaLabel().length > 0) {
-                Text(this.vgaLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
-                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-              }
             }
             .width('100%')
-            .padding({ top: sp2, bottom: sp2 })
+            .padding({ top: sp1, bottom: sp2 })
 
             this.secStorage()
             this.secNet()
