@@ -6,9 +6,9 @@ import { pathExists, isoReadable } from '../lib/fsutil';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
 import {
-  VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType,
+  VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType, GuestOs,
   newProfileId, fitBoard, buildArgs, sharedDir, SCHEMA_VERSION, builtinIsoFor,
-  forwardErrors,
+  forwardErrors, seedWinVars,
 } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { pickIsoPath } from '../lib/isoPick';
@@ -52,6 +52,7 @@ export struct VmWizard {
   @State portForwards: string = '';
   @State sharedFolder: boolean = false;
   @State name: string = '';
+  @State guestOS: GuestOs = 'linux';
   @State cpuModelCollapsed: boolean = true; /* CPU 机型组默认折叠（步骤②） */
   @State tcgCollapsed: boolean = true;      /* TCG 模拟组默认折叠（步骤③） */
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine ISO 下载中 */
@@ -78,6 +79,7 @@ export struct VmWizard {
     this.sharedFolder = false;
     this.cpuModelCollapsed = true;
     this.tcgCollapsed = true;
+    this.guestOS = 'linux';
   }
 
   /* 「内置 Alpine」按钮：按当前架构确保内置 iso 就绪（缺失则按需下载），完成后挂到光驱 */
@@ -127,6 +129,25 @@ export struct VmWizard {
   /* 架构卡片显示名：存储值(loongarch64)较长，UI 主标题用短称 loongarch */
   private archLabel(a: VmArch): string {
     return a === 'loongarch64' ? 'loongarch' : a;
+  }
+
+  /* 切 guestOS 时套模板默认：windows 用 q35/virt + 大内存/核数 + 64G 盘；linux 回默认。 */
+  private applyGuestOS(g: GuestOs): void {
+    this.guestOS = g;
+    if (g === 'windows11') {
+      if (this.arch !== 'x86_64' && this.arch !== 'aarch64') { this.arch = 'x86_64'; }
+      this.board = this.arch === 'aarch64' ? 'virt' : 'q35';
+      this.memoryMB = 8192;
+      this.cpus = 4;
+      this.diskGB = 64;
+      this.portForwards = '';
+    } else {
+      this.arch = 'x86_64';
+      this.board = 'pc';
+      this.memoryMB = 1024;
+      this.cpus = 2;
+      this.diskGB = 8;
+    }
   }
 
   /* 引导固件由板卡自动选择（向导不暴露）：x86 用 SeaBIOS（OVMF 固件产出后
@@ -239,6 +260,8 @@ export struct VmWizard {
       schemaVersion: SCHEMA_VERSION,
       id: id,
       name: this.name.trim().length > 0 ? this.name.trim() : '未命名',
+      guestOS: this.guestOS,
+      security: { tpm: this.guestOS === 'windows11' },
       machine: {
         arch: this.arch,
         vga: this.vga,
@@ -286,6 +309,11 @@ export struct VmWizard {
       }
     }
     new VmStore(this.filesDir).save(p);
+    if (this.guestOS === 'windows11') {
+      if (!seedWinVars(this.vmDataDir, id, this.arch)) {
+        promptAction.showToast({ message: 'UEFI 变量文件缺失，可能无法启动 Windows' });
+      }
+    }
     promptAction.showToast({ message: `已保存「${p.name}」` });
     if (this.onClose) { this.onClose(); }
   }
@@ -314,6 +342,22 @@ export struct VmWizard {
   stepArch() {
     Column({ space: spCard }) {
       Row({ space: sp2 }) {
+        Row({ space: sp1 }) {
+          Radio({ value: 'linux', group: 'guestOS' })
+            .checked(this.guestOS === 'linux')
+            .onChange((c: boolean) => { if (c) { this.applyGuestOS('linux'); } })
+          Text('Linux').fontSize(tBody).fontColor(cText)
+        }
+        Row({ space: sp1 }) {
+          Radio({ value: 'windows11', group: 'guestOS' })
+            .checked(this.guestOS === 'windows11')
+            .onChange((c: boolean) => { if (c) { this.applyGuestOS('windows11'); } })
+          Text('Windows 11').fontSize(tBody).fontColor(cText)
+        }
+        Blank()
+      }
+      .width('100%')
+      Row({ space: sp2 }) {
         ForEach(ARCH_OPTIONS, (a: VmArch) => {
           Column() {
             Text(this.archLabel(a)).fontSize(tCard).fontWeight(FontWeight.Medium)
@@ -332,6 +376,9 @@ export struct VmWizard {
           .onClick(() => {
             this.arch = a;
             this.board = fitBoard(a, this.board);
+            if (this.guestOS === 'windows11' && a !== 'x86_64' && a !== 'aarch64') {
+              promptAction.showToast({ message: 'Windows 11 仅支持 x86_64 / aarch64' });
+            }
           })
         }, (a: VmArch) => a)
       }
@@ -546,10 +593,15 @@ export struct VmWizard {
         Row() {
           Text('9p 共享目录').fontSize(tLabel).layoutWeight(1)
           Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
+            .enabled(this.guestOS !== 'windows11')
             .onChange((v: boolean) => this.sharedFolder = v)
         }
         if (this.sharedFolder) {
-          Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
+          if (this.guestOS === 'windows11') {
+            Text('Windows 需 virtio-win 驱动，暂不支持 9p').fontSize(tSub).fontColor(cWeak)
+          } else {
+            Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
+          }
         }
         this.stepErrorMsg()
       }
