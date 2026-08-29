@@ -68,19 +68,36 @@ bool resolveSym(void *so, const char *name, T *out)
 void vmMain(VmState *vm)
 {
     pthread_setname_np(pthread_self(), "qemu-main");
-    /* qemu 自己的错误走 stdout/stderr：重定向到 <vmDataDir>/qemu.log 以便诊断 */
+    /* qemu 自己的错误走 stdout/stderr：重定向到 <vmDataDir>/qemu-<vmId>.log 以便诊断。
+     * 文件名带 vmId（从 -qmp unix:.../qmp-<id>.sock 反解——vmId 本身不传给子进程），
+     * 多实例并跑时各子进程写各自文件、互不 O_TRUNC 覆盖/写交错，与 qmp-<id>.sock /
+     * serial-<id>.log 命名对齐；解析不到 id 时回退全局 qemu.log。 */
+    std::string dataDir;
+    std::string vmId;
     for (size_t i = 0; i + 1 < vm->argStrings.size(); i++) {
-        if (vm->argStrings[i] == "-L") {
-            std::string log = vm->argStrings[i + 1] + "/qemu.log";
-            int fd = open(log.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-            if (fd >= 0) {
-                dup2(fd, STDOUT_FILENO);
-                dup2(fd, STDERR_FILENO);
-                if (fd > STDERR_FILENO) {
-                    close(fd);
+        if (vm->argStrings[i] == "-L" && dataDir.empty()) {
+            dataDir = vm->argStrings[i + 1];
+        }
+        if (vm->argStrings[i] == "-qmp") {
+            const std::string &v = vm->argStrings[i + 1];
+            auto s = v.find("qmp-");
+            if (s != std::string::npos) {
+                auto e = v.find(".sock", s);
+                if (e != std::string::npos) {
+                    vmId = v.substr(s + 4, e - s - 4);
                 }
             }
-            break;
+        }
+    }
+    if (!dataDir.empty()) {
+        std::string log = vmId.empty() ? dataDir + "/qemu.log" : dataDir + "/qemu-" + vmId + ".log";
+        int fd = open(log.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd >= 0) {
+            dup2(fd, STDOUT_FILENO);
+            dup2(fd, STDERR_FILENO);
+            if (fd > STDERR_FILENO) {
+                close(fd);
+            }
         }
     }
     int argc = (int)vm->argPtrs.size();

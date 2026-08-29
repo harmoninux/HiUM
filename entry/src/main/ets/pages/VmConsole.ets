@@ -205,27 +205,34 @@ struct VmConsole {
     this.doStart();
   }
 
-  /* 读 qemu.log 末尾若干行：qemu 的报错（unknown CPU / 参数非法 / 内存不足等）经
-   * vm.cpp 重定向 stdout/stderr 写到此文件，是语义错误的唯一权威来源。启动失败时
-   * 透出具体原因，替代笼统的「启动失败」——因为自定义 qemu 参数(extraArgs)永远无法
-   * 静态校验，唯一的兜底就是让 qemu 自己把话说出来。 */
+  /* 读 qemu 日志末尾若干行：qemu 的报错（unknown CPU / 参数非法 / 内存不足等）经
+   * vm.cpp 重定向 stdout/stderr 写到 <vmDataDir>/qemu-<vmId>.log（多实例各写各文件，
+   * 对齐 qmp-<id>.sock/serial-<id>.log），是语义错误的唯一权威来源。启动失败时透出
+   * 具体原因，替代笼统的「启动失败」——因为自定义 qemu 参数(extraArgs)永远无法静态
+   * 校验，唯一的兜底就是让 qemu 自己把话说出来。旧版全局 qemu.log 作回退。 */
   private qemuLogTail(): string {
-    const log = this.vmDataDir + '/qemu.log';
-    try {
-      if (!pathExists(log)) { return ''; }
-      const st = fs.statSync(log);
-      if (st.size <= 0) { return ''; }
-      const fd = fs.openSync(log, fs.OpenMode.READ_ONLY);
-      const buf = new ArrayBuffer(st.size);
-      const n = fs.readSync(fd.fd, buf);
-      fs.closeSync(fd);
-      const text = util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n));
-      const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-      if (lines.length === 0) { return ''; }
-      return lines.slice(-60).join('\n');
-    } catch {
-      return '';
+    const candidates: string[] = [
+      this.vmDataDir + '/qemu-' + this.vmId + '.log',
+      this.vmDataDir + '/qemu.log',
+    ];
+    for (const log of candidates) {
+      try {
+        if (!pathExists(log)) { continue; }
+        const st = fs.statSync(log);
+        if (st.size <= 0) { continue; }
+        const fd = fs.openSync(log, fs.OpenMode.READ_ONLY);
+        const buf = new ArrayBuffer(st.size);
+        const n = fs.readSync(fd.fd, buf);
+        fs.closeSync(fd);
+        const text = util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n));
+        const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+        if (lines.length === 0) { continue; }
+        return lines.slice(-60).join('\n');
+      } catch {
+        continue;
+      }
     }
+    return '';
   }
 
   /* 启动失败统一出口：状态栏留一句简短提示，完整 qemu.log 尾部用弹窗展示——
