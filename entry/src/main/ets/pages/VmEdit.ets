@@ -3,7 +3,7 @@
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
-import { VmProfile, VmStore, VmArch, VgaType, SCHEMA_VERSION, fitBoard, builtinIsoFor } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmArch, SCHEMA_VERSION, fitBoard, builtinIsoFor } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp8, spCard } from '../lib/uiTokens';
 
@@ -14,7 +14,6 @@ interface DiskNapi {
 
 const napi = napiModule as DiskNapi;
 
-const VGA_OPTIONS: VgaType[] = ['std', 'virtio'];
 const GB = 1024 * 1024 * 1024;
 
 @Component
@@ -34,7 +33,6 @@ export struct VmEdit {
   @State diskPath: string = '';
   @State cdromPath: string = '';
   @State bootFromCdrom: boolean = false;
-  @State vga: VgaType = 'std';
   @State netEnabled: boolean = true;
   @State portForwards: string = '';
   @State sharedFolder: boolean = false;
@@ -61,7 +59,6 @@ export struct VmEdit {
     this.diskPath = p.media.diskPath;
     this.cdromPath = p.media.cdromPath;
     this.bootFromCdrom = p.media.bootFromCdrom;
-    this.vga = p.machine.vga;
     this.netEnabled = p.net.enabled;
     this.portForwards = p.net.portForwards;
     this.sharedFolder = p.net.sharedFolder;
@@ -134,7 +131,7 @@ export struct VmEdit {
       name: this.name.trim().length > 0 ? this.name.trim() : '未命名',
       machine: {
         arch: this.arch,
-        vga: this.vga,
+        vga: this.profile.machine.vga,
         machine: fitBoard(this.arch, this.profile.machine.machine),
         firmware: this.profile.machine.firmware,
         cpuModel: this.profile.machine.cpuModel,
@@ -295,22 +292,6 @@ export struct VmEdit {
             Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
               .onChange((v: boolean) => this.bootFromCdrom = v)
-          }.padding(spCard)
-        }
-
-        ListItem() {
-          Row() {
-            Text('显卡').fontSize(tLabel).width(72)
-            Select(VGA_OPTIONS.map((v: VgaType): SelectOption => {
-              return { value: v };
-            }))
-              .value(this.vga)
-              .selected(VGA_OPTIONS.indexOf(this.vga))
-              .font({ size: tBody })
-              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).layoutWeight(1)
-              .onSelect((index: number) => {
-                this.vga = VGA_OPTIONS[index];
-              })
           }.padding(spCard)
         }
 
