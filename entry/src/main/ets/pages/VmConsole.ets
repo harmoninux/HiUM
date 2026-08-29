@@ -2,6 +2,7 @@
 // 顶部工具条（电源/QMP 控制/截图/全屏）。vmId 经 LocalStorage 传入，页面按
 // vmId 自载 profile。VM 跑在 NCP 子进程，关窗只是摘窗，重开窗口即重新挂窗。
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { util } from '@kit.ArkTS';
 import { image } from '@kit.ImageKit';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
@@ -204,6 +205,46 @@ struct VmConsole {
     this.doStart();
   }
 
+  /* 读 qemu.log 末尾若干行：qemu 的报错（unknown CPU / 参数非法 / 内存不足等）经
+   * vm.cpp 重定向 stdout/stderr 写到此文件，是语义错误的唯一权威来源。启动失败时
+   * 透出具体原因，替代笼统的「启动失败」——因为自定义 qemu 参数(extraArgs)永远无法
+   * 静态校验，唯一的兜底就是让 qemu 自己把话说出来。 */
+  private qemuLogTail(): string {
+    const log = this.vmDataDir + '/qemu.log';
+    try {
+      if (!pathExists(log)) { return ''; }
+      const st = fs.statSync(log);
+      if (st.size <= 0) { return ''; }
+      const fd = fs.openSync(log, fs.OpenMode.READ_ONLY);
+      const buf = new ArrayBuffer(st.size);
+      const n = fs.readSync(fd.fd, buf);
+      fs.closeSync(fd);
+      const text = util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n));
+      const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+      if (lines.length === 0) { return ''; }
+      return lines.slice(-60).join('\n');
+    } catch {
+      return '';
+    }
+  }
+
+  /* 启动失败统一出口：状态栏留一句简短提示，完整 qemu.log 尾部用弹窗展示——
+   * 报错（unknown CPU / 参数非法 / backtrace 等）可能远长于一行，弹窗可整段看，
+   * 也避免状态栏被 maxLines(1) 截断。detail 为空（如进程级拉起失败，未写入 log）则只留状态栏。 */
+  private failStart(shortMsg: string): void {
+    this.status = shortMsg;
+    const detail = this.qemuLogTail();
+    if (detail.length === 0) {
+      return;
+    }
+    AlertDialog.show({
+      title: 'QEMU 启动失败',
+      message: detail,
+      buttons: [{ value: '确定', action: () => {
+      } }],
+    });
+  }
+
   private doStart(): void {
     if (!this.profile) {
       return;
@@ -237,7 +278,7 @@ struct VmConsole {
     const ret = napi.startVm(this.vmId, this.profile.machine.arch,
       buildArgs(this.profile, this.vmDataDir, share), this.xcController.surfaceId);
     if (ret !== 0) {
-      this.status = '启动失败: ' + ret;
+      this.failStart('启动失败');
       return;
     }
     this.status = '启动中...';
@@ -251,7 +292,7 @@ struct VmConsole {
     }, 2000);
     setTimeout(() => {
       if (this.status === '启动中...' && !napi.vmRunning(this.vmId)) {
-        this.status = '启动失败（子进程退出）';
+        this.failStart('启动失败：子进程退出');
       }
     }, 10000);
   }
