@@ -368,7 +368,7 @@ export struct VmManage {
     }
     AlertDialog.show({
       title: '删除虚拟机',
-      message: `将删除「${p.name}」的配置、封面及本应用内创建的磁盘镜像，确认？`,
+      message: `将删除「${p.name}」的配置、系统盘镜像及内核文件副本（仅本应用目录内），确认？`,
       primaryButton: { value: '取消', action: () => {} },
       secondaryButton: {
         value: '删除',

@@ -44,7 +44,6 @@ export struct VmList {
   @StorageLink('firmwareReady') firmwareReady: boolean = false;
   @StorageLink('vmListVersion') @Watch('reload') vmListVersion: number = 0;
   @State profiles: VmProfile[] = [];
-  @State thumbTick: number = 0;
   @State runningIds: Record<string, boolean> = {};
   @State diskUsage: Record<string, number> = {}; /* vmId → 磁盘实占字节数 */
   @Consume('showWizard') showWizard: boolean; /* 全窗口工坊模态开关（Index @Provide） */
@@ -100,7 +99,6 @@ export struct VmList {
     const store = this.store();
     let list = store.list();
     this.profiles = list;
-    this.thumbTick++;
     /* 磁盘虚拟大小（qemu-img info 的 virtual-size，而非文件实占；VM 量少可接受） */
     const usage: Record<string, number> = {};
     for (const p of list) {
@@ -213,7 +211,7 @@ export struct VmList {
     }
     AlertDialog.show({
       title: '删除虚拟机',
-      message: `将删除「${p.name}」的配置、封面及本应用内创建的磁盘镜像，确认？`,
+      message: `将删除「${p.name}」的配置、系统盘镜像及内核文件副本（仅本应用目录内），确认？`,
       primaryButton: {
         value: '取消',
         action: () => {},
@@ -292,7 +290,7 @@ export struct VmList {
     .justifyContent(FlexAlign.Center)
   }
 
-  /* 侧栏紧凑行：封面/架构 tag + 名称(运行/缺媒体徽标) + 规格行 + 进入/启动 */
+  /* 侧栏紧凑行：名称(运行/缺媒体徽标) + 规格行（点行进详情，长按出菜单） */
   @Builder
   sideRow(p: VmProfile) {
     Row({ space: sp2 }) {
@@ -386,7 +384,7 @@ export struct VmList {
             ListItem() {
               this.sideRow(p)
             }
-          }, (p: VmProfile) => p.id + ':' + this.thumbTick)
+          }, (p: VmProfile) => p.id)
         }
         .layoutWeight(1)
         .padding({ left: sp3, right: sp3, bottom: sp2 })

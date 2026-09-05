@@ -1,5 +1,5 @@
 // 真备份/恢复（EntryBackupAbility）：把应用的数据目录接进系统备份/恢复流程。
-// 数据 = filesDir/vms（VM 配置 *.json + 缩略图 *.jpg + 系统盘镜像 *.qcow2）。
+// 数据 = filesDir/vms（VM 配置 *.json + 系统盘镜像 *.qcow2 + 内核/initrd 副本）。
 // 备份方向：文件系统把归档数据 staged 到 context.backupDir；恢复方向：把
 // backupDir/vms 写回 filesDir/vms。只备份 vms/，不含可再生的固件/ISO
 // （vm/ 目录由 ensureAppBootstrap 从 rawfile 重新解包）。

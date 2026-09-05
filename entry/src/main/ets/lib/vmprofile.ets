@@ -447,10 +447,6 @@ export class VmStore {
     return `${this.dir}/${id}.json`;
   }
 
-  thumbPath(id: string): string {
-    return `${this.dir}/${id}.jpg`;
-  }
-
   list(): VmProfile[] {
     const out: VmProfile[] = [];
     let names: string[] = [];
@@ -493,9 +489,9 @@ export class VmStore {
     fs.closeSync(fd);
   }
 
-  /* 删配置、缩略图以及位于 vms 目录内的磁盘镜像与内核/initrd 副本 */
+  /* 删配置以及位于 vms 目录内的磁盘镜像与内核/initrd 副本 */
   remove(p: VmProfile): void {
-    for (const path of [this.profilePath(p.id), this.thumbPath(p.id), p.media.diskPath,
+    for (const path of [this.profilePath(p.id), p.media.diskPath,
       p.media.kernelPath, p.media.initrdPath]) {
       try {
         if (path.length > 0 && path.startsWith(this.dir) && fs.accessSync(path)) {

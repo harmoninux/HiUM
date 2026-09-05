@@ -3,7 +3,6 @@
 // vmId 自载 profile。VM 跑在 NCP 子进程，关窗只是摘窗，重开窗口即重新挂窗。
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
-import { image } from '@kit.ImageKit';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { promptAction, window } from '@kit.ArkUI';
@@ -20,12 +19,6 @@ import {
   cDanger, cPrimary, sp1, sp2,
 } from '../lib/uiTokens';
 
-interface ScreenShotBuf {
-  width: number;
-  height: number;
-  pixels: ArrayBuffer;
-}
-
 /* 多 ISO 启动前的可读性过滤在 doStart 内做：把不可读盘从本次启动的 ISO 列表里剔除，
  * 再经 buildArgs 的 isoOverride 传入（不动 profile 对象，避免污染后续配置/结算）。 */
 
@@ -41,7 +34,6 @@ interface QemuNapi {
   qmpConnect: (vmId: string, sockPath: string) => number;
   qmpCommand: (vmId: string, cmd: string) => string;
   setQmpEventCallback: (vmId: string, cb: ((evt: string) => void) | null) => void;
-  captureScreen: (vmId: string) => ScreenShotBuf | null;
 }
 
 const napi: QemuNapi = napiModule as QemuNapi;
@@ -159,7 +151,6 @@ struct VmConsole {
 
   aboutToDisappear(): void {
     napi.setQmpEventCallback(this.vmId, null);
-    this.saveThumb(); /* 顺手更新列表页缩略图 */
   }
 
   private enterVm(): void {
@@ -519,33 +510,6 @@ struct VmConsole {
     if (releaseBtns !== 0) {
       this.sendPtrMedia(this.lastX, this.lastY, 0);
     }
-  }
-
-  private saveThumb(): void {
-    if (!this.profile || !napi.vmRunning(this.vmId)) {
-      return;
-    }
-    const shot = napi.captureScreen(this.vmId);
-    if (!shot || shot.width <= 0) {
-      return;
-    }
-    const store = new VmStore(this.filesDir);
-    const thumb = store.thumbPath(this.vmId);
-    image.createPixelMap(shot.pixels, {
-      size: { width: shot.width, height: shot.height },
-      pixelFormat: image.PixelMapFormat.RGBA_8888,
-      editable: false,
-    }).then((pixelMap: image.PixelMap) => {
-      const fd = fs.openSync(thumb, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
-      return image.createImagePacker()
-        .packToFile(pixelMap, fd.fd, { format: 'image/jpeg', quality: 75 })
-        .then(() => {
-          fs.closeSync(fd);
-          this.vmListVersion++;
-        });
-    }).catch((err: Object) => {
-      hilog.warn(DOMAIN, TAG, 'saveThumb failed: %{public}s', JSON.stringify(err));
-    });
   }
 
   /* console 通用 helpers（preferences 按 vmId 区分键；原 fab 前缀沿用为文件名） */

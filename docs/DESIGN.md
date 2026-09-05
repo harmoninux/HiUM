@@ -156,7 +156,7 @@ B（时光机）与 F（临时会话）共用同一份快照引擎，不造两�
 
 `VmProfile` 带 schema 版本号 + 迁移器（v1/v2→v3 自动迁移，v3 只新增
 media.kernelPath/initrdPath/kernelAppend 三字段，旧存档归一化回填空串）。
-持久化到 `filesDir/vms/<id>.json`；缩略图 `vms/<id>.jpg`。
+持久化到 `filesDir/vms/<id>.json`。
 
 **介质资产来源与复制语义**（已实现）：
 
