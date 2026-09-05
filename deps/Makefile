@@ -16,8 +16,7 @@ PKGS=zstd \
     pcre2 \
     libglib \
     pixman \
-    libqemu \
-    swtpm
+    libqemu
 STAMP=$(patsubst %,%/.stamp,$(PKGS))
 
 # Default target
@@ -40,20 +39,16 @@ copy: output/.stamp
 output/.stamp: $(STAMP) Makefile
 	cp buildroot/lib/libpcre2-8.so.0 output/
 	cp buildroot/lib/libz.so.1 output/libz.so
-	# OVMF secure-boot VARS（已 enroll 微软密钥）不在 qemu pc-bios，从 git 跟踪的 baseline 源再生
-	cp deps/baseline/edk2-x86_64-secure-vars.fd output/edk2-x86_64-secure-vars.fd 2>/dev/null || true
 	mkdir -p ../entry/libs/$(OHOS_ABI)
 	rm -f ../entry/libs/$(OHOS_ABI)/*
 	cp output/*.so ../entry/libs/$(OHOS_ABI)/
 	cp output/*.so.* ../entry/libs/$(OHOS_ABI)/
-	# libswtpm.so + its prebuilt musl runtime libs (SONAME-resolved via dlopen)
-	cp baseline/swtpm-libs/* ../entry/libs/$(OHOS_ABI)/
 	mkdir -p ../entry/src/main/resources/rawfile/vm/keymaps
 	cp output/en-us ../entry/src/main/resources/rawfile/vm/keymaps/
 	mkdir -p ../entry/src/main/resources/rawfile/vm/firmware
 	for fw in bios-256k.bin bios.bin kvmvapic.bin linuxboot.bin linuxboot_dma.bin \
 		vgabios-stdvga.bin vgabios-virtio.bin vgabios-ramfb.bin \
-		efi-virtio.rom efi-e1000.rom pxe-e1000.rom edk2-x86_64-code.fd edk2-x86_64-secure-code.fd edk2-x86_64-secure-vars.fd edk2-i386-vars.fd edk2-arm-vars.fd edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd; do cp output/$$fw ../entry/src/main/resources/rawfile/vm/firmware/ 2>/dev/null || true; done
+		efi-virtio.rom edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd; do cp output/$$fw ../entry/src/main/resources/rawfile/vm/firmware/ 2>/dev/null || true; done
 	touch output/.stamp
 
 %/.stamp: %/Makefile

@@ -406,9 +406,7 @@ export struct VmStorage {
         Column({ space: sp1 }) {
           Text('未引用光盘').fontSize(tSub).fontColor(cWeak)
             .padding({ top: sp1, bottom: sp1 })
-          Text(this.profile && this.profile.guestOS === 'windows11'
-            ? 'Windows 11 安装请使用官方 x64 ISO（光盘经 USB 存储挂载）'
-            : '选择本地 ISO 或内置 Alpine')
+          Text('选择本地 ISO 或内置 Alpine')
             .fontSize(tSub).fontColor(cWeak)
         }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp1 })
       }
@@ -426,7 +424,7 @@ export struct VmStorage {
           .onClick(() => this.pickBuiltinIso())
       }.width('100%').padding({ top: sp1, bottom: sp2 })
       if (this.cdromPaths.length > 0) {
-        Text('第一张为启动盘候选（Windows 请把官方 x64 ISO 放第一张）')
+        Text('第一张为启动盘候选（从光盘启动时）')
           .fontSize(tSub).fontColor(cWeak).width('100%').padding({ bottom: sp2 })
       }
     }.alignItems(HorizontalAlign.Start).width('100%')

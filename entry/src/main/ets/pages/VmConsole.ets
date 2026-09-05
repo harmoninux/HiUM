@@ -10,7 +10,7 @@ import { promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
-import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir, builtinIsoFor, seedWinVars, swtpmSockPath, swtpmDir } from '../lib/vmprofile';
+import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir, builtinIsoFor } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { pathExists, isoReadable } from '../lib/fsutil';
 import { prepareStart } from '../lib/tempSession';
@@ -42,8 +42,6 @@ interface QemuNapi {
   qmpCommand: (vmId: string, cmd: string) => string;
   setQmpEventCallback: (vmId: string, cb: ((evt: string) => void) | null) => void;
   captureScreen: (vmId: string) => ScreenShotBuf | null;
-  startSwtpm: (vmId: string, tpmDir: string, ctrlSock: string, logPath: string) => number;
-  stopSwtpm: (vmId: string) => void;
 }
 
 const napi: QemuNapi = napiModule as QemuNapi;
@@ -281,31 +279,13 @@ struct VmConsole {
     });
   }
 
-  /* Windows 11 首次启动提示（按架构给不同说明）。用户可能会卡在「不看提示装不上」。 */
-  private showWinInstallHint(blocking: boolean): void {
-    if (!this.profile) { return; }
-    const isoMsg = '1. 挂载官方 Win11 x64 ISO（x64 全用内置驱动，无需 virtio-win）。';
-    const bypassMsg = '2. 到安装界面按 Shift+F10 → regedit → HKEY_LOCAL_MACHINE\\SYSTEM\\Setup → 新建 LabConfig → BypassTPMCheck=1 / BypassSecureBootCheck=1，返回后下一步。';
-    AlertDialog.show({
-      title: 'Windows 11 安装提示',
-      message: isoMsg + '\n' + bypassMsg,
-      buttons: [{ value: '知道了', action: () => {
-        if (blocking) {
-          this.status = '';
-        }
-      } }],
-    });
-  }
-
   private doStart(): void {
     if (!this.profile) {
       return;
     }
     const pBack = this.profile;
-    hilog.info(DOMAIN, TAG, 'doStart vmId=%{public}s arch=%{public}s guestOS=%{public}s isWin=%{public}s tpm=%{public}s isoCount=%{public}d bootFromCdrom=%{public}s tempSession=%{public}s',
-      this.vmId, pBack.machine.arch, pBack.guestOS, String(pBack.guestOS === 'windows11'),
-      String(!!(pBack.security && pBack.security.tpm)),
-      pBack.media.cdromPaths.length, String(pBack.media.bootFromCdrom),
+    hilog.info(DOMAIN, TAG, 'doStart vmId=%{public}s arch=%{public}s isoCount=%{public}d bootFromCdrom=%{public}s tempSession=%{public}s',
+      this.vmId, pBack.machine.arch, pBack.media.cdromPaths.length, String(pBack.media.bootFromCdrom),
       String(pBack.temporarySession));
     let share = '';
     if (this.profile.net.sharedFolder) {
@@ -335,29 +315,6 @@ struct VmConsole {
     /* 每次启动都是一个新的 NCP 子进程；多实例按 vmId 各起各的。
      * 不可读的辅助盘在下方按 isoReadable 过滤剔出本次启动列表（不动 this.profile），
      * 避免污染后续配置页/下次结算。 */
-    const isWin = this.profile.guestOS === 'windows11';
-    if (isWin) {
-      const seeded = seedWinVars(this.vmDataDir, this.profile.id, this.profile.machine.arch);
-      hilog.info(DOMAIN, TAG, 'doStart seedWinVars vm=%{public}s ok=%{public}s', this.vmId, String(seeded));
-      if (!seeded) {
-        this.status = 'UEFI 变量文件缺失';
-        this.showWinInstallHint(true);
-        return;
-      }
-    }
-    if (isWin && this.profile.security && this.profile.security.tpm) {
-      const tpmDir = swtpmDir(this.vmDataDir, this.profile.id);
-      const sock = swtpmSockPath(this.vmDataDir, this.profile.id);
-      const log = this.vmDataDir + '/swtpm-' + this.profile.id + '.log';
-      hilog.info(DOMAIN, TAG, 'doStart startSwtpm vm=%{public}s sock=%{public}s', this.vmId, sock);
-      const rc = napi.startSwtpm(this.vmId, tpmDir, sock, log);
-      hilog.info(DOMAIN, TAG, 'doStart startSwtpm vm=%{public}s rc=%{public}d', this.vmId, rc);
-      if (rc !== 0) {
-        this.status = 'TPM 启动失败';
-        this.profile.security.tpm = false; /* 降级：buildWinArgs 不再挂 tpm-tis */
-        promptAction.showToast({ message: 'TPM 启动失败，已改为注册表绕过安装' });
-      }
-    }
     /* 多 ISO：把不可读盘从本次启动列表剔除（不动 profile），其余原样传给 buildArgs。 */
     const allIsos = this.profile.media.cdromPaths;
     const launchIsos = allIsos.filter((p: string): boolean => isoReadable(p));
@@ -373,9 +330,6 @@ struct VmConsole {
     hilog.info(DOMAIN, TAG, 'doStart startVm vm=%{public}s arch=%{public}s ret=%{public}d',
       this.vmId, this.profile.machine.arch, ret);
     if (ret !== 0) {
-      if (isWin && this.profile.security && this.profile.security.tpm) {
-        napi.stopSwtpm(this.vmId);
-      }
       this.failStart('启动失败');
       return;
     }
@@ -436,9 +390,6 @@ struct VmConsole {
       return;
     }
     this.closed = true;
-    if (this.profile && this.profile.guestOS === 'windows11') {
-      napi.stopSwtpm(this.vmId);
-    }
     try {
       const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
       ctx.terminateSelf();

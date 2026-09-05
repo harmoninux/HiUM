@@ -5,7 +5,6 @@
 #include "imgtool.h"
 #include "ncp_client.h"
 #include "qmp.h"
-#include "swtpm.h"
 
 #include <hilog/log.h>
 
@@ -38,34 +37,6 @@ napi_value intResult(napi_env env, int v)
 }
 
 } // namespace
-
-/* startSwtpm(vmId: string, tpmDir: string, ctrlSock: string, logPath: string): number
- * 拉起 libswtpm_child.so 子进程（dlopen libswtpm.so + swtpm_entry），轮询 ctrlSock 就绪 */
-static napi_value StartSwtpm(napi_env env, napi_callback_info info)
-{
-    size_t argc = 4;
-    napi_value args[4] = {nullptr};
-    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-    std::string vmId = stringArg(env, args[0]);
-    std::string dir = stringArg(env, args[1]);
-    std::string ctrl = stringArg(env, args[2]);
-    std::string log = stringArg(env, args[3]);
-    int rc = swtpm_start(vmId, dir, ctrl, log, 5000);
-    OH_LOG_INFO(LOG_APP, "startSwtpm vm=%{public}s rc=%{public}d sock=%{public}s tpmdir=%{public}s", vmId.c_str(), rc, ctrl.c_str(), dir.c_str());
-    return intResult(env, rc);
-}
-
-/* stopSwtpm(vmId: string) */
-static napi_value StopSwtpm(napi_env env, napi_callback_info info)
-{
-    size_t argc = 1;
-    napi_value args[1] = {nullptr};
-    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-    std::string vmId = stringArg(env, args[0]);
-    swtpm_stop(vmId);
-    OH_LOG_INFO(LOG_APP, "stopSwtpm vm=%{public}s done", vmId.c_str());
-    return nullptr;
-}
 
 /* startVm(vmId: string, arch: string, args: string[], surfaceId: bigint): number
  * 拉起 NCP 子进程跑 VM（异步；结果经 vmRunning(vmId)/日志体现） */
@@ -506,8 +477,6 @@ static napi_value Init(napi_env env, napi_value exports)
 {
     napi_property_descriptor desc[] = {
         { "startVm", nullptr, StartVm, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "startSwtpm", nullptr, StartSwtpm, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "stopSwtpm", nullptr, StopSwtpm, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "vmRunning", nullptr, VmRunning, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "vmSnapshot", nullptr, VmSnapshot, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "createSurface", nullptr, CreateSurface, nullptr, nullptr, nullptr, napi_default, nullptr },

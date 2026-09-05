@@ -13,9 +13,6 @@ namespace qemu_ipc {
 constexpr int32_t kProtoVersion = 1;
 constexpr const char *kDescriptor = "qemuohos.qemu.Runtime";
 constexpr const char *kChildLib = "libqemu_child.so";
-/* swtpm 独立 NCP 子进程：descriptor 与 qemu 的区分，避免 IPC stub 混淆 */
-constexpr const char *kSwtpmDescriptor = "qemuohos.swtpm.Runtime";
-constexpr const char *kSwtpmChildLib = "libswtpm_child.so";
 
 /* request codes */
 constexpr uint32_t kStart = 1;         /* [ver][arch][argc][argv...][window parcel] → int32 */
