@@ -14,9 +14,9 @@ import {
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { pickIsoPath, pickFilePath } from '../lib/isoPick';
 import {
-  cPrimary, cSub, cWeak, cText, cBorder, cDanger, cBg, cBlock,
+  cPrimary, cSub, cWeak, cText, cBorder, cDanger, cBg, cBlock, cChip,
   tPage, tCard, tBody, tSub, tLabel, tMono,
-  sp1, sp2, sp3, sp4, sp8, spCard, bw, rElem, rBtn, btnH, btnSh, btnPadX,
+  sp1, sp2, sp3, sp4, sp8, spCard, bw, rElem, rBtn, rBadge, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
@@ -663,50 +663,45 @@ export struct VmWizard {
   @Builder
   stepMedia() {
     Column({ space: spCard }) {
-      /* 系统盘必配（无开关）：新建空白盘 或 导入现有镜像（创建时复制进 vms/） */
+      /* 系统盘必配（无开关）：新建空白盘 或 导入现有镜像（创建时复制进 vms/）。
+       * 来源/分配方式用分段胶囊（与概览 chips 同款），不用 Radio——圆点+对勾太嘈杂 */
       this.groupHeader('系统盘')
-      Row({ space: sp3 }) {
-        Row({ space: sp1 }) {
-          Radio({ value: 'new', group: 'diskSource' })
-            .checked(this.diskSource === 'new')
-            .onChange((isChecked: boolean) => {
-              if (isChecked) { this.diskSource = 'new'; }
-            })
-          Text('新建空白盘').fontSize(tBody).fontColor(cText)
-        }
-        Row({ space: sp1 }) {
-          Radio({ value: 'import', group: 'diskSource' })
-            .checked(this.diskSource === 'import')
-            .onChange((isChecked: boolean) => {
-              if (isChecked) { this.diskSource = 'import'; }
-            })
-          Text('导入现有镜像').fontSize(tBody).fontColor(cText)
-        }
+      Row({ space: sp2 }) {
+        Text('新建空白盘').fontSize(tBody)
+          .fontColor(this.diskSource === 'new' ? Color.White : cSub)
+          .backgroundColor(this.diskSource === 'new' ? cPrimary : cChip)
+          .borderRadius(rBadge)
+          .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+          .onClick(() => { this.diskSource = 'new' })
+        Text('导入现有镜像').fontSize(tBody)
+          .fontColor(this.diskSource === 'import' ? Color.White : cSub)
+          .backgroundColor(this.diskSource === 'import' ? cPrimary : cChip)
+          .borderRadius(rBadge)
+          .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+          .onClick(() => { this.diskSource = 'import' })
       }
       if (this.diskSource === 'new') {
         Text(`磁盘大小: ${Math.round(this.diskGB)}GB`).fontSize(tLabel)
         Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
           min: 0, max: DISK_SIZES.length - 1, step: 1 })
           .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
-        Row({ space: sp3 }) {
-          Row({ space: sp1 }) {
-            Radio({ value: 'dynamic', group: 'diskAlloc' })
-              .checked(this.diskAlloc === 'dynamic')
-              .onChange((isChecked: boolean) => {
-                if (isChecked) { this.diskAlloc = 'dynamic'; }
-              })
-            Text('动态分配').fontSize(tBody).fontColor(cText)
-          }
-          Row({ space: sp1 }) {
-            Radio({ value: 'fixed', group: 'diskAlloc' })
-              .checked(this.diskAlloc === 'fixed')
-              .onChange((isChecked: boolean) => {
-                if (isChecked) { this.diskAlloc = 'fixed'; }
-              })
-            Text('固定大小').fontSize(tBody).fontColor(cText)
-          }
+        Row({ space: sp2 }) {
+          Text('动态分配').fontSize(tBody)
+            .fontColor(this.diskAlloc === 'dynamic' ? Color.White : cSub)
+            .backgroundColor(this.diskAlloc === 'dynamic' ? cPrimary : cChip)
+            .borderRadius(rBadge)
+            .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+            .onClick(() => { this.diskAlloc = 'dynamic' })
+          Text('固定大小').fontSize(tBody)
+            .fontColor(this.diskAlloc === 'fixed' ? Color.White : cSub)
+            .backgroundColor(this.diskAlloc === 'fixed' ? cPrimary : cChip)
+            .borderRadius(rBadge)
+            .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+            .onClick(() => { this.diskAlloc = 'fixed' })
+          Text('动态：用到多少占多少；固定：创建即占满')
+            .fontSize(tSub).fontColor(cWeak).layoutWeight(1)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
-        Text('动态分配：用到多少占多少；固定大小：创建时即占满该容量').fontSize(tSub).fontColor(cWeak)
       } else {
         Row({ space: sp2 }) {
           Button('选择镜像').focusable(false).fontSize(tBody)
