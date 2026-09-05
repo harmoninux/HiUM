@@ -5,7 +5,7 @@ import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import napiModule from 'libentry.so';
-import { VmProfile, VmStore, buildArgs, sharedDir } from '../lib/vmprofile';
+import { VmProfile, VmStore, buildArgs, sharedDir, qmpSockPath } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
 import {
   VmSnapshotEntry, snapshotApply, snapshotDelete, parseSnapshots,
@@ -21,6 +21,8 @@ import {
 
 interface DiskNapi {
   diskInfo: (path: string) => string;
+  qmpConnect: (vmId: string, sockPath: string) => number;
+  qmpCommand: (vmId: string, cmd: string) => string;
 }
 
 const napi = napiModule as DiskNapi;
@@ -318,6 +320,43 @@ export struct VmManage {
     }
   }
 
+  /* 运行中 VM 关机入口：QMP system_powerdown（ACPI，客机自行保存退出）/ quit
+   *（立即断电）。与 VmList 长按菜单同一套语义；连接是 per-vm 单例，发完不
+   * disconnect，可能被打开中的 console 窗口复用。 */
+  private confirmPowerOff(force: boolean): void {
+    const p = this.profile;
+    if (!p) {
+      return;
+    }
+    const label = force ? '强制关机' : '关机';
+    const message = force
+      ? `将立即结束「${p.name}」的虚拟机进程，未保存的数据可能丢失。确认？`
+      : `向「${p.name}」发送 ACPI 关机信号（客机保存后自行退出）。确认？`;
+    AlertDialog.show({
+      title: label,
+      message: message,
+      primaryButton: { value: '取消', action: () => {} },
+      secondaryButton: {
+        value: label,
+        fontColor: force ? cDanger : cPrimary,
+        action: () => this.powerOff(p, force),
+      },
+    });
+  }
+
+  private powerOff(p: VmProfile, force: boolean): void {
+    try {
+      napi.qmpConnect(p.id, qmpSockPath(p, this.vmDataDir));
+      const cmd = force ? '{"execute":"quit"}' : '{"execute":"system_powerdown"}';
+      /* 连接线程异步就绪，等一小下再发，避免 socket 未连上白发（同 VmList） */
+      setTimeout(() => {
+        napi.qmpCommand(p.id, cmd);
+      }, 150);
+    } catch {
+      promptAction.showToast({ message: '操作失败' });
+    }
+  }
+
   private confirmDeleteVm(): void {
     const p = this.profile;
     if (!p) {
@@ -520,7 +559,7 @@ export struct VmManage {
             }.alignItems(VerticalAlign.Center)
             Text(this.arch).fontSize(tSubL).fontColor(cSub)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          /* 操作图标钮：启动(play_fill) / 进入(rectangle) / 编辑(slider_vertical_3) / 删除(trash) */
+          /* 操作图标钮：启动(play_fill) / 进入(rectangle) / 关机(power, 仅运行中) / 编辑(slider_vertical_3) / 删除(trash) */
           Button() {
             SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.rectangle') : $r('sys.symbol.play_fill'))
               .fontSize(20)
@@ -530,6 +569,21 @@ export struct VmManage {
           .width(btnH).height(btnH)
           .backgroundColor(Color.Transparent)
           .onClick(() => this.openConsole())
+          if (this.isRunningNow()) {
+            /* 关机入口（仅运行中显示）：power 图标，点按弹出 关机/强制关机 两选项 */
+            Button() {
+              SymbolGlyph($r('sys.symbol.power'))
+                .fontSize(20)
+                .fontColor([cText])
+            }
+            .focusable(false)
+            .width(btnH).height(btnH)
+            .backgroundColor(Color.Transparent)
+            .bindMenu([
+              { value: '关机', action: () => this.confirmPowerOff(false) },
+              { value: '强制关机', action: () => this.confirmPowerOff(true) },
+            ])
+          }
           Button() {
             SymbolGlyph($r('sys.symbol.slider_vertical_3'))
               .fontSize(20)
