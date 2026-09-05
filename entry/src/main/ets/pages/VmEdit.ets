@@ -41,6 +41,7 @@ export struct VmEdit {
   @State mttcg: boolean = true;
   @State tbSizeText: string = '1024';
   @State extraArgs: string = '';
+  @State kernelAppend: string = ''; /* 内核参数（-append）；仅当 VM 已配 kernel 时展示可编辑 */
   @State showAdvanced: boolean = false;
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine ISO 下载中 */
   @State isoPct: number = 0;
@@ -67,6 +68,7 @@ export struct VmEdit {
     this.mttcg = p.runtime.mttcg;
     this.tbSizeText = String(p.runtime.tbSize);
     this.extraArgs = p.extraArgs;
+    this.kernelAppend = p.media.kernelAppend;
     this.readDiskMeta();
   }
 
@@ -109,6 +111,25 @@ export struct VmEdit {
   private baseName(path: string): string {
     const i = path.lastIndexOf('/');
     return i >= 0 ? path.substring(i + 1) : path;
+  }
+
+  /* 是否已配直接内核引导（build 里判空走这里，避免 this.profile 链式取值触发 nullable 报错） */
+  private hasKernel(): boolean {
+    const p = this.profile;
+    return p !== null && p.media.kernelPath.length > 0;
+  }
+
+  /* 「内核 xxx + yyy」摘要行（仅 hasKernel 时调用） */
+  private kernelLabel(): string {
+    const p = this.profile;
+    if (!p) {
+      return '';
+    }
+    let s = '内核 ' + this.baseName(p.media.kernelPath);
+    if (p.media.initrdPath.length > 0) {
+      s += ' + ' + this.baseName(p.media.initrdPath);
+    }
+    return s;
   }
 
   /* 「选择文件」按钮：拉起系统选择器选 .iso，解析成真实路径后挂到光驱并默认从光盘启动。
@@ -201,10 +222,10 @@ export struct VmEdit {
         diskPath: this.diskPath,
         cdromPaths: this.cdromPaths,
         bootFromCdrom: this.bootFromCdrom,
-        /* kernel 三件套本页无编辑入口，原样透传，避免保存即丢 */
+        /* kernel/initrd 本页无更换入口，原样透传；kernelAppend 由上方输入框编辑 */
         kernelPath: this.profile.media.kernelPath,
         initrdPath: this.profile.media.initrdPath,
-        kernelAppend: this.profile.media.kernelAppend,
+        kernelAppend: this.kernelAppend.trim(),
       },
       net: {
         enabled: this.netEnabled,
@@ -373,10 +394,25 @@ export struct VmEdit {
           }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: spCard, bottom: spCard })
 
           Row() {
-            Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
+            Text(this.hasKernel() ? '从光盘启动（内核引导时无效）' : '从光盘启动')
+              .fontSize(tLabel).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
+              .enabled(!this.hasKernel())
               .onChange((v: boolean) => this.bootFromCdrom = v)
           }.padding({ top: sp1, bottom: sp1 })
+
+          /* 内核引导：已配 kernel 时展示文件名 + 可编辑的内核参数（-append）。
+           * kernel/initrd 文件本身创建后不可更换（重建 VM 走向导） */
+          if (this.hasKernel()) {
+            Column({ space: 4 }) {
+              Text('内核引导').fontSize(tLabel)
+              Text(this.kernelLabel()).fontSize(tSub).fontColor(cWeak)
+              TextInput({ text: this.kernelAppend, placeholder: '内核参数，如 console=tty0 console=ttyS0 root=/dev/vda' })
+                .fontSize(tBody)
+                .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+                .onChange((v: string) => this.kernelAppend = v)
+            }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: spCard, bottom: spCard })
+          }
 
           /* —— 网络 —— */
           this.groupHead('网络')

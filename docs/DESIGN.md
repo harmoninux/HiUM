@@ -171,7 +171,8 @@ media.kernelPath/initrdPath/kernelAppend 三字段，旧存档归一化回填空
 - ISO 光盘例外：沿用「原地引用外部路径」（用户已确认），不复制；
   路径失效由启动失败的 qemu log 弹窗兜底。
 - 删除 VM 时 `VmStore.remove` 连同 vms/ 内的系统盘镜像、kernel/initrd
-  副本一并清理；编辑页保存透传 kernel 三字段（无编辑入口也不丢配置）。
+  副本一并清理；编辑页可改内核参数（-append），kernel/initrd 文件
+  与内核参数以外的字段透传不丢（文件更换需重建 VM）。
 - **踩坑**：`fs.writeSync(fd, buf, { offset: 0 })` 的 offset 是**绝对文件
   位置**——传 0 会让每个 4MB 分块都覆盖写回首字节，>4MB 的文件复制完只剩
   首块（表象：qemu 报 "linux kernel too old to load a ram disk"，即读到的
