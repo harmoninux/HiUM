@@ -3,7 +3,7 @@
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
-import { VmProfile, VmStore, VmArch, SCHEMA_VERSION, fitBoard, builtinIsoFor, forwardErrors, GuestOs, seedWinVars } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmArch, SCHEMA_VERSION, fitBoard, builtinIsoFor, forwardErrors } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { isoReadable } from '../lib/fsutil';
 import { pickIsoPath } from '../lib/isoPick';
@@ -40,7 +40,6 @@ export struct VmEdit {
   @State sharedFolder: boolean = false;
   @State mttcg: boolean = true;
   @State tbSizeText: string = '1024';
-  @State guestOS: GuestOs = 'linux';
   @State extraArgs: string = '';
   @State showAdvanced: boolean = false;
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine ISO 下载中 */
@@ -68,7 +67,6 @@ export struct VmEdit {
     this.mttcg = p.runtime.mttcg;
     this.tbSizeText = String(p.runtime.tbSize);
     this.extraArgs = p.extraArgs;
-    this.guestOS = p.guestOS;
     this.readDiskMeta();
   }
 
@@ -186,8 +184,6 @@ export struct VmEdit {
       schemaVersion: SCHEMA_VERSION,
       id: this.profile.id,
       name: this.name.trim().length > 0 ? this.name.trim() : '未命名',
-      guestOS: this.guestOS,
-      security: { tpm: this.guestOS === 'windows11' },
       machine: {
         arch: this.arch,
         vga: this.profile.machine.vga,
@@ -205,6 +201,10 @@ export struct VmEdit {
         diskPath: this.diskPath,
         cdromPaths: this.cdromPaths,
         bootFromCdrom: this.bootFromCdrom,
+        /* kernel 三件套本页无编辑入口，原样透传，避免保存即丢 */
+        kernelPath: this.profile.media.kernelPath,
+        initrdPath: this.profile.media.initrdPath,
+        kernelAppend: this.profile.media.kernelAppend,
       },
       net: {
         enabled: this.netEnabled,
@@ -214,11 +214,6 @@ export struct VmEdit {
       temporarySession: this.profile.temporarySession,
       extraArgs: this.extraArgs.trim(),
     };
-    if (this.guestOS === 'windows11') {
-      if (!seedWinVars(this.vmDataDir, p.id, this.arch)) {
-        promptAction.showToast({ message: 'UEFI 变量文件缺失，可能无法启动 Windows' });
-      }
-    }
     new VmStore(this.filesDir).save(p);
     this.vmListVersion++;
     promptAction.showToast({ message: '已保存' });
@@ -295,14 +290,6 @@ export struct VmEdit {
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).layoutWeight(1)
               .padding({ left: inpPadX, right: inpPadX })
               .textAlign(TextAlign.Start)
-          }.padding({ top: sp1, bottom: sp1 })
-
-          Row() {
-            Text('系统').fontSize(tLabel).width(72)
-            Text(this.guestOS === 'windows11' ? 'Windows 11' : 'Linux')
-              .fontSize(tBody).fontColor(cSub)
-              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).layoutWeight(1)
-              .padding({ left: inpPadX, right: inpPadX })
           }.padding({ top: sp1, bottom: sp1 })
 
           Row({ space: 4 }) {
@@ -383,7 +370,7 @@ export struct VmEdit {
                 .enabled(!this.ensureIsoLoading)
                 .onClick(() => this.pickBuiltinIso())
             }
-          }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
+          }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: spCard, bottom: spCard })
 
           Row() {
             Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
@@ -413,10 +400,9 @@ export struct VmEdit {
               Row() {
                 Text('共享目录').fontSize(tLabel).layoutWeight(1)
                 Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
-                  .enabled(this.guestOS !== 'windows11')
                   .onChange((v: boolean) => this.sharedFolder = v)
               }.padding({ left: 0, right: 0 })
-              Text(this.guestOS === 'windows11' ? 'Windows 暂不支持 9p 共享' : '挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
+              Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
           }
 

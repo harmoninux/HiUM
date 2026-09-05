@@ -2,16 +2,17 @@
 // 新建 / 编辑统一主路径：新建直接进手工向导，无需模板磁贴；VmEdit 保留为高级入口。
 // 第⑥步实时 buildArgs 只读预览。
 import { promptAction } from '@kit.ArkUI';
-import { pathExists, isoReadable } from '../lib/fsutil';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import { pathExists, isoReadable, copyFileWithProgress, fileSizeOf, readAsciiAt } from '../lib/fsutil';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
 import {
-  VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType, GuestOs,
+  VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType,
   newProfileId, fitBoard, buildArgs, sharedDir, SCHEMA_VERSION, builtinIsoFor,
-  forwardErrors, seedWinVars,
+  forwardErrors,
 } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
-import { pickIsoPath } from '../lib/isoPick';
+import { pickIsoPath, pickFilePath } from '../lib/isoPick';
 import {
   cPrimary, cSub, cWeak, cText, cBorder, cDanger, cBg, cBlock,
   tPage, tCard, tBody, tSub, tLabel, tMono,
@@ -21,12 +22,18 @@ import {
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
+  diskInfo: (path: string) => string;
 }
 const napi = napiModule as DiskNapi;
+
+const DOMAIN = 0x0002;
+const TAG = 'QemuUI';
 
 const STEPS: string[] = ['架构', '板卡/固件', 'CPU/内存', '介质', '网络', '命名'];
 const ARCH_OPTIONS: VmArch[] = ['x86_64', 'i386', 'aarch64', 'arm', 'loongarch64', 'riscv64'];
 const DISK_SIZES: number[] = [1, 2, 4, 8, 16, 32, 64, 128, 256];
+/* 可导入的系统盘镜像后缀（.img/.raw 按 raw 处理，见 buildArgs 扩展名判定） */
+const DISK_SUFFIXES: string[] = ['.qcow2', '.img', '.raw'];
 
 @Component
 export struct VmWizard {
@@ -46,13 +53,23 @@ export struct VmWizard {
   @State tbSizeText: string = '1024';
   @State diskGB: number = 8;
   @State diskAlloc: string = 'dynamic';
+  /* 系统盘来源：new=新建空白盘（大小+分配方式）；import=导入现有镜像，创建时复制进 vms/ */
+  @State diskSource: string = 'new';
+  @State importDiskSrc: string = '';    /* 已选镜像的真实路径（创建时复制，profile 不存它） */
+  @State importDiskMeta: string = '';   /* diskInfo 探测结果摘要（格式 · 虚拟大小） */
+  /* 直接内核引导（可选高级组）：选了就在创建时复制进 vms/ 并生成 -kernel/-initrd/-append */
+  @State kernelSrc: string = '';
+  @State initrdSrc: string = '';
+  @State kernelAppend: string = '';
+  @State kernelCollapsed: boolean = true;
+  @State copying: boolean = false;      /* finish 的镜像/内核复制进行中（禁用完成按钮） */
+  @State copyPct: number = 0;
   @State cdromPaths: string[] = [];
   @State bootFromCdrom: boolean = false;
   @State netEnabled: boolean = true;
   @State portForwards: string = '';
   @State sharedFolder: boolean = false;
   @State name: string = '';
-  @State guestOS: GuestOs = 'linux';
   @State cpuModelCollapsed: boolean = true; /* CPU 机型组默认折叠（步骤②） */
   @State tcgCollapsed: boolean = true;      /* TCG 模拟组默认折叠（步骤③） */
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine ISO 下载中 */
@@ -72,6 +89,15 @@ export struct VmWizard {
     this.tbSizeText = '1024';
     this.diskGB = 8;
     this.diskAlloc = 'dynamic';
+    this.diskSource = 'new';
+    this.importDiskSrc = '';
+    this.importDiskMeta = '';
+    this.kernelSrc = '';
+    this.initrdSrc = '';
+    this.kernelAppend = '';
+    this.kernelCollapsed = true;
+    this.copying = false;
+    this.copyPct = 0;
     this.cdromPaths = [];
     this.bootFromCdrom = false;
     this.netEnabled = true;
@@ -79,7 +105,6 @@ export struct VmWizard {
     this.sharedFolder = false;
     this.cpuModelCollapsed = true;
     this.tcgCollapsed = true;
-    this.guestOS = 'linux';
   }
 
   /* 「内置 Alpine」按钮：按当前架构确保内置 iso 就绪（缺失则按需下载），完成后挂到光驱 */
@@ -130,6 +155,56 @@ export struct VmWizard {
     this.cdromPaths.splice(idx, 1);
   }
 
+  /* 「导入镜像」的选择：只暂存真实路径（importDiskSrc），复制动作在 finish
+   * （按新 id 复制到 vms/ 标准位置后 profile 才引用它）。顺带用 diskInfo 探测
+   * 格式/虚拟大小做展示与格式校验（qemu-img 不认的判无效）。 */
+  private pickImportDisk(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    pickFilePath(ctx, DISK_SUFFIXES).then((p: string) => {
+      if (p.length === 0) {
+        promptAction.showToast({ message: '未选择文件 / 路径不可读' });
+        return;
+      }
+      this.importDiskSrc = p;
+      this.importDiskMeta = '';
+      const s = napi.diskInfo(p);
+      if (s.length > 0) {
+        try {
+          /* ArkTS 禁 any/unknown：Record 字典式解析 + typeof 窄化（同 VmEdit.readDiskMeta） */
+          const j = JSON.parse(s) as Record<string, number | string>;
+          const fmt = typeof j['format'] === 'string' ? j['format'] as string : '?';
+          const vs = typeof j['virtual-size'] === 'number' ? j['virtual-size'] as number : 0;
+          this.importDiskMeta = `${fmt} · 虚拟 ${(vs / (1024 * 1024 * 1024)).toFixed(1)}G`;
+        } catch {
+          this.importDiskMeta = '';
+        }
+      }
+    });
+  }
+
+  /* 内核/initrd 选择：内核无固定扩展名（vmlinuz/bzImage/Image…），不过滤后缀 */
+  private pickKernel(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    pickFilePath(ctx, []).then((p: string) => {
+      if (p.length > 0) { this.kernelSrc = p; }
+    });
+  }
+
+  private pickInitrd(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    pickFilePath(ctx, []).then((p: string) => {
+      if (p.length > 0) { this.initrdSrc = p; }
+    });
+  }
+
+  /* 导入镜像的目标扩展名（小写）：.qcow2 保持（qcow2 格式判定靠它），其余原样保留
+   *（picker 已限 .qcow2/.img/.raw，非 qcow2 后缀 buildArgs 一律按 raw） */
+  private importDiskExt(): string {
+    const s = this.importDiskSrc.toLowerCase();
+    const i = s.lastIndexOf('.');
+    return i >= 0 ? s.substring(i) : '.img';
+  }
+
   private boards(): string[] {
     if (this.arch === 'aarch64') { return ['virt', 'raspi2', 'raspi3']; }
     if (this.arch === 'arm') { return ['virt', 'raspi2', 'raspi3']; }
@@ -142,33 +217,9 @@ export struct VmWizard {
     return a === 'loongarch64' ? 'loongarch' : a;
   }
 
-  /* 切 guestOS 时套模板默认：windows 用 q35/virt + 大内存/核数 + 64G 盘；linux 回默认。 */
-  private applyGuestOS(g: GuestOs): void {
-    this.guestOS = g;
-    if (g === 'windows11') {
-      if (this.arch !== 'x86_64' && this.arch !== 'i386') { this.arch = 'x86_64'; }
-      this.board = 'q35';
-      /* Windows 固定 -cpu max（引导期需 SSE4.2/POPCNT，弱 CPU 会三重故障回 shell），
-       * 强制清空自定义机型，UI 该组直接显示固定提示（见 stepBoard）。 */
-      this.cpuModel = '';
-      this.memoryMB = 8192;
-      this.cpus = 4;
-      this.diskGB = 64;
-      this.portForwards = '';
-    } else {
-      this.arch = 'x86_64';
-      this.board = 'pc';
-      this.memoryMB = 1024;
-      this.cpus = 2;
-      this.diskGB = 8;
-    }
-  }
-
   /* 引导固件由板卡自动选择（向导不暴露）：x86 用 SeaBIOS（OVMF 固件产出后
    * q35 再自动切 UEFI）；virt 按架构固定 EDK2；树莓派 SoC 自带、无外部固件 */
   private firmwareHint(): string {
-    /* Windows 恒走 OVMF pflash（buildWinArgs 硬编码），固件项对用户关闭 */
-    if (this.guestOS === 'windows11') { return '引导固件：OVMF UEFI + Secure Boot（固定，Windows 必需）'; }
     const b = fitBoard(this.arch, this.board);
     if (b === 'pc' || b === 'q35') { return '引导固件：SeaBIOS（自动）'; }
     if (b === 'virt') { return '引导固件：EDK2 UEFI（按架构固定）'; }
@@ -180,16 +231,6 @@ export struct VmWizard {
    * 填 seabios 仅为占位。 */
   private autoFirmware(): VmFirmware {
     return 'seabios';
-  }
-
-  /* Windows 关闭的无效/固定项：架构仅 x86_64/i386、板卡恒 q35（buildWinArgs 硬编码）。
-   * 返回 true = 该卡片禁用（灰化 + 不可点）。直接在 @Builder 内以方法调用求值，
-   * 避免在 UI 组件语法体内声明局部变量（ArkTS 不允许 @Builder 内 `const`）。 */
-  private archDisabled(a: VmArch): boolean {
-    return this.guestOS === 'windows11' && a !== 'x86_64' && a !== 'i386';
-  }
-  private boardDisabled(b: string): boolean {
-    return this.guestOS === 'windows11' && b !== 'q35';
   }
 
   /* ---- 输入约束：各步即时校验（红字提示 + 禁用下一步/完成），不再等运行时报错 ---- */
@@ -221,6 +262,20 @@ export struct VmWizard {
       }
     }
     if (step === 3) {
+      if (this.diskSource === 'import') {
+        if (this.importDiskSrc.length === 0 || !isoReadable(this.importDiskSrc)) {
+          return '导入模式需先选择可读的镜像文件';
+        }
+        if (this.importDiskMeta.length === 0) {
+          return '镜像无法识别（需 qcow2/raw 格式）';
+        }
+      }
+      if (this.kernelSrc.length > 0 && !isoReadable(this.kernelSrc)) {
+        return '内核文件不可读或不存在';
+      }
+      if (this.initrdSrc.length > 0 && !isoReadable(this.initrdSrc)) {
+        return 'initrd 文件不可读或不存在';
+      }
       if (this.bootFromCdrom && this.cdromPaths.length === 0) {
         return '从光盘启动需先指定 ISO';
       }
@@ -279,17 +334,18 @@ export struct VmWizard {
     return 'pc (兼容最好)';
   }
 
-  /* 从当前步装配一份 VmProfile（不落盘、不建盘；用于预览/完成） */
+  /* 从当前步装配一份 VmProfile（不落盘、不建盘；用于预览/完成）。
+   * 导入/内核文件的路径在这里就定为 vms/ 内的复制目标路径——finish 按它复制，
+   * profile 引用的始终是复制后的自有资产。 */
   private assemble(id: string): VmProfile {
-    /* 系统盘必配：保存时建在标准位置 */
-    const diskPath = `${this.filesDir}/vms/${id}.qcow2`;
+    const diskPath = this.diskSource === 'import'
+      ? `${this.filesDir}/vms/${id}${this.importDiskExt()}`
+      : `${this.filesDir}/vms/${id}.qcow2`;
     const tbSize = Number(this.tbSizeText);
     const p: VmProfile = {
       schemaVersion: SCHEMA_VERSION,
       id: id,
       name: this.name.trim().length > 0 ? this.name.trim() : '未命名',
-      guestOS: this.guestOS,
-      security: { tpm: this.guestOS === 'windows11' },
       machine: {
         arch: this.arch,
         vga: this.vga,
@@ -307,6 +363,9 @@ export struct VmWizard {
         diskPath: diskPath,
         cdromPaths: this.cdromPaths,
         bootFromCdrom: this.bootFromCdrom,
+        kernelPath: this.kernelSrc.length > 0 ? `${this.filesDir}/vms/${id}.kernel` : '',
+        initrdPath: this.initrdSrc.length > 0 ? `${this.filesDir}/vms/${id}.initrd` : '',
+        kernelAppend: this.kernelAppend.trim(),
       },
       net: {
         enabled: this.netEnabled,
@@ -325,25 +384,107 @@ export struct VmWizard {
       promptAction.showToast({ message: '存在无效设置，请按红字提示修正' });
       return;
     }
+    if (this.copying) {
+      return;
+    }
     const id = newProfileId();
     const p = this.assemble(id);
-    if (p.media.diskPath.length > 0) {
-      if (!pathExists(p.media.diskPath)) {
-        const ret = napi.createDisk(p.media.diskPath, Math.round(this.diskGB * 1024), this.diskAlloc);
-        if (ret !== 0) {
-          promptAction.showToast({ message: '创建磁盘失败' });
+    /* 介质落盘：import=复制所选镜像为系统盘（大文件异步分块+进度）；
+     * kernel/initrd=复制进 vms/；new=新建空白 qcow2。全部就绪后才 save。 */
+    this.copying = true;
+    this.copyPct = 0;
+    this.prepareMedia(p)
+      .then((ok: boolean) => {
+        this.copying = false;
+        if (!ok) {
+          return; /* 各步骤已 toast 具体原因 */
+        }
+        new VmStore(this.filesDir).save(p);
+        promptAction.showToast({ message: `已保存「${p.name}」` });
+        if (this.onClose) { this.onClose(); }
+      });
+  }
+
+  /* finish 的介质准备：按来源把系统盘/内核/initrd 备齐，全部成功才 resolve(true) */
+  private prepareMedia(p: VmProfile): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const doKernel = (): void => {
+        if (this.kernelSrc.length === 0) {
+          resolve(true);
           return;
         }
-      }
-    }
-    new VmStore(this.filesDir).save(p);
-    if (this.guestOS === 'windows11') {
-      if (!seedWinVars(this.vmDataDir, id, this.arch)) {
-        promptAction.showToast({ message: 'UEFI 变量文件缺失，可能无法启动 Windows' });
-      }
-    }
-    promptAction.showToast({ message: `已保存「${p.name}」` });
-    if (this.onClose) { this.onClose(); }
+        copyFileWithProgress(this.kernelSrc, p.media.kernelPath, (pct: number) => {
+          this.copyPct = pct;
+        }).then((ok: boolean) => {
+          if (!ok) {
+            promptAction.showToast({ message: '复制内核失败' });
+            resolve(false);
+            return;
+          }
+          /* 诊断：复制后核对大小 + 内核头 magic，防止「复制成功但内容不对」留给
+           * qemu loader 才报。magic 按架构核对 ASCII 签名：x86 bzImage=HdrS@0x202、
+           * arm64 Image=ARM\x64@0x38（0x64 恰是 ASCII 'd'）；arm32 zImage/loongarch/
+           * riscv 无可查的 ASCII magic，只核大小。 */
+          const srcSize = fileSizeOf(this.kernelSrc);
+          const dstSize = fileSizeOf(p.media.kernelPath);
+          let magic = '';
+          let magicOk = true;
+          if (this.arch === 'x86_64' || this.arch === 'i386') {
+            magic = readAsciiAt(p.media.kernelPath, 0x202, 4);
+            magicOk = magic === 'HdrS';
+          } else if (this.arch === 'aarch64') {
+            magic = readAsciiAt(p.media.kernelPath, 0x38, 4);
+            magicOk = magic === 'ARMd';
+          }
+          hilog.info(DOMAIN, TAG, 'kernel copy src=%{public}s (%{public}d) → dst %{public}d bytes, magic=%{public}s',
+            this.kernelSrc, srcSize, dstSize, magic);
+          if (srcSize !== dstSize || !magicOk) {
+            promptAction.showToast({ message: `内核文件校验失败（大小 ${dstSize}/${srcSize}，magic=${magic}）` });
+            resolve(false);
+            return;
+          }
+          if (this.initrdSrc.length === 0) {
+            resolve(true);
+            return;
+          }
+          copyFileWithProgress(this.initrdSrc, p.media.initrdPath, (pct: number) => {
+            this.copyPct = pct;
+          }).then((ok2: boolean) => {
+            if (!ok2) { promptAction.showToast({ message: '复制 initrd 失败' }); }
+            hilog.info(DOMAIN, TAG, 'initrd copy src=%{public}s (%{public}d) → dst %{public}d bytes',
+              this.initrdSrc, fileSizeOf(this.initrdSrc), fileSizeOf(p.media.initrdPath));
+            resolve(ok2);
+          });
+        });
+      };
+      const doDisk = (): void => {
+        if (this.diskSource === 'import') {
+          copyFileWithProgress(this.importDiskSrc, p.media.diskPath, (pct: number) => {
+            this.copyPct = pct;
+          }).then((ok: boolean) => {
+            if (!ok) {
+              promptAction.showToast({ message: '复制系统盘镜像失败' });
+              resolve(false);
+              return;
+            }
+            hilog.info(DOMAIN, TAG, 'disk copy src=%{public}s (%{public}d) → dst %{public}d bytes',
+              this.importDiskSrc, fileSizeOf(this.importDiskSrc), fileSizeOf(p.media.diskPath));
+            doKernel();
+          });
+          return;
+        }
+        if (!pathExists(p.media.diskPath)) {
+          const ret = napi.createDisk(p.media.diskPath, Math.round(this.diskGB * 1024), this.diskAlloc);
+          if (ret !== 0) {
+            promptAction.showToast({ message: '创建磁盘失败' });
+            resolve(false);
+            return;
+          }
+        }
+        doKernel();
+      };
+      doDisk();
+    });
   }
 
   @Builder
@@ -370,27 +511,10 @@ export struct VmWizard {
   stepArch() {
     Column({ space: spCard }) {
       Row({ space: sp2 }) {
-        Row({ space: sp1 }) {
-          Radio({ value: 'linux', group: 'guestOS' })
-            .checked(this.guestOS === 'linux')
-            .onChange((c: boolean) => { if (c) { this.applyGuestOS('linux'); } })
-          Text('Linux').fontSize(tBody).fontColor(cText)
-        }
-        Row({ space: sp1 }) {
-          Radio({ value: 'windows11', group: 'guestOS' })
-            .checked(this.guestOS === 'windows11')
-            .onChange((c: boolean) => { if (c) { this.applyGuestOS('windows11'); } })
-          Text('Windows 11').fontSize(tBody).fontColor(cText)
-        }
-        Blank()
-      }
-      .width('100%')
-      Row({ space: sp2 }) {
         ForEach(ARCH_OPTIONS, (a: VmArch) => {
-          /* windows11 仅 x86_64/i386，其它架构禁用（灰化 + 不可点，archDisabled()） */
           Column() {
             Text(this.archLabel(a)).fontSize(tCard).fontWeight(FontWeight.Medium)
-              .fontColor(this.arch === a ? Color.White : (this.archDisabled(a) ? cWeak : cText))
+              .fontColor(this.arch === a ? Color.White : cText)
             if (a === 'aarch64') { Text('ARM 64 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
             if (a === 'arm') { Text('ARM 32 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
             if (a === 'x86_64') { Text('64 位').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
@@ -400,14 +524,9 @@ export struct VmWizard {
           }
           .layoutWeight(1)
           .padding(spCard)
-          .backgroundColor(this.archDisabled(a) ? cBg : (this.arch === a ? cPrimary : Color.White))
+          .backgroundColor(this.arch === a ? cPrimary : Color.White)
           .borderRadius(rElem)
-          .enabled(!this.archDisabled(a))
           .onClick(() => {
-            if (this.archDisabled(a)) {
-              promptAction.showToast({ message: 'Windows 11 仅支持 x86_64 / i386' });
-              return;
-            }
             this.arch = a;
             this.board = fitBoard(a, this.board);
           })
@@ -425,18 +544,16 @@ export struct VmWizard {
       this.groupHeader('机器类型')
       Row({ space: sp2 }) {
         ForEach(this.boards(), (b: string) => {
-          /* windows11 固定 q35（buildWinArgs 硬编码），其它板卡禁用（灰化 + 不可点，boardDisabled()） */
           Column() {
             Text(b).fontSize(tCard).fontWeight(FontWeight.Medium)
-              .fontColor(this.board === b ? Color.White : (this.boardDisabled(b) ? cWeak : cText))
+              .fontColor(this.board === b ? Color.White : cText)
             Text(this.boardName(b)).fontSize(tSub).fontColor(this.board === b ? Color.White : cWeak)
           }
           .layoutWeight(1)
           .padding(spCard)
-          .backgroundColor(this.boardDisabled(b) ? cBg : (this.board === b ? cPrimary : Color.White))
+          .backgroundColor(this.board === b ? cPrimary : Color.White)
           .borderRadius(rElem)
-          .enabled(!this.boardDisabled(b))
-          .onClick(() => { if (!this.boardDisabled(b)) { this.board = b as VmBoard; } })
+          .onClick(() => { this.board = b as VmBoard; })
         }, (b: string) => b)
       }
       .width('100%')
@@ -459,12 +576,7 @@ export struct VmWizard {
       .margin({ top: sp2, bottom: sp1 })
       .onClick(() => this.cpuModelCollapsed = !this.cpuModelCollapsed)
 
-      if (this.guestOS === 'windows11') {
-        /* Windows 固定 -cpu max（buildWinArgs 恒 max 或用户值；识别弱 CPU 会引导期
-         * 三重故障回 shell），故不暴露预设/自定义输入，只显示固定提示。 */
-        Text('Windows 11 固定 -cpu max（系统要求 SSE4.2/POPCNT，不可自定义）')
-          .fontSize(tSub).fontColor(cWeak).width('100%')
-      } else if (!this.cpuModelCollapsed) {
+      if (!this.cpuModelCollapsed) {
         Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
           Text('自动')
             .fontSize(tBody)
@@ -551,31 +663,116 @@ export struct VmWizard {
   @Builder
   stepMedia() {
     Column({ space: spCard }) {
-      /* 系统盘必配（无开关）：每台 VM 都带系统盘，保存时建在标准位置 */
+      /* 系统盘必配（无开关）：新建空白盘 或 导入现有镜像（创建时复制进 vms/） */
       this.groupHeader('系统盘')
-      Text(`磁盘大小: ${Math.round(this.diskGB)}GB`).fontSize(tLabel)
-      Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
-        min: 0, max: DISK_SIZES.length - 1, step: 1 })
-        .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
       Row({ space: sp3 }) {
         Row({ space: sp1 }) {
-          Radio({ value: 'dynamic', group: 'diskAlloc' })
-            .checked(this.diskAlloc === 'dynamic')
+          Radio({ value: 'new', group: 'diskSource' })
+            .checked(this.diskSource === 'new')
             .onChange((isChecked: boolean) => {
-              if (isChecked) { this.diskAlloc = 'dynamic'; }
+              if (isChecked) { this.diskSource = 'new'; }
             })
-          Text('动态分配').fontSize(tBody).fontColor(cText)
+          Text('新建空白盘').fontSize(tBody).fontColor(cText)
         }
         Row({ space: sp1 }) {
-          Radio({ value: 'fixed', group: 'diskAlloc' })
-            .checked(this.diskAlloc === 'fixed')
+          Radio({ value: 'import', group: 'diskSource' })
+            .checked(this.diskSource === 'import')
             .onChange((isChecked: boolean) => {
-              if (isChecked) { this.diskAlloc = 'fixed'; }
+              if (isChecked) { this.diskSource = 'import'; }
             })
-          Text('固定大小').fontSize(tBody).fontColor(cText)
+          Text('导入现有镜像').fontSize(tBody).fontColor(cText)
         }
       }
-      Text('动态分配：用到多少占多少；固定大小：创建时即占满该容量').fontSize(tSub).fontColor(cWeak)
+      if (this.diskSource === 'new') {
+        Text(`磁盘大小: ${Math.round(this.diskGB)}GB`).fontSize(tLabel)
+        Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
+          min: 0, max: DISK_SIZES.length - 1, step: 1 })
+          .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
+        Row({ space: sp3 }) {
+          Row({ space: sp1 }) {
+            Radio({ value: 'dynamic', group: 'diskAlloc' })
+              .checked(this.diskAlloc === 'dynamic')
+              .onChange((isChecked: boolean) => {
+                if (isChecked) { this.diskAlloc = 'dynamic'; }
+              })
+            Text('动态分配').fontSize(tBody).fontColor(cText)
+          }
+          Row({ space: sp1 }) {
+            Radio({ value: 'fixed', group: 'diskAlloc' })
+              .checked(this.diskAlloc === 'fixed')
+              .onChange((isChecked: boolean) => {
+                if (isChecked) { this.diskAlloc = 'fixed'; }
+              })
+            Text('固定大小').fontSize(tBody).fontColor(cText)
+          }
+        }
+        Text('动态分配：用到多少占多少；固定大小：创建时即占满该容量').fontSize(tSub).fontColor(cWeak)
+      } else {
+        Row({ space: sp2 }) {
+          Button('选择镜像').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cPrimary)
+            .onClick(() => this.pickImportDisk())
+          Text(this.importDiskSrc.length > 0
+            ? this.baseName(this.importDiskSrc) + (this.importDiskMeta.length > 0 ? `（${this.importDiskMeta}）` : '')
+            : '未选择（支持 .qcow2/.img/.raw）')
+            .fontSize(tSub).fontColor(this.importDiskSrc.length > 0 ? cSub : cWeak)
+            .layoutWeight(1).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        Text('创建时复制进虚拟机目录作为系统盘；之后与源文件无关').fontSize(tSub).fontColor(cWeak)
+      }
+
+      /* 直接内核引导：默认折叠的高级组；选了 kernel 即绕过固件引导（-kernel） */
+      Row({ space: sp8 }) {
+        Text() {
+          Span('内核引导').fontColor(cSub)
+          Span(this.kernelCollapsed ? ' ▸ 展开' : ' ▾ 收起').fontColor(cWeak).fontSize(tSub)
+        }
+        .fontSize(tLabel)
+        Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
+      }
+      .width('100%')
+      .margin({ top: sp2, bottom: sp1 })
+      .onClick(() => this.kernelCollapsed = !this.kernelCollapsed)
+
+      if (!this.kernelCollapsed) {
+        Row({ space: sp2 }) {
+          Button('选择内核').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cPrimary)
+            .onClick(() => this.pickKernel())
+          Text(this.kernelSrc.length > 0 ? this.baseName(this.kernelSrc) : '未选择（vmlinuz/bzImage/Image…）')
+            .fontSize(tSub).fontColor(this.kernelSrc.length > 0 ? cSub : cWeak)
+            .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.kernelSrc.length > 0) {
+            Button('清除').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cDanger)
+              .onClick(() => { this.kernelSrc = ''; })
+          }
+        }
+        Row({ space: sp2 }) {
+          Button('选择 initrd').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cPrimary)
+            .onClick(() => this.pickInitrd())
+          Text(this.initrdSrc.length > 0 ? this.baseName(this.initrdSrc) : '可选（initramfs/initrd.img…）')
+            .fontSize(tSub).fontColor(this.initrdSrc.length > 0 ? cSub : cWeak)
+            .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.initrdSrc.length > 0) {
+            Button('清除').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cDanger)
+              .onClick(() => { this.initrdSrc = ''; })
+          }
+        }
+        TextInput({ text: this.kernelAppend, placeholder: '内核参数（可选），如 console=tty0 console=ttyS0 root=/dev/vda' })
+          .fontSize(tBody)
+          .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+          .onChange((v: string) => this.kernelAppend = v)
+        Text('指定内核后由 qemu 直接装载引导（-kernel），绕过 BIOS/UEFI 流程；内核与 initrd 在创建时复制进虚拟机目录')
+          .fontSize(tSub).fontColor(cWeak).width('100%')
+      }
 
       this.groupHeader('光盘')
       /* 多 ISO 有序列表：第一张为启动盘候选（从光盘启动时）；每张一行可独立移除 */
@@ -605,7 +802,7 @@ export struct VmWizard {
           .enabled(!this.ensureIsoLoading)
           .onClick(() => this.pickBuiltinIso())
       }
-      Text('第一张为启动盘候选（Windows 请把官方 x64 ISO 放第一张）')
+      Text('第一张为启动盘候选（从光盘启动时）')
         .fontSize(tSub).fontColor(cWeak).width('100%')
       Row() {
         Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
@@ -638,15 +835,10 @@ export struct VmWizard {
         Row() {
           Text('9p 共享目录').fontSize(tLabel).layoutWeight(1)
           Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
-            .enabled(this.guestOS !== 'windows11')
             .onChange((v: boolean) => this.sharedFolder = v)
         }
         if (this.sharedFolder) {
-          if (this.guestOS === 'windows11') {
-            Text('Windows 暂不支持 9p 共享').fontSize(tSub).fontColor(cWeak)
-          } else {
-            Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
-          }
+          Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
         }
         this.stepErrorMsg()
       }
@@ -725,18 +917,19 @@ export struct VmWizard {
           .layoutWeight(1)
           .align(Alignment.Top)
 
-          /* 内容下方：下一步 / 完成（固定不随滚动） */
+          /* 内容下方：下一步 / 完成（固定不随滚动）；完成可能触发镜像/内核复制，显示进度 */
           Row() {
             Blank()
-            Button(this.step === STEPS.length - 1 ? '完成' : '下一步')
+            Button(this.copying ? `复制介质 ${this.copyPct}%`
+              : (this.step === STEPS.length - 1 ? '完成' : '下一步'))
               .focusable(false).fontSize(tBody)
               .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
               .backgroundColor(Color.Transparent)
               .fontColor(cPrimary)
               /* 下一步只卡当前步；完成卡全部步（防跳步改坏其他步后直接提交） */
-              .enabled(this.step === STEPS.length - 1
+              .enabled(!this.copying && (this.step === STEPS.length - 1
                 ? this.fullError().length === 0
-                : this.stepError().length === 0)
+                : this.stepError().length === 0))
               .onClick(() => {
                 if (this.step < STEPS.length - 1) {
                   this.step++;

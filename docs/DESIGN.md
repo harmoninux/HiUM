@@ -144,17 +144,42 @@ B（时光机）与 F（临时会话）共用同一份快照引擎，不造两�
 按 VM 属性（`SessionPolicy = persist | ephemeral`）选择关闭动作。网络
 （hostfwd/9p）两种模式下都可用。
 
-## 6. 数据模型（schema v2）
+## 6. 数据模型（schema v3）
 
 配置分层，UI 只面对领域对象，`buildArgs` 是纯函数归档：
 
 - **机器定义**：arch / machine（pc/q35/virt/raspi…）/ firmware（SeaBIOS/OVMF）/
   cpu 模型 / 设备图。
 - **运行时**：memory / cpus / accel（可被性能预设覆盖）。
-- **介质**：disk / cdrom / boot 顺序。
+- **介质**：disk / cdrom / boot 顺序 / 直接内核引导（-kernel/-initrd/-append，
+  kernelPath 非空即绕过固件引导流程）。
 
-`VmProfile` v2 带 schema 版本号 + 迁移器（v1→v2 自动迁移）。持久化到
-`filesDir/vms/<id>.json`；缩略图 `vms/<id>.jpg`。
+`VmProfile` 带 schema 版本号 + 迁移器（v1/v2→v3 自动迁移，v3 只新增
+media.kernelPath/initrdPath/kernelAppend 三字段，旧存档归一化回填空串）。
+持久化到 `filesDir/vms/<id>.json`；缩略图 `vms/<id>.jpg`。
+
+**介质资产来源与复制语义**（已实现）：
+
+- 系统盘：向导二选一——新建空白 qcow2（大小+动态/固定，保存即
+  `qemu-img create` 到 `vms/<id>.qcow2`）；或「导入现有镜像」
+  （picker 选 .qcow2/.img/.raw，**创建完成时复制**进 `vms/<id>.<ext>`，
+  大文件 4MB 分块异步复制 + 进度，profile 只引用复制后的自有资产，
+  与源文件脱钩）。
+- 直接内核引导（向导「内核引导」折叠组）：picker 选内核（不限后缀，
+  vmlinuz/bzImage/Image…）与可选 initrd，加可选内核参数（-append）；
+  同样在创建时复制为 `vms/<id>.kernel` / `vms/<id>.initrd`。
+- ISO 光盘例外：沿用「原地引用外部路径」（用户已确认），不复制；
+  路径失效由启动失败的 qemu log 弹窗兜底。
+- 删除 VM 时 `VmStore.remove` 连同 vms/ 内的系统盘镜像、kernel/initrd
+  副本一并清理；编辑页保存透传 kernel 三字段（无编辑入口也不丢配置）。
+- **踩坑**：`fs.writeSync(fd, buf, { offset: 0 })` 的 offset 是**绝对文件
+  位置**——传 0 会让每个 4MB 分块都覆盖写回首字节，>4MB 的文件复制完只剩
+  首块（表象：qemu 报 "linux kernel too old to load a ram disk"，即读到的
+  内核头是尾块内容、无 HdrS magic）。复制一律不传 offset（缺省从
+  filePointer 顺序追加）。≤4MB 的旧用途（VARS 模板）单块不会暴露此坑。
+  向导在复制后做「大小 + 内核头 magic（按架构：x86=HdrS@0x202，
+  arm64=ARM\x64@0x38；其余架构只核大小）」校验兜底（创建期直接报错，
+  不留坏资产）。
 
 MediaStore 集中管理：基础镜像（base）+ 差分快照（backing_file）+ ISO 导入
 （文件选择器）+ 存储配额。
