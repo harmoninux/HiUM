@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <execinfo.h>
 #include <fstream>
@@ -27,6 +28,7 @@ qemu_console_lookup_default_fn qe_console_lookup_default;
 graphic_hw_update_fn qe_graphic_hw_update;
 qemu_input_event_send_key_qcode_fn qe_input_send_key;
 qemu_input_queue_abs_fn qe_input_queue_abs;
+qemu_input_queue_rel_fn qe_input_queue_rel;
 qemu_input_queue_btn_fn qe_input_queue_btn;
 qemu_input_event_sync_fn qe_input_event_sync;
 qemu_input_is_absolute_fn qe_input_is_absolute;
@@ -50,6 +52,12 @@ struct VmState {
     std::vector<char *> argPtrs;
 };
 VmState g_vm;
+
+/* qemu stderr 的镜像文件路径（qemu-<vmId>.log）。正常退出路径在 vmMain 尾部
+ * 读回抬 hilog；崩溃时 qe_system_entry 不返回、那段不执行，crashSigHandler
+ * 里补一次读回（见下），否则 abort 前的最后文本只能躺在沙箱文件里，hdc
+ * shell 无权读。 */
+std::string g_qemuLogPath;
 
 /* qemu 把 run-once 状态放在自身 .so 的静态区（vm_config_groups、DCL 链表
  * ……），同一份映射无法二次进入（qemu_add_opts 重复注册会 abort）；
@@ -110,6 +118,7 @@ void vmMain(VmState *vm)
     /* logPath 供日志转发线程 + 退出时镜像读取 */
     std::string logPath = dataDir.empty() ? std::string() :
         (vmId.empty() ? dataDir + "/qemu.log" : dataDir + "/qemu-" + vmId + ".log");
+    g_qemuLogPath = logPath; /* 崩溃 handler 用（qe_system_entry 不返回时兜底读回） */
     installCrashHandlers();
     std::atomic<bool> stopRelay{false};
     std::thread relay;
@@ -177,16 +186,70 @@ void bindDisplay(VmState *vm)
     OH_LOG_ERROR(LOG_APP, "timed out waiting for qemu console");
 }
 
-/* SIGSEGV/SIGABRT/SIGBUS/FPE/ILL：把 backtrace 刷到 log fd（= qemu-*.log），由
- * relayQemuLogThread 实时抬到 hilog，随后退出。backtrace_symbols_fd 打印到已被
- * dup2 的 STDERR_FILENO，远端无需访问 app 沙箱即可看到崩溃栈。 */
-void crashSigHandler(int sig)
+/* 崩溃 handler 的磁盘输出走 STDERR（已被 dup2 到 qemu-<id>.log，relay 线程
+ * 60ms 轮询会把落盘行抬到 hilog）。注意：信号 handler 里禁止 OH_LOG/hilog ——
+ * hilog 是 IPC/带锁路径，在 SIGABRT 上下文调用会丢行甚至死锁，之前
+ * OH_LOG_ERROR("crash-log...") 未出现即此故。backtrace_symbols_fd 是
+ * async-signal-safe 的；这里的所有写文件/输出只用 syscall：write/read/open。 */
+static void dumpQemuLogTail(int fd)
 {
+    /* 读回 log 尾部 ≤16KB，写 STDERR。qemu 崩溃前的 stderr 文本随 dup2 落盘，
+     * 正常退出路径在 vmMain 尾部才读回——崩溃时 qe_system_entry 不返回，不执行。 */
+    if (g_qemuLogPath.empty()) {
+        return;
+    }
+    int lfd = open(g_qemuLogPath.c_str(), O_RDONLY);
+    if (lfd < 0) {
+        return;
+    }
+    off_t end = lseek(lfd, 0, SEEK_END);
+    off_t start = end > (off_t)0x4000 ? end - (off_t)0x4000 : 0;
+    lseek(lfd, start, SEEK_SET);
+    char buf[2048];
+    ssize_t n;
+    while ((n = read(lfd, buf, sizeof(buf))) > 0) {
+        ssize_t w = write(fd, buf, n);
+        (void)w;
+    }
+    close(lfd);
+}
+
+/* SIGSEGV/SIGABRT/SIGBUS/FPE/ILL：
+ * 1) 镜像 qemu-<id>.log 尾部到 STDERR（relay 抬 hilog，abort 前文本）；
+ * 2) 打印 backtrace（musl 内部帧常挡断 qemu 地址，故从 ucontext 提取“中断瞬间
+ *    PC/LR/FO”——那个数是指向 qemu 栈帧的硬证据，本地 addr2line 即解出函数）；
+ * 3) 退出。 */
+void crashSigHandler(int sig, siginfo_t *info, void *ucontext)
+{
+    char buf[160];
+    int fd = STDERR_FILENO;
+
+    dumpQemuLogTail(fd);
+
+    ucontext_t *uctx = (ucontext_t *)ucontext;
+    if (uctx != nullptr) {
+#if defined(__aarch64__)
+        const uint64_t pc = (uint64_t)uctx->uc_mcontext.pc;
+        const uint64_t lr = (uint64_t)uctx->uc_mcontext.regs[30];
+#elif defined(__arm__)
+        const uint64_t pc = (uint64_t)uctx->uc_mcontext.arm_pc;
+        const uint64_t lr = (uint64_t)uctx->uc_mcontext.arm_lr;
+#else /* x86_64 */
+        const uint64_t pc = (uint64_t)uctx->uc_mcontext.gregs[REG_RIP];
+        const uint64_t lr = (uint64_t)uctx->uc_mcontext.gregs[REG_RSP];
+#endif
+        int len = snprintf(buf, sizeof(buf), "crash-sig=%d pc=0x%llx lr=0x%llx\n",
+                           sig, (unsigned long long)pc, (unsigned long long)lr);
+        if (len > 0) {
+            ssize_t w = write(fd, buf, len);
+            (void)w;
+        }
+    }
+
     void *bt[64];
     int n = backtrace(bt, 64);
-    backtrace_symbols_fd(bt, n, STDERR_FILENO);
-    /* hold 一下让日志转发线程把上面的 backtrace / qemu abort 消息实时抬到 hilog，
-     * 再退出。仅崩溃路径用，短暂 sleep 可接受。 */
+    backtrace_symbols_fd(bt, n, fd);
+    /* hold 一下让日志转发线程把上面落盘的内容实时抬到 hilog，再退出。 */
     usleep(200 * 1000);
     _exit(128 + sig);
 }
@@ -194,8 +257,8 @@ void crashSigHandler(int sig)
 void installCrashHandlers()
 {
     struct sigaction sa{};
-    sa.sa_handler = crashSigHandler;
-    sa.sa_flags = SA_RESETHAND;
+    sa.sa_sigaction = crashSigHandler;
+    sa.sa_flags = SA_RESETHAND | SA_SIGINFO;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGSEGV, &sa, nullptr);
     sigaction(SIGABRT, &sa, nullptr);
@@ -276,6 +339,7 @@ int vm_start(const std::string &arch, const std::vector<std::string> &args)
     ok &= resolveSym(so, "graphic_hw_update", &qe_graphic_hw_update);
     ok &= resolveSym(so, "qemu_input_event_send_key_qcode", &qe_input_send_key);
     ok &= resolveSym(so, "qemu_input_queue_abs", &qe_input_queue_abs);
+    ok &= resolveSym(so, "qemu_input_queue_rel", &qe_input_queue_rel);
     ok &= resolveSym(so, "qemu_input_queue_btn", &qe_input_queue_btn);
     ok &= resolveSym(so, "qemu_input_event_sync", &qe_input_event_sync);
     ok &= resolveSym(so, "qemu_input_is_absolute", &qe_input_is_absolute);

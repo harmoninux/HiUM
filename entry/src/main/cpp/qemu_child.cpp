@@ -110,11 +110,16 @@ int onRequest(uint32_t code, const OHIPCParcel *data, OHIPCParcel *reply, void *
             return replyInt(reply, 0);
         }
         case kPointer: {
-            int32_t x = 0, y = 0, buttons = 0;
+            int32_t x = 0, y = 0, buttons = 0, mode = 0;
             OH_IPCParcel_ReadInt32(data, &x);
             OH_IPCParcel_ReadInt32(data, &y);
             OH_IPCParcel_ReadInt32(data, &buttons);
-            input_send_pointer(x, y, buttons);
+            OH_IPCParcel_ReadInt32(data, &mode);
+            if (mode == 1) {
+                input_send_rel(x, y, buttons);
+            } else {
+                input_send_pointer(x, y, buttons);
+            }
             return replyInt(reply, 0);
         }
         case kKey: {

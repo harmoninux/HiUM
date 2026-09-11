@@ -10,7 +10,7 @@
 
 namespace qemu_ipc {
 
-constexpr int32_t kProtoVersion = 1;
+constexpr int32_t kProtoVersion = 2; /* v2: kPointer 带 mode 字段（0=abs/1=rel） */
 constexpr const char *kDescriptor = "qemuohos.qemu.Runtime";
 constexpr const char *kChildLib = "libqemu_child.so";
 
@@ -19,7 +19,7 @@ constexpr uint32_t kStart = 1;         /* [ver][arch][argc][argv...][window parc
 constexpr uint32_t kAttachSurface = 2; /* [ver][window parcel] → int32 */
 constexpr uint32_t kDetachSurface = 3; /* [ver] → int32 */
 constexpr uint32_t kResizeSurface = 4; /* [ver][w][h] → int32 */
-constexpr uint32_t kPointer = 5;       /* [ver][x][y][buttons] → int32 */
+constexpr uint32_t kPointer = 5;       /* [ver][x][y][buttons][mode] → int32；mode 0=abs(virtio-tablet) 1=rel(PS/2或usb-mouse) */
 constexpr uint32_t kKey = 6;           /* [ver][qcode][down] → int32 */
 constexpr uint32_t kQuery = 7;         /* [ver] → [ver][fbW][fbH][running] */
 constexpr uint32_t kScreenshot = 8;    /* [ver][maxW] → [ver][w][h][rgba bytes] */

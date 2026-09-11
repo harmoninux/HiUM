@@ -5,6 +5,7 @@
 #include "imgtool.h"
 #include "ncp_client.h"
 #include "qmp.h"
+#include "serial.h"
 
 #include <hilog/log.h>
 
@@ -158,19 +159,23 @@ static napi_value DestroySurface(napi_env env, napi_callback_info info)
     return intResult(env, 0);
 }
 
-/* sendPointer(vmId: string, x: number, y: number, buttons: number) */
+/* sendPointer(vmId: string, x: number, y: number, buttons: number, mode=0|1)
+ * mode 0=absolute（默认，virtio-tablet），1=relative（PS/2、usb-mouse） */
 static napi_value SendPointer(napi_env env, napi_callback_info info)
 {
-    size_t argc = 4;
-    napi_value args[4] = {nullptr};
+    size_t argc = 5;
+    napi_value args[5] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
 
     std::string vmId = stringArg(env, args[0]);
-    int32_t x = 0, y = 0, buttons = 0;
+    int32_t x = 0, y = 0, buttons = 0, mode = 0;
     napi_get_value_int32(env, args[1], &x);
     napi_get_value_int32(env, args[2], &y);
     napi_get_value_int32(env, args[3], &buttons);
-    ncp_client_pointer(vmId, x, y, buttons);
+    if (argc > 4) {
+        napi_get_value_int32(env, args[4], &mode);
+    }
+    ncp_client_pointer(vmId, x, y, buttons, mode);
     return nullptr;
 }
 
@@ -260,6 +265,50 @@ static napi_value SetQmpEventCallback(napi_env env, napi_callback_info info)
     napi_valuetype type = napi_undefined;
     napi_typeof(env, args[1], &type);
     qmp_set_event_callback(vmId, env, type == napi_function ? args[1] : nullptr);
+    return nullptr;
+}
+
+/* serialOpen(vmId: string, sockPath: string): number —— 起连接线程（重试等 qemu 建 socket） */
+static napi_value SerialOpen(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    return intResult(env, serial_open(stringArg(env, args[0]), stringArg(env, args[1])));
+}
+
+/* serialWrite(vmId: string, text: string): number —— 写到客机串口（返回字节数，未连=-1） */
+static napi_value SerialWrite(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    return intResult(env, serial_write(stringArg(env, args[0]), stringArg(env, args[1])));
+}
+
+/* serialClose(vmId: string) —— 停线程断连（QEMU 侧 chardev 仍在，可再开） */
+static napi_value SerialClose(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    serial_close(stringArg(env, args[0]));
+    return nullptr;
+}
+
+/* setSerialCallback(vmId: string, cb: ((text: string) => void) | null)
+ * 推送客串口入站字节；断线合成 "<SERIAL_DISCONNECT>" */
+static napi_value SetSerialCallback(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string vmId = stringArg(env, args[0]);
+    napi_valuetype type = napi_undefined;
+    napi_typeof(env, args[1], &type);
+    serial_set_callback(vmId, env, type == napi_function ? args[1] : nullptr);
     return nullptr;
 }
 
@@ -497,6 +546,10 @@ static napi_value Init(napi_env env, napi_value exports)
         { "snapshotCreate", nullptr, SnapshotCreate, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "snapshotApply", nullptr, SnapshotApply, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "snapshotDelete", nullptr, SnapshotDelete, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "serialOpen", nullptr, SerialOpen, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "serialWrite", nullptr, SerialWrite, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "serialClose", nullptr, SerialClose, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "setSerialCallback", nullptr, SetSerialCallback, nullptr, nullptr, nullptr, napi_default, nullptr },
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

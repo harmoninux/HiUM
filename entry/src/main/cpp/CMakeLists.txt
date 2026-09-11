@@ -15,6 +15,7 @@ include_directories(${NATIVERENDER_ROOT_PATH}
 add_library(entry SHARED
     napi_init.cpp
     qmp.cpp
+    serial.cpp
     ncp_client.cpp
     imgtool.cpp)
 

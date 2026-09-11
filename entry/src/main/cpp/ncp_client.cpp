@@ -327,7 +327,8 @@ void ncp_client_resize(const std::string &vmId, int32_t w, int32_t h)
     OH_IPCParcel_Destroy(req);
 }
 
-void ncp_client_pointer(const std::string &vmId, int32_t x, int32_t y, int32_t buttons)
+void ncp_client_pointer(const std::string &vmId, int32_t x, int32_t y, int32_t buttons,
+                        int32_t mode)
 {
     ChildState *chp = getChild(vmId);
     if (chp == nullptr) {
@@ -341,6 +342,7 @@ void ncp_client_pointer(const std::string &vmId, int32_t x, int32_t y, int32_t b
     OH_IPCParcel_WriteInt32(req, x);
     OH_IPCParcel_WriteInt32(req, y);
     OH_IPCParcel_WriteInt32(req, buttons);
+    OH_IPCParcel_WriteInt32(req, mode);
     replyCode(sendTo(*chp, kPointer, req));
     OH_IPCParcel_Destroy(req);
 }
