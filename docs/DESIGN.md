@@ -37,12 +37,12 @@ guest 系统，并把 guest 屏幕**直接渲染**到 ArkUI（XComponent，不�
 | 宿主↔guest 共享文件夹 | ✅ 先给 | **virtio-9p / virtfs**（Linux guest 内核内置，无需 agent） |
 | 端口转发 / NAT / 网卡配置 | ✅ | user-mode net + `hostfwd`（结构化） |
 | PXE 网络引导 / 直启内核 | ✅ | `-boot n`+Etherboot / `-kernel -initrd -append` |
-| 串口 / QMP monitor 脚本化 | ✅ | `-serial` + QMP（Tools 页直接敲原始命令） |
+| 串口 / QMP monitor 脚本化 | ✅ | 交互串口（`-chardev socket,server=on` + Console 串口视图双向）+ QMP（Tools 页直接敲原始命令） |
 | 指定板卡跑「无硬件 lab」 | ✅ | virt/raspi/pc/q35 各带默认设备图 |
 | 临时会话 / 烧毁即弃 | ✅ | 首启快照 + 关闭即回滚（可联网/可转发） |
 | 剪贴板双向 | ❌ | 需 guest agent，**后置**（当前走 9p 共享目录兑现「交换文件」） |
 | guest 自动时间同步 | ⚠️ 弱 | 无宿主导入通道，靠 guest 自 NTP，后置 |
-| 音频 | ⚠️ 视宿主 | QEMU 需 OHOS 侧音频后端，Phase 2 试探 |
+| 音频 | ✅ | OHOS 音频后端（`-audiodev driver=ohos`，见 libqemu 补丁）；pc/q35=AC97、virt=virtio-sound |
 | virtio-gpu 3D（virgl） | ⚠️ 视 guest | 依赖 guest 侧 virgl 驱动，后置 stretch |
 | Windows 客机完整体验 | ⚠️ 受限 | 9p 需 WinFsp 驱动；先只保证 Linux/Alpine/Android-x86/DOS，后置 |
 
@@ -53,7 +53,7 @@ guest 系统，并把 guest 屏幕**直接渲染**到 ArkUI（XComponent，不�
 - guest 自动时间同步
 - virgl 3D 加速
 - Windows 客机完整体验
-- 音频（视 OHOS 音频后端可达性，Phase 2 试探）
+（音频已落地：OHOS 渲染器后端，见 §1.1 与 §6 v6）
 
 ## 2. 总体架构（分层）
 
@@ -144,18 +144,28 @@ B（时光机）与 F（临时会话）共用同一份快照引擎，不造两�
 按 VM 属性（`SessionPolicy = persist | ephemeral`）选择关闭动作。网络
 （hostfwd/9p）两种模式下都可用。
 
-## 6. 数据模型（schema v3）
+## 6. 数据模型（schema v6）
 
 配置分层，UI 只面对领域对象，`buildArgs` 是纯函数归档：
 
 - **机器定义**：arch / machine（pc/q35/virt/raspi…）/ firmware（SeaBIOS/OVMF）/
-  cpu 模型 / 设备图。
+  cpu 模型 / 设备图 / cpuFlags（`-cpu <模型>,<flags>` 关联增强）/ rtcLocal
+  （`-rtc base=localtime`）。
 - **运行时**：memory / cpus / accel（可被性能预设覆盖）。
 - **介质**：disk / cdrom / boot 顺序 / 直接内核引导（-kernel/-initrd/-append，
   kernelPath 非空即绕过固件引导流程）。
 
-`VmProfile` 带 schema 版本号 + 迁移器（v1/v2→v3 自动迁移，v3 只新增
-media.kernelPath/initrdPath/kernelAppend 三字段，旧存档归一化回填空串）。
+`VmProfile` 带 schema 版本号 + 迁移器（v1/v2→v3 自动迁移；v3 新增
+media.kernelPath/initrdPath/kernelAppend；v4 新增 machine.mouse（
+tablet|relative 注入模式）、machine.vga 扩展（cirrus/vmware）、
+machine.serialInteractive（串口 socket 交互）、runtime.rng/balloon
+（virtio 增强设备）；**v5 磁盘数组化：`media.disks: VmDisk[]`（第 0 张 =
+系统盘，其余为数据盘，每张带 readonly；最多 8 张数据盘，型号/接口按
+板卡固定 virtio（raspi 单 SD 槽））——快照与临时会话只作用于系统盘，
+数据盘不参与回滚。**v6：machine.cpuFlags（CPU 关联增强）、
+machine.rtcLocal（RTC 本地时区）、runtime.audio（声音，默认开）、
+runtime.gdbPort（GDB 调试后端，0=关，仅编辑页可配；同向导「创建后
+编辑」语义）。app 未发布，新字段统一并入归一化回填，无存量迁移）。
 持久化到 `filesDir/vms/<id>.json`。
 
 **介质资产来源与复制语义**（已实现）：
@@ -205,7 +215,7 @@ VMRegistry · 事件驱动渲染 · 真备份/恢复（启用 EntryBackupAbility
 网络（hostfwd + 9p）；设置（JIT 性能预设）。
 
 **Phase 2 · 深化**
-软键盘/输入法 · 音频（视 OHOS 后端）· 运行态 HUD · 板卡硬广矩阵 · 多屏 ·
+软键盘/输入法 · 运行态 HUD · 板卡硬广矩阵 · 多屏 ·
 更精细手势。
 
 **Phase 3 · 后置项**（需 guest agent / 驱动）

@@ -13,7 +13,11 @@ export TOOL_HOME ?= /apps/harmony
 OHOS_ARCH ?= aarch64
 OHOS_ABI ?= arm64-v8a
 
-HDC := /apps/harmony/sdk/default/openharmony/toolchains/hdc -t 192.168.1.4:44959
+# 设备无线调试地址（随 DHCP 变化，不固化在仓库里）：
+#   make install HDC_TARGET=<ip>:<port>
+# 未指定时不加 -t，用 hdc 自身默认/唯一已连接目标。
+HDC_TARGET ?=
+HDC := $(TOOL_HOME)/sdk/default/openharmony/toolchains/hdc $(if $(HDC_TARGET),-t $(HDC_TARGET),)
 BUNDLE := app.hackeris.hium
 HAP_UNSIGNED := entry/build/default/outputs/default/entry-default-unsigned.hap
 HAP := entry/build/default/outputs/default/entry-default-signed.hap

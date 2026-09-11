@@ -129,6 +129,6 @@
 
 ## 8. 验证
 1. `make hap` 无 ArkTS Error/警告。
-2. 部署（项目 HDC `-s 192.168.1.3:8710 -t 127.0.0.1:5555` + `bm install -p`）进程存活、无 FATAL/CRASH/SIGSEGV。
+2. 部署到真机（`make deploy HDC_TARGET=<ip>:<port>`）进程存活、无 FATAL/CRASH/SIGSEGV。
 3. 设备人工过：列表选中→详情、搜索过滤、模板磁贴→工坊、快照时间线、snackbar、空态。
 4. 每 step 一项一 commit、一项一验证（Build + Deploy + 进程存活）。

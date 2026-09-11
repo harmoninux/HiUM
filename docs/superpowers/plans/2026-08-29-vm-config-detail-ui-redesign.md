@@ -6,7 +6,7 @@
 
 **Architecture:** 纯 ArkTS/ArkUI 组件改动，只改三个页面文件（`VmManage` / `VmEdit` / `VmStorage`）；数据模型 `vmprofile.ts` 不动（`machine.vga` 字段保留，只是 UI 不再暴露）。组头统一复用向导 `groupHeader` 样式（灰字 + 延伸线）。
 
-**Tech Stack:** HarmonyOS ArkTS / ArkUI 组件；`hvigorw assembleHap` 编译；`hdc` 部署到 `192.168.1.4:44959` 人工验证。
+**Tech Stack:** HarmonyOS ArkTS / ArkUI 组件；`hvigorw assembleHap` 编译；`hdc` 部署到真机人工验证（`make deploy HDC_TARGET=<ip>:<port>`）。
 
 **验证门禁说明：** 本项目无 ArkUI 组件单测框架（无 `ohosTest` / `*.test.ets`），无法 TDD。每个任务以 `make hap` 编译通过为硬门禁，最终用 `make deploy` 部署到设备做人工验证（见各任务「设备验证」与文末汇总）。
 
@@ -733,7 +733,7 @@ git commit -m "feat(存储弹窗): 光盘区加「选择ISO」入口，清除后
 
 ## 设备验证清单（`make deploy` 后人工确认）
 
-> 需先 `hdc tconn 192.168.1.4:44959`。测试目标 VM 假设为「我的虚拟机」(x86_64)。
+> 需先 `hdc tconn <ip>:<port>`。测试目标 VM 假设为「我的虚拟机」(x86_64)。
 
 1. **详情页（VmManage）**
    - 概览为独立分区 + 胶囊（内存/核/pc/seabios），无 vga 胶囊。
