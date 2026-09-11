@@ -21,6 +21,10 @@ all: download/qemu
 	rm -rf temp build
 	mkdir -p temp build
 	cd download/qemu && git worktree add -f $(shell pwd)/temp/qemu HEAD
+	# worktree 出自 download/qemu 的 HEAD；HiUM 对 qemu 源树的改动以
+	# patches/*.patch 形式入库，worktree 创建后立即应用（本地未提交改动
+	# 不进 worktree，构建可复现的保证全在此步）。
+	cd temp/qemu && git apply $(shell pwd)/patches/qemu-0001-audio-ohos-backend.patch
 	cd temp/qemu && \
 	PKG_CONFIG=$(shell which pkg-config) \
 	PKG_CONFIG_PATH= \

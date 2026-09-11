@@ -1,0 +1,439 @@
+From 50ce7090000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: HiUM <app.hackeris.hium>
+Date: Mon, 8 Sep 2026 00:00:00 +0800
+Subject: [PATCH] audio: add OHOS (OpenHarmony) audio backend driver
+
+Add a CoreAudio-like pull-model audio backend driven by the
+OpenHarmony audio renderer: the QEMU mixing engine keeps
+filling hw->buf_emul (generic get/put helpers wrapped with
+vo->lock), while the OHOS renderer callback thread consumes
+frames from the same ring at the device pace.
+
+Renderer fixed at 48 kHz / 2ch / S16LE; QEMU mixer converts.
+
+Mirrors CONFIG_AUDIO_* conventions: QAPI enum + union entries
+guarded by CONFIG_AUDIO_OHOS, libohaudio linkage via meson
+dependency, and the driver kept inside libsystem so it lands
+in every qemu-system binary.
+
+Signed-off-by: HiUM <app.hackeris.hium>
+---
+ audio/audio_ohos.c | 309 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ audio/audio.c      |   3 +
+ audio/meson.build  |   6 ++
+ meson.build        |  10 +++
+ qapi/audio.json    |   3 +
+ 5 files changed, 331 insertions(+)
+
+diff --git a/audio/audio.c b/audio/audio.c
+index 86e6744..02393b5 100644
+--- a/audio/audio.c
++++ b/audio/audio.c
+@@ -2022,6 +2022,9 @@ void audio_create_pdos(Audiodev *dev)
+         CASE(SPICE, spice, );
+ #endif
+         CASE(WAV, wav, );
++#ifdef CONFIG_AUDIO_OHOS
++        CASE(OHOS, ohos, );
++#endif
+
+     case AUDIODEV_DRIVER__MAX:
+         abort();
+diff --git a/audio/audio_template.h b/audio/audio_template.h
+index 7a8c431..e823094 100644
+--- a/audio/audio_template.h
++++ b/audio/audio_template.h
+@@ -391,6 +391,10 @@ AudiodevPerDirectionOptions *glue(audio_get_pdo_, TYPE)(Audiodev *dev)
+ #endif
+     case AUDIODEV_DRIVER_WAV:
+         return dev->u.wav.TYPE;
++#ifdef CONFIG_AUDIO_OHOS
++    case AUDIODEV_DRIVER_OHOS:
++        return dev->u.ohos.TYPE;
++#endif
+
+     case AUDIODEV_DRIVER__MAX:
+         break;
+diff --git a/audio/audio_ohos.c b/audio/audio_ohos.c
+new file mode 100644
+index 0000000..432b415
+--- /dev/null
++++ b/audio/audio_ohos.c
+@@ -0,0 +1,309 @@
++/*
++ * QEMU audio backend for OpenHarmony (OHOS) audio renderer
++ *
++ * Looks somewhat like CoreAudio (pull model): the audio device side
++ * (called without BQL) fills hw->buf_emul through the generic
++ * get_buffer_out/put_buffer_out helpers (wrapped with a mutex), while
++ * the OHOS renderer thread pulls frames from the same ring in the
++ * OH_AudioRenderer_OnWriteDataCallback at the device pace.
++ *
++ * The renderer is configured fixed at 48 kHz / 2ch / S16LE; the QEMU
++ * mixing engine takes care of any guest format conversion.
++ *
++ * The Ring is 2+ callback periods so the callback can always abort
++ * with silence instead of waiting (like CoreAudio).
++ */
++#include "qemu/osdep.h"
++#include "qemu/module.h"
++#include "qemu/audio.h"
++
++#define AUDIO_CAP "ohos"
++#include "audio_int.h"
++
++#include <ohaudio/native_audiorenderer.h>
++#include <ohaudio/native_audiostreambuilder.h>
++
++/* 480 frames @ 48kHz = 10ms per renderer callback */
++#define OHOS_CALLBACK_FRAMES 480
++
++typedef struct OhosVoiceOut {
++    HWVoiceOut hw;
++    /* Protects hw->buf_emul / pos_emul / pending_emul (mixer side vs
++     * renderer callback) plus renderer lifecycle. */
++    pthread_mutex_t lock;
++    OH_AudioRenderer *renderer;
++    bool started;
++} OhosVoiceOut;
++
++static void *ohos_get_buffer_out(HWVoiceOut *hw, size_t *size)
++{
++    OhosVoiceOut *vo = (OhosVoiceOut *)hw;
++    void *ret;
++
++    pthread_mutex_lock(&vo->lock);
++    ret = audio_generic_get_buffer_out(hw, size);
++    pthread_mutex_unlock(&vo->lock);
++
++    return ret;
++}
++
++static size_t ohos_put_buffer_out(HWVoiceOut *hw, void *buf, size_t size)
++{
++    OhosVoiceOut *vo = (OhosVoiceOut *)hw;
++    size_t ret;
++
++    pthread_mutex_lock(&vo->lock);
++    ret = audio_generic_put_buffer_out(hw, buf, size);
++    pthread_mutex_unlock(&vo->lock);
++
++    return ret;
++}
++
++static size_t ohos_buffer_get_free(HWVoiceOut *hw)
++{
++    OhosVoiceOut *vo = (OhosVoiceOut *)hw;
++    size_t ret;
++
++    pthread_mutex_lock(&vo->lock);
++    ret = audio_generic_buffer_get_free(hw);
++    pthread_mutex_unlock(&vo->lock);
++
++    return ret;
++}
++
++static size_t ohos_write(HWVoiceOut *hw, void *buf, size_t size)
++{
++    OhosVoiceOut *vo = (OhosVoiceOut *)hw;
++    size_t ret;
++
++    pthread_mutex_lock(&vo->lock);
++    ret = audio_generic_write(hw, buf, size);
++    pthread_mutex_unlock(&vo->lock);
++
++    return ret;
++}
++
++/*
++ * OHOS renderer thread callback. Called without BQL; only take
++ * vo->lock. If the ring has fewer than the requested frames, output
++ * silence and do not consume whatever is left (same policy as
++ * CoreAudio's audioDeviceIOProc): underrun = short glitch, never a
++ * stall of the entire mixer.
++ *
++ * Result macro: AUDIO_DATA_CALLBACK_RESULT_VALID / _INVALID.
++ */
++static OH_AudioData_Callback_Result ohos_write_data(
++    OH_AudioRenderer *renderer, void *user_data,
++    void *audio_data, int32_t audio_data_size)
++{
++    OhosVoiceOut *vo = user_data;
++    HWVoiceOut *hw;
++    size_t pending_frames;
++    uint32_t frames;
++    size_t len;
++
++    (void)renderer;
++    if (!vo || !audio_data || audio_data_size <= 0) {
++        return AUDIO_DATA_CALLBACK_RESULT_INVALID;
++    }
++
++    hw = &vo->hw;
++    pthread_mutex_lock(&vo->lock);
++
++    if (!hw->buf_emul) {
++        memset(audio_data, 0, audio_data_size);
++        pthread_mutex_unlock(&vo->lock);
++        return AUDIO_DATA_CALLBACK_RESULT_VALID;
++    }
++
++    pending_frames = hw->pending_emul / hw->info.bytes_per_frame;
++    frames = audio_data_size / hw->info.bytes_per_frame;
++
++    if (pending_frames < frames) {
++        memset(audio_data, 0, audio_data_size);
++        pthread_mutex_unlock(&vo->lock);
++        return AUDIO_DATA_CALLBACK_RESULT_VALID;
++    }
++
++    len = frames * hw->info.bytes_per_frame;
++    while (len) {
++        size_t start, write_len;
++
++        start = audio_ring_posb(hw->pos_emul, hw->pending_emul, hw->size_emul);
++        write_len = MIN(MIN(hw->pending_emul, len), hw->size_emul - start);
++
++        if (!write_len) {
++            /* cannot happen given pending_frames >= frames, be safe */
++            break;
++        }
++
++        memcpy(audio_data, hw->buf_emul + start, write_len);
++        hw->pending_emul -= write_len;
++        len -= write_len;
++        audio_data += write_len;
++    }
++
++    pthread_mutex_unlock(&vo->lock);
++    return AUDIO_DATA_CALLBACK_RESULT_VALID;
++}
++
++/*
++ * Phone calls / focus interrupts stop the renderer; on RESUME the
++ * renderer would stay paused otherwise and the VM audio dies until the
++ * guest cycle. Explicitly restart (see wineohos AudioBroker lesson).
++ */
++static void ohos_interrupt_data(OH_AudioRenderer *renderer, void *user_data,
++                                OH_AudioInterrupt_ForceType type,
++                                OH_AudioInterrupt_Hint hint)
++{
++    OhosVoiceOut *vo = user_data;
++
++    (void)renderer;
++    (void)type;
++    if (!vo) {
++        return;
++    }
++
++    if (hint == AUDIOSTREAM_INTERRUPT_HINT_RESUME) {
++        pthread_mutex_lock(&vo->lock);
++        if (vo->started && vo->renderer) {
++            OH_AudioRenderer_Start(vo->renderer);
++        }
++        pthread_mutex_unlock(&vo->lock);
++    }
++}
++
++static int ohos_init_out(HWVoiceOut *hw, struct audsettings *as,
++                         void *drv_opaque)
++{
++    OhosVoiceOut *vo = (OhosVoiceOut *)hw;
++    struct audsettings obt_as;
++    OH_AudioStreamBuilder *builder = NULL;
++    OH_AudioStream_Result result;
++    int err;
++
++    err = pthread_mutex_init(&vo->lock, NULL);
++    if (err) {
++        dolog("Could not create mutex\nReason: %s\n", strerror(err));
++        return -1;
++    }
++
++    vo->renderer = NULL;
++    vo->started = false;
++
++    obt_as = *as;
++    as = &obt_as;
++    /* OHOS renderer is locked to 48 kHz / 2ch / S16LE */
++    as->freq = 48000;
++    as->fmt = AUDIO_FORMAT_S16;
++    as->nchannels = 2;
++    as->endianness = 0; /* S16LE */
++    audio_pcm_init_info(&hw->info, as);
++
++    result = OH_AudioStreamBuilder_Create(&builder, AUDIOSTREAM_TYPE_RENDERER);
++    if (result != AUDIOSTREAM_SUCCESS || !builder) {
++        dolog("ohos: could not create audio stream builder: %d\n", result);
++        pthread_mutex_destroy(&vo->lock);
++        return -1;
++    }
++
++    OH_AudioStreamBuilder_SetSamplingRate(builder, 48000);
++    OH_AudioStreamBuilder_SetChannelCount(builder, 2);
++    OH_AudioStreamBuilder_SetSampleFormat(builder, AUDIOSTREAM_SAMPLE_S16LE);
++    OH_AudioStreamBuilder_SetEncodingType(builder, AUDIOSTREAM_ENCODING_TYPE_RAW);
++    OH_AudioStreamBuilder_SetLatencyMode(builder, AUDIOSTREAM_LATENCY_MODE_NORMAL);
++    OH_AudioStreamBuilder_SetRendererInfo(builder, AUDIOSTREAM_USAGE_GAME);
++    OH_AudioStreamBuilder_SetFrameSizeInCallback(builder, OHOS_CALLBACK_FRAMES);
++    OH_AudioStreamBuilder_SetRendererWriteDataCallback(
++        builder, ohos_write_data, vo);
++    OH_AudioStreamBuilder_SetRendererInterruptCallback(
++        builder, ohos_interrupt_data, vo);
++
++    result = OH_AudioStreamBuilder_GenerateRenderer(builder, &vo->renderer);
++    OH_AudioStreamBuilder_Destroy(builder);
++    if (result != AUDIOSTREAM_SUCCESS || !vo->renderer) {
++        dolog("ohos: could not generate renderer: %d\n", result);
++        pthread_mutex_destroy(&vo->lock);
++        return -1;
++    }
++
++    /* Ring must hold at least two callback periods. */
++    hw->samples = MAX(OHOS_CALLBACK_FRAMES * 2, 2048);
++
++    return 0;
++}
++
++static void ohos_fini_out(HWVoiceOut *hw)
++{
++    OhosVoiceOut *vo = (OhosVoiceOut *)hw;
++
++    pthread_mutex_lock(&vo->lock);
++    if (vo->renderer) {
++        if (vo->started) {
++            OH_AudioRenderer_Stop(vo->renderer);
++        }
++        OH_AudioRenderer_Release(vo->renderer);
++        vo->renderer = NULL;
++        vo->started = false;
++    }
++    pthread_mutex_unlock(&vo->lock);
++
++    pthread_mutex_destroy(&vo->lock);
++}
++
++static void ohos_enable_out(HWVoiceOut *hw, bool enable)
++{
++    OhosVoiceOut *vo = (OhosVoiceOut *)hw;
++
++    pthread_mutex_lock(&vo->lock);
++    if (enable) {
++        if (!vo->started && vo->renderer) {
++            if (OH_AudioRenderer_Start(vo->renderer) == AUDIOSTREAM_SUCCESS) {
++                vo->started = true;
++            } else {
++                dolog("ohos: renderer start failed\n");
++            }
++        }
++    } else {
++        if (vo->started && vo->renderer) {
++            OH_AudioRenderer_Stop(vo->renderer);
++            vo->started = false;
++        }
++    }
++    pthread_mutex_unlock(&vo->lock);
++}
++
++static void *ohos_audio_init(Audiodev *dev, Error **errp)
++{
++    return dev;
++}
++
++static void ohos_audio_fini(void *opaque)
++{
++}
++
++static struct audio_pcm_ops ohos_pcm_ops = {
++    .init_out        = ohos_init_out,
++    .fini_out        = ohos_fini_out,
++    .write           = ohos_write,
++    .buffer_get_free = ohos_buffer_get_free,
++    .get_buffer_out  = ohos_get_buffer_out,
++    .put_buffer_out  = ohos_put_buffer_out,
++    .enable_out      = ohos_enable_out,
++};
++
++static struct audio_driver ohos_audio_driver = {
++    .name           = "ohos",
++    .init           = ohos_audio_init,
++    .fini           = ohos_audio_fini,
++    .pcm_ops        = &ohos_pcm_ops,
++    .max_voices_out = 1,
++    .voice_size_out = sizeof(OhosVoiceOut),
++};
++
++static void register_audio_ohos(void)
++{
++    audio_driver_register(&ohos_audio_driver);
++}
++
++type_init(register_audio_ohos);
+diff --git a/audio/meson.build b/audio/meson.build
+index b2dca2c..1d5fa48 100644
+--- a/audio/meson.build
++++ b/audio/meson.build
+@@ -11,6 +11,12 @@ system_ss.add(files('audio-hmp-cmds.c', 'wavcapture.c'))
+ system_ss.add(when: coreaudio, if_true: files('coreaudio.m'))
+ system_ss.add(when: dsound, if_true: files('dsoundaudio.c', 'audio_win_int.c'))
+
++# OHOS audio backend is part of libsystem, so it lands inside every
++# qemu-system lib like coreaudio does on macOS.
++if ohos_audio.found()
++  system_ss.add(files('audio_ohos.c'), ohos_audio)
++endif
++
+ audio_modules = {}
+ foreach m : [
+   ['alsa', alsa, files('alsaaudio.c')],
+diff --git a/meson.build b/meson.build
+index 5d6eed3..e5d99e1 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1800,6 +1800,15 @@ if not get_option('coreaudio').auto() or (host_os == 'darwin' and have_system)
+                          required: get_option('coreaudio'))
+ endif
+
++# OHOS audio backend: provided by the OpenHarmony SDK sysroot
++# (libohaudio.so + <ohaudio/*.h>). Detected unconditionally; a plain
++# linux build without the ODK just evaluates to not_found and the
++# driver is compiled out.
++ohos_audio = not_found
++if have_system and cc.has_header('ohaudio/native_audiorenderer.h')
++  ohos_audio = cc.find_library('ohaudio', required: false)
++endif
++
+ opengl = not_found
+ if not get_option('opengl').auto() or have_system or have_vhost_user_gpu
+   epoxy = dependency('epoxy', method: 'pkg-config',
+@@ -2308,6 +2317,7 @@ if have_system
+     'coreaudio': coreaudio.found(),
+     'dsound': dsound.found(),
+     'jack': jack.found(),
++    'ohos': ohos_audio.found(),
+     'oss': oss.found(),
+     'pa': pulse.found(),
+     'pipewire': pipewire.found(),
+diff --git a/qapi/audio.json b/qapi/audio.json
+index 2df87b9..d1ed291 100644
+--- a/qapi/audio.json
++++ b/qapi/audio.json
+@@ -478,6 +478,7 @@
+             { 'name': 'dbus', 'if': 'CONFIG_DBUS_DISPLAY' },
+             { 'name': 'dsound', 'if': 'CONFIG_AUDIO_DSOUND' },
+             { 'name': 'jack', 'if': 'CONFIG_AUDIO_JACK' },
++            { 'name': 'ohos', 'if': 'CONFIG_AUDIO_OHOS' },
+             { 'name': 'oss', 'if': 'CONFIG_AUDIO_OSS' },
+             { 'name': 'pa', 'if': 'CONFIG_AUDIO_PA' },
+             { 'name': 'pipewire', 'if': 'CONFIG_AUDIO_PIPEWIRE' },
+@@ -518,6 +519,8 @@
+                    'if': 'CONFIG_AUDIO_DSOUND' },
+     'jack':      { 'type': 'AudiodevJackOptions',
+                    'if': 'CONFIG_AUDIO_JACK' },
++    'ohos':      { 'type': 'AudiodevGenericOptions',
++                   'if': 'CONFIG_AUDIO_OHOS' },
+     'oss':       { 'type': 'AudiodevOssOptions',
+                    'if': 'CONFIG_AUDIO_OSS' },
+     'pa':        { 'type': 'AudiodevPaOptions',
+--
+2.39.2
