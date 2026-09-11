@@ -9,14 +9,14 @@ import { promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
-import { VmProfile, VmStore, buildArgs, qmpSockPath, sharedDir, builtinIsoFor } from '../lib/vmprofile';
+import { VmProfile, VmStore, buildArgs, qmpSockPath, serialSockPath, sharedDir, builtinIsoFor, mainDiskPath } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { pathExists, isoReadable } from '../lib/fsutil';
 import { prepareStart } from '../lib/tempSession';
 import { takePendingVmId, isPadOrPhone } from '../lib/vmwindows';
 import { VirtualKeyboard } from '../lib/VirtualKeyboard';
 import {
-  cDanger, cPrimary, sp1, sp2,
+  cDanger, cPrimary, cWeak, sp1, sp2,
 } from '../lib/uiTokens';
 
 /* 多 ISO 启动前的可读性过滤在 doStart 内做：把不可读盘从本次启动的 ISO 列表里剔除，
@@ -28,12 +28,16 @@ interface QemuNapi {
   createSurface: (vmId: string, surfaceId: bigint) => number;
   resizeSurface: (vmId: string, w: number, h: number) => number;
   destroySurface: (vmId: string) => number;
-  sendPointer: (vmId: string, x: number, y: number, buttons: number) => void;
+  sendPointer: (vmId: string, x: number, y: number, buttons: number, mode?: number) => void;
   sendKey: (vmId: string, qcode: number, down: boolean) => void;
   scroll: (vmId: string, dx: number, dy: number) => void;
   qmpConnect: (vmId: string, sockPath: string) => number;
   qmpCommand: (vmId: string, cmd: string) => string;
   setQmpEventCallback: (vmId: string, cb: ((evt: string) => void) | null) => void;
+  serialOpen: (vmId: string, sockPath: string) => number;
+  serialWrite: (vmId: string, text: string) => number;
+  serialClose: (vmId: string) => void;
+  setSerialCallback: (vmId: string, cb: ((text: string) => void) | null) => void;
 }
 
 const napi: QemuNapi = napiModule as QemuNapi;
@@ -96,6 +100,11 @@ struct VmConsole {
   @State status: string = '';
   @State showKbd: boolean = false;   /* 虚拟键盘显隐（底部状态栏开关，按 vmId 持久化） */
   @State immersive: boolean = false; /* 沉浸全屏态（最大化进入），沉浸时隐藏底部状态栏 */
+  /* v4 交互式串口：serialView=串口视图盖在画面上；文本/输入/Ctrl 修饰态均在页内 */
+  @State serialView: boolean = false;
+  @State serialText: string = '';
+  @State serialInput: string = '';
+  @State ctrlOn: boolean = false; /* Ctrl 修饰（发送时对字母做 ^C 类映射） */
   private vmId: string = '';
   private profile: VmProfile | null = null;
   private xcController: VmXComponentController = new VmXComponentController();
@@ -117,6 +126,8 @@ struct VmConsole {
   private scrollAcc: number = 0;
   private lastX: number = 0;
   private lastY: number = 0;
+  private mouseRel: boolean = false; /* 本 VM 输入模式：relative=发送 delta（不裁 viewport 映射） */
+  private serialScroller: Scroller = new Scroller();
 
   private toSurfacePx(vp: number, vpSize: number, surfaceSize: number): number {
     if (vpSize <= 0 || surfaceSize <= 0) {
@@ -139,6 +150,9 @@ struct VmConsole {
         this.startVm();
       }
     };
+    if (this.profile) {
+      this.mouseRel = this.profile.machine.mouse === 'relative';
+    }
     napi.setQmpEventCallback(this.vmId, (evt: string) => this.onQmpEvent(evt));
     this.loadKbd();
     this.enterVm();
@@ -151,6 +165,7 @@ struct VmConsole {
 
   aboutToDisappear(): void {
     napi.setQmpEventCallback(this.vmId, null);
+    this.closeSerial();
   }
 
   private enterVm(): void {
@@ -290,9 +305,9 @@ struct VmConsole {
         share = '';
       }
     }
-    /* 启动前的快照结算 + 临时会话打点：仅 qcow2 支持（raw 无内部快照）。
-     * 失败则拒启，避免"用户以为会回滚却没回滚"。 */
-    const disk = this.profile.media.diskPath;
+    /* 启动前的快照结算 + 临时会话打点：仅主盘（disks[0]）参与；qcow2 才支持
+     *（raw 无内部快照）。失败则拒启，避免"用户以为会回滚却没回滚"。 */
+    const disk = mainDiskPath(this.profile);
     if (this.profile.temporarySession &&
       (disk.length === 0 || !disk.toLowerCase().endsWith('.qcow2'))) {
       this.status = '临时会话需 qcow2 系统盘';
@@ -363,6 +378,7 @@ struct VmConsole {
       case 'QMP_DISCONNECT':
         this.status = '已关机';
         this.vmListVersion++;
+        this.closeSerial(); /* 串口随 VM 死亡断线，回画面视图 */
         /* VM 进程已死（意外退出 / ACPI / 强制断电 / quit 一律如此）：
          * 窗口是「存活 VM 的视图」，死机就应该销毁窗口——下次从列表「进入」
          * 会走全新的窗口→enterVm→startVm 自动重启。避免窗口停在「已关机」
@@ -403,11 +419,21 @@ struct VmConsole {
   /* ================= 触摸手势（单指移动/点击/长按右键，双指滚轮） ================= */
 
   private sendPtrMedia(vx: number, vy: number, buttons: number): void {
+    if (this.mouseRel) {
+      /* 相对注入（PS/2 / usb-mouse）：坐标语义是 delta（view px），
+       * 传给 native 的是与上次位置的差值；native 端不再做 viewport 映射 */
+      const dx = vx - this.lastX;
+      const dy = vy - this.lastY;
+      this.lastX = vx;
+      this.lastY = vy;
+      napi.sendPointer(this.vmId, dx, dy, buttons, 1);
+      return;
+    }
     const px = this.toSurfacePx(vx, this.areaW, this.xcController.surfaceWidth);
     const py = this.toSurfacePx(vy, this.areaH, this.xcController.surfaceHeight);
     this.lastX = vx;
     this.lastY = vy;
-    napi.sendPointer(this.vmId, px, py, buttons);
+    napi.sendPointer(this.vmId, px, py, buttons, 0);
   }
 
   private cancelLongPress(): void {
@@ -550,6 +576,98 @@ struct VmConsole {
       '{"type":"qcode","data":"delete"}]}');
   }
 
+  /* ================= 交互式串口（v4）：画面 ↔ 串口视图 ================= */
+
+  /* 打开串口视图：连接本 VM 的 socket（qemu -serial chardev:socket,server=on）
+   * 并注册数据回调；VM 未启用交互串口（serialInteractive=false / raspi）时提示 */
+  private openSerial(): void {
+    const p = this.profile;
+    if (!p) {
+      return;
+    }
+    if (!p.machine.serialInteractive) {
+      promptAction.showToast({ message: '该 VM 串口为日志模式（可在配置页开启交互）' });
+      return;
+    }
+    this.serialView = true;
+    this.serialText = '';
+    this.serialInput = '';
+    this.ctrlOn = false;
+    napi.serialOpen(this.vmId, serialSockPath(p, this.vmDataDir));
+    napi.setSerialCallback(this.vmId, (text: string) => this.onSerialData(text));
+    setTimeout(() => {
+      this.serialScroller.scrollEdge(Edge.Bottom);
+    }, 100);
+  }
+
+  private closeSerial(): void {
+    if (!this.serialView) {
+      return;
+    }
+    this.serialView = false;
+    napi.setSerialCallback(this.vmId, null);
+    napi.serialClose(this.vmId);
+  }
+
+  private toggleSerialView(): void {
+    if (this.serialView) {
+      this.closeSerial();
+    } else {
+      this.openSerial();
+    }
+  }
+
+  /* 入站字节推送到只读文本区；断线合成标记单独显示。限长防内存涨（boot 刷屏会很大） */
+  private onSerialData(text: string): void {
+    if (text === '<SERIAL_DISCONNECT>') {
+      this.serialText += '\n[串口连接已断开]\n';
+      return;
+    }
+    this.serialText += text;
+    if (this.serialText.length > 512 * 1024) {
+      this.serialText = this.serialText.substring(this.serialText.length - 512 * 1024);
+    }
+    this.serialScroller.scrollEdge(Edge.Bottom);
+  }
+
+  /* Ctrl+字母 → 控制字节（^C=0x03）；其余字符原样。发送回车结尾（Linux ttyS0 icrnl 会转 \n） */
+  private ctrlMap(ch: string): string {
+    if (!this.ctrlOn) {
+      return ch;
+    }
+    const c = ch.charCodeAt(0);
+    if ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) { /* A-Z a-z */
+      return String.fromCharCode(c & 0x1f);
+    }
+    return ch;
+  }
+
+  private serialSendText(): void {
+    const t = this.serialInput;
+    if (t.length === 0) {
+      return;
+    }
+    let wire = '';
+    for (let i = 0; i < t.length; i++) {
+      wire += this.ctrlMap(t.charAt(i));
+    }
+    wire += '\r';
+    const ret = napi.serialWrite(this.vmId, wire);
+    if (ret < 0) {
+      promptAction.showToast({ message: '串口未连接' });
+      return;
+    }
+    this.serialInput = '';
+  }
+
+  /* 发送单个原始字符（Esc=0x1b；Enter=0x0d；Ctrl 单发 0x03 在此收尾） */
+  private serialSendByte(code: number): void {
+    const ret = napi.serialWrite(this.vmId, String.fromCharCode(code));
+    if (ret < 0) {
+      promptAction.showToast({ message: '串口未连接' });
+    }
+  }
+
   /* ================ 窗口最大化 → 沉浸全屏（参照 wineohos VirtualDesktopAbility） ================
    * 用户点系统最大化按钮 → 系统发 MAXIMIZE(2) → 本页以 ENTER_IMMERSIVE 方式
    * 最大化：铺满屏幕、隐藏系统标题栏/状态栏(Dock)。还原走系统自带通道——悬停
@@ -602,6 +720,73 @@ struct VmConsole {
         if (isPadOrPhone() && this.showKbd) {
           VirtualKeyboard({ vmId: this.vmId, showKbd: this.$showKbd })
         }
+        /* 交互式串口 overlay（v4）：盖住画面，只读滚动区 + 键帽/输入行。
+         * 键帽发送原始字节：Ctrl=切换修饰、Esc=0x1b、Enter=0x0d */
+        if (this.serialView) {
+          Column() {
+            Scroll(this.serialScroller) {
+              Text(this.serialText)
+                .fontSize(STATUS_FS)
+                .fontColor('#fff1f2f4')
+                .width('100%')
+                .padding({ left: sp2, right: sp2, top: sp2, bottom: sp2 })
+            }
+            .layoutWeight(1)
+            .align(Alignment.TopStart)
+            .scrollBar(BarState.Auto)
+            .width('100%')
+
+            Row({ space: sp2 }) {
+              Text('Ctrl').fontSize(STATUS_FS).height(STATUS_BTN_H)
+                .padding({ left: sp1, right: sp1 })
+                .fontColor(this.ctrlOn ? cPrimary : MENU_TEXT)
+                .backgroundColor(Color.Transparent)
+                .onClick(() => { this.ctrlOn = !this.ctrlOn })
+              Text('Esc').fontSize(STATUS_FS).height(STATUS_BTN_H)
+                .padding({ left: sp1, right: sp1 })
+                .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+                .onClick(() => { this.serialSendByte(0x1b) })
+              Text('Enter').fontSize(STATUS_FS).height(STATUS_BTN_H)
+                .padding({ left: sp1, right: sp1 })
+                .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+                .onClick(() => { this.serialSendByte(0x0d) })
+              Text(this.ctrlOn ? 'Ctrl 开' : '发送键序').fontSize(STATUS_FS).fontColor(cWeak)
+              Text('清屏').fontSize(STATUS_FS).height(STATUS_BTN_H)
+                .padding({ left: sp1, right: sp1 })
+                .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+                .onClick(() => { this.serialText = '' })
+            }
+            .width('100%')
+            .height(STATUS_H)
+            .backgroundColor('#e620242b')
+            .padding({ left: sp2, right: sp2 })
+            .alignItems(VerticalAlign.Center)
+
+            Row({ space: sp2 }) {
+              TextInput({ text: this.serialInput, placeholder: '输入并回车发送（Ctrl 开时 ^C 生效）' })
+                .layoutWeight(1)
+                .fontSize(STATUS_FS)
+                .height(STATUS_H)
+                .fontColor(MENU_TEXT)
+                .backgroundColor('#e620242b')
+                .padding({ left: sp2, right: sp2 })
+                .onChange((v: string) => this.serialInput = v)
+                .onSubmit(() => this.serialSendText())
+              Text('发送').fontSize(STATUS_FS).height(STATUS_BTN_H)
+                .padding({ left: sp1, right: sp1 })
+                .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+                .onClick(() => { this.serialSendText() })
+            }
+            .width('100%')
+            .height(STATUS_H)
+            .backgroundColor('#e620242b')
+            .padding({ left: sp2, right: sp2 })
+            .alignItems(VerticalAlign.Center)
+          }
+          .width('100%')
+          .height('100%')
+          .backgroundColor('#e620242b')
+        }
       }
       .width('100%')
       .layoutWeight(1)
@@ -629,6 +814,10 @@ struct VmConsole {
             .padding({ left: sp1, right: sp1 })
             .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
             .onClick(() => { this.actReset() })
+          Button(this.serialView ? '画面' : '串口').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+            .padding({ left: sp1, right: sp1 })
+            .fontColor(this.serialView ? cPrimary : MENU_TEXT).backgroundColor(Color.Transparent)
+            .onClick(() => { this.toggleSerialView() })
           if (isPadOrPhone()) {
             Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
               .padding({ left: sp1, right: sp1 })

@@ -10,7 +10,7 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import napiModule from 'libentry.so';
 import {
-  VmProfile, VmStore, qmpSockPath,
+  VmProfile, VmStore, qmpSockPath, mainDiskPath,
 } from '../lib/vmprofile';
 import {
   initVmRegistry, refreshRunningMap, vmIsRunning,
@@ -103,10 +103,11 @@ export struct VmList {
     const usage: Record<string, number> = {};
     for (const p of list) {
       let vsize = 0;
-      if (p.media.diskPath.length > 0) {
+      const main = mainDiskPath(p);
+      if (main.length > 0) {
         try {
-          if (fs.accessSync(p.media.diskPath)) {
-            const s = napi.diskInfo(p.media.diskPath);
+          if (fs.accessSync(main)) {
+            const s = napi.diskInfo(main);
             if (s.length > 0) {
               const j = JSON.parse(s) as Record<string, number | string>;
               vsize = typeof j['virtual-size'] === 'number' ? j['virtual-size'] as number : 0;
@@ -129,7 +130,7 @@ export struct VmList {
   /* 该 VM 引用的媒体（系统盘/光盘）文件是否失效；空串 = 正常 */
   private mediaIssue(p: VmProfile): string {
     const bad: string[] = [];
-    if (p.media.diskPath.length > 0 && !pathExists(p.media.diskPath)) {
+    if (mainDiskPath(p).length > 0 && !pathExists(mainDiskPath(p))) {
       bad.push('系统盘');
     }
     for (const iso of p.media.cdromPaths) {
@@ -143,7 +144,7 @@ export struct VmList {
 
   /* 卡片上的磁盘用量表述（无盘/读不到 → 空串） */
   private diskUsed(p: VmProfile): string {
-    if (p.media.diskPath.length === 0) {
+    if (mainDiskPath(p).length === 0) {
       return '';
     }
     const bytes = this.diskUsage[p.id] ?? 0;

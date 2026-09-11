@@ -3,11 +3,11 @@
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
-import { VmProfile, VmStore, VmArch, SCHEMA_VERSION, fitBoard, builtinIsoFor, forwardErrors } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmArch, VgaType, MouseMode, VmDisk, SCHEMA_VERSION, fitBoard, fitVga, builtinIsoFor, forwardErrors, mainDiskPath } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { isoReadable } from '../lib/fsutil';
 import { pickIsoPath } from '../lib/isoPick';
-import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp5, sp8, spCard } from '../lib/uiTokens';
+import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, cText, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp5, sp8, spCard } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -42,6 +42,20 @@ export struct VmEdit {
   @State tbSizeText: string = '1024';
   @State extraArgs: string = '';
   @State kernelAppend: string = ''; /* 内核参数（-append）；仅当 VM 已配 kernel 时展示可编辑 */
+  /* v4：显卡/输入模式/系统增强/只读与第二盘 */
+  @State vga: VgaType = 'std';
+  @State mouse: MouseMode = 'tablet';
+  @State rng: boolean = false;
+  @State balloon: boolean = false;
+  @State diskReadonly: boolean = false;
+  @State serialInteractive: boolean = true;
+  @State extraDisks: VmDisk[] = []; /* 数据盘（disks[1..]，第 0 张为系统盘走 diskPath） */
+  /* v6：声音 / GDB 调试后端 / CPU 关联增强（flags+RTC 本地时区） */
+  @State audio: boolean = true;
+  @State gdbOn: boolean = false;
+  @State gdbPortText: string = '1234';
+  @State cpuFlags: string = '';
+  @State rtcLocal: boolean = false;
   @State showAdvanced: boolean = false;
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine ISO 下载中 */
   @State isoPct: number = 0;
@@ -59,7 +73,7 @@ export struct VmEdit {
     this.arch = p.machine.arch;
     this.memoryMB = p.runtime.memoryMB;
     this.cpus = p.runtime.cpus;
-    this.diskPath = p.media.diskPath;
+    this.diskPath = mainDiskPath(p);
     this.cdromPaths = p.media.cdromPaths.length > 0 ? p.media.cdromPaths.slice() : [];
     this.bootFromCdrom = p.media.bootFromCdrom;
     this.netEnabled = p.net.enabled;
@@ -69,6 +83,19 @@ export struct VmEdit {
     this.tbSizeText = String(p.runtime.tbSize);
     this.extraArgs = p.extraArgs;
     this.kernelAppend = p.media.kernelAppend;
+    this.vga = p.machine.vga;
+    this.mouse = p.machine.mouse;
+    this.rng = p.runtime.rng;
+    this.balloon = p.runtime.balloon;
+    this.diskReadonly = p.media.disks.length > 0 ? p.media.disks[0].readonly : false;
+    this.serialInteractive = p.machine.serialInteractive;
+    this.extraDisks = p.media.disks.slice(1);
+    /* v6 */
+    this.audio = p.runtime.audio;
+    this.gdbOn = p.runtime.gdbPort > 0;
+    this.gdbPortText = String(p.runtime.gdbPort > 0 ? p.runtime.gdbPort : 1234);
+    this.cpuFlags = p.machine.cpuFlags;
+    this.rtcLocal = p.machine.rtcLocal;
     this.readDiskMeta();
   }
 
@@ -169,6 +196,21 @@ export struct VmEdit {
     }
   }
 
+  /* v4 板卡判定（编辑页只读展示，按 fitBoard 对齐构建行为） */
+  private isX86Board(): boolean {
+    const p = this.profile;
+    if (!p) { return true; }
+    const b = fitBoard(this.arch, p.machine.machine);
+    return b === 'pc' || b === 'q35';
+  }
+
+  private isRaspiBoard(): boolean {
+    const p = this.profile;
+    if (!p) { return false; }
+    const b = fitBoard(this.arch, p.machine.machine);
+    return b === 'raspi2' || b === 'raspi3';
+  }
+
   /* 保存前静态校验：返回第一条错误描述（'' = 通过）。覆盖「从光盘启动但未指定 ISO」、
    * 端口转发格式、ISO 路径存在性。cpuModel 编辑页无入口、tb-size 有整数兜底，交由向导
    * 与构建时拦；自定义 qemu 参数(extraArgs)与资源型错误无法静态判定，由启动失败时的
@@ -186,7 +228,28 @@ export struct VmEdit {
       const errs = forwardErrors(this.portForwards);
       if (errs.length > 0) { return '端口转发：' + errs.join('；'); }
     }
+    /* v6：GDB 端口（开启时）须为 1-65535 整数 */
+    if (this.gdbOn) {
+      const gp = Number(this.gdbPortText);
+      if (!Number.isInteger(gp) || gp < 1 || gp > 65535) {
+        return 'GDB 端口需为 1-65535 的整数';
+      }
+    }
     return '';
+  }
+
+  /* 保存时的磁盘组装（v5）：第 0 张=系统盘（diskPath），数据盘=extraDisks */
+  private assembleDisks(): VmDisk[] {
+    const out: VmDisk[] = [];
+    if (this.diskPath.length > 0) {
+      out.push({ path: this.diskPath, readonly: this.diskReadonly });
+    }
+    for (const d of this.extraDisks) {
+      if (d.path.length > 0) {
+        out.push({ path: d.path, readonly: d.readonly });
+      }
+    }
+    return out;
   }
 
   private save(): void {
@@ -207,19 +270,27 @@ export struct VmEdit {
       name: this.name.trim().length > 0 ? this.name.trim() : '未命名',
       machine: {
         arch: this.arch,
-        vga: this.profile.machine.vga,
+        vga: fitVga(fitBoard(this.arch, this.profile.machine.machine), this.vga),
         machine: fitBoard(this.arch, this.profile.machine.machine),
         firmware: this.profile.machine.firmware,
         cpuModel: this.profile.machine.cpuModel,
+        mouse: this.mouse,
+        serialInteractive: this.serialInteractive,
+        cpuFlags: this.cpuFlags.trim(),
+        rtcLocal: this.rtcLocal,
       },
       runtime: {
         memoryMB: Math.round(this.memoryMB),
         cpus: Math.round(this.cpus),
         mttcg: this.mttcg,
         tbSize: Number.isInteger(tbSize) && tbSize > 0 ? tbSize : 1024,
+        rng: this.rng,
+        balloon: this.balloon,
+        audio: this.audio,
+        gdbPort: this.gdbOn ? Number(this.gdbPortText) : 0,
       },
       media: {
-        diskPath: this.diskPath,
+        disks: this.assembleDisks(),
         cdromPaths: this.cdromPaths,
         bootFromCdrom: this.bootFromCdrom,
         /* kernel/initrd 本页无更换入口，原样透传；kernelAppend 由上方输入框编辑 */
@@ -329,6 +400,45 @@ export struct VmEdit {
               .layoutWeight(1)
           }.alignItems(VerticalAlign.Center).padding({ top: spCard, bottom: spCard })
 
+          /* v4 显卡：x86 板卡可换；virt/raspi 固定（说明行） */
+          Row({ space: sp2 }) {
+            Text('显卡').fontSize(tLabel).width(72)
+            if (this.isX86Board()) {
+              Row({ space: sp2 }) {
+                ForEach(['std', 'cirrus', 'vmware', 'virtio'], (g: string) => {
+                  Text(g).fontSize(tSub)
+                    .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+                    .fontColor(this.vga === g ? Color.White : cText)
+                    .backgroundColor(this.vga === g ? cPrimary : cBg)
+                    .borderRadius(rBtn)
+                    .onClick(() => { this.vga = g as VgaType; })
+                }, (g: string) => g)
+              }
+            } else {
+              Text(this.isRaspiBoard() ? '板载（固定）' : 'virtio-gpu（固定）')
+                .fontSize(tSub).fontColor(cSub).layoutWeight(1)
+            }
+          }.width('100%').padding({ top: sp1, bottom: sp1 })
+
+          /* v4 输入模式：tablet 绝对 / relative 相对（raspi 板卡禁用） */
+          Row({ space: sp2 }) {
+            Text('输入模式').fontSize(tLabel).width(72)
+            Text('绝对 (触摸)').fontSize(tSub)
+              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              .fontColor(this.mouse === 'tablet' ? Color.White : cText)
+              .backgroundColor(this.mouse === 'tablet' ? cPrimary : cBg)
+              .borderRadius(rBtn)
+              .enabled(!this.isRaspiBoard())
+              .onClick(() => { this.mouse = 'tablet' })
+            Text('相对 (PS/2)').fontSize(tSub)
+              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              .fontColor(this.mouse === 'relative' ? Color.White : cText)
+              .backgroundColor(this.mouse === 'relative' ? cPrimary : cBg)
+              .borderRadius(rBtn)
+              .enabled(!this.isRaspiBoard())
+              .onClick(() => { this.mouse = 'relative' })
+          }.width('100%').padding({ top: sp1, bottom: sp1 })
+
           /* —— 存储 —— */
           this.groupHead('存储')
 
@@ -359,6 +469,47 @@ export struct VmEdit {
                 })
             }
           }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
+
+          /* v5：系统盘只读 + 数据盘列表（创建/导入/移除/扩容在存储弹窗） */
+          Row() {
+            Text('系统盘只读').fontSize(tLabel).layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.diskReadonly })
+              .onChange((v: boolean) => this.diskReadonly = v)
+          }.padding({ top: sp1, bottom: sp1 })
+          Text('开启后防系统盘误写；扩容、快照等管理操作不受影响').fontSize(tSub).fontColor(cWeak).width('100%')
+
+          Column({ space: sp1 }) {
+            Row() {
+              Text('数据盘').fontSize(tLabel).width(72)
+              Text(this.extraDisks.length === 0 ? '未配置' : `${this.extraDisks.length} 张`)
+                .fontSize(tSub).fontColor(cSub).layoutWeight(1)
+              Button('存储管理').focusable(false).fontSize(tBody)
+                .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                .backgroundColor(Color.Transparent).fontColor(cPrimary)
+                .onClick(() => {
+                  const p = this.profile;
+                  if (p) {
+                    this.storageParam = p;
+                    this.showStorage = true;
+                  }
+                })
+            }
+            ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
+              Row({ space: sp2 }) {
+                Text(this.baseName(d.path))
+                  .fontSize(tSub).fontColor(cSub).layoutWeight(1).maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text('只读').fontSize(tSub).fontColor(cSub)
+                Toggle({ type: ToggleType.Switch, isOn: d.readonly })
+                  .onChange((v: boolean) => {
+                    const next = this.extraDisks.slice();
+                    next[idx] = { path: d.path, readonly: v };
+                    this.extraDisks = next;
+                  })
+              }.width('100%').padding({ top: sp1, bottom: sp1 })
+            }, (d: VmDisk) => d.path)
+            Text('快照仅含系统盘，数据盘不参与').fontSize(tSub).fontColor(cWeak).width('100%')
+          }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: spCard, bottom: spCard })
 
           Column({ space: sp1 }) {
             Text('光盘 ISO').fontSize(tLabel)
@@ -458,6 +609,64 @@ export struct VmEdit {
                 .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.tbSizeText = v)
             }.padding({ bottom: sp1 })
+            /* v4 系统增强：RNG/balloon（raspi 无 PCI 禁用） */
+            Row() {
+              Text('随机数 (RNG)').fontSize(tLabel).layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.rng })
+                .enabled(!this.isRaspiBoard())
+                .onChange((v: boolean) => this.rng = v)
+            }.padding({ top: sp1, bottom: sp1 })
+            Row() {
+              Text('内存回收 (Balloon)').fontSize(tLabel).layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.balloon })
+                .enabled(!this.isRaspiBoard())
+                .onChange((v: boolean) => this.balloon = v)
+            }.padding({ top: sp1, bottom: sp1 })
+            /* v6：声音（raspi 无模拟声卡禁用；向导建 VM 默认开，历史开机开关在此） */
+            Row() {
+              Text('声音').fontSize(tLabel).layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.audio })
+                .enabled(!this.isRaspiBoard())
+                .onChange((v: boolean) => this.audio = v)
+            }.padding({ top: sp1, bottom: sp1 })
+            /* v6：GDB 调试后端（开机后可连 `gdb target remote :端口`）。仅编辑页提供，
+             * 窗口底部引导文案提示用法 */
+            Row() {
+              Text('GDB 调试').fontSize(tLabel).layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.gdbOn })
+                .onChange((v: boolean) => this.gdbOn = v)
+            }.padding({ top: sp1, bottom: sp1 })
+            if (this.gdbOn) {
+              Row() {
+                Text('监听端口').fontSize(tLabel).width(96)
+                TextInput({ text: this.gdbPortText })
+                  .layoutWeight(1)
+                  .fontSize(tBody)
+                  .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+                  .onChange((v: string) => this.gdbPortText = v)
+              }.padding({ bottom: sp1 })
+              Text('host 侧执行：gdb 后 target remote :' + this.gdbPortText).fontSize(tSub).fontColor(cWeak)
+                .padding({ bottom: sp1 })
+            }
+            /* v6：CPU 关联增强——flags 字符串与 CPU 模型合并（raspi 固定 CPU 禁用） */
+            Row() {
+              Text('CPU 关联').fontSize(tLabel).width(96)
+              TextInput({ text: this.cpuFlags, placeholder: '如 +sse4a,-avx2' })
+                .layoutWeight(1)
+                .fontSize(tBody)
+                .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+                .enabled(!this.isRaspiBoard())
+                .onChange((v: string) => this.cpuFlags = v)
+            }.padding({ bottom: sp1 })
+            Text('追加到 -cpu 模型之后；留空不生成参数').fontSize(tSub).fontColor(cWeak)
+              .padding({ bottom: sp1 })
+            Row() {
+              Text('RTC 本地时区').fontSize(tLabel).layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.rtcLocal })
+                .onChange((v: boolean) => this.rtcLocal = v)
+            }.padding({ top: sp1, bottom: sp1 })
+            Text('guest 时钟随宿主时区显示（-rtc base=localtime）').fontSize(tSub).fontColor(cWeak)
+              .padding({ bottom: sp1 })
             Column({ space: 4 }) {
               Text('自定义 QEMU 参数').fontSize(tLabel)
               Text('追加到命令行末尾').fontSize(tSub).fontColor(cWeak)

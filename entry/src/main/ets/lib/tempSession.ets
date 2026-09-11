@@ -4,7 +4,7 @@
 //
 // 这帧 `__temp__-` 前缀的快照是机制层产物，不对用户暴露：VmManage 显示快照列表时按前缀滤掉。
 // 进程级单例（App 一启动就 initTempSession 订阅生命周期），VM 停止无论列表页开没开都能回滚。
-import { VmStore } from './vmprofile';
+import { VmStore, mainDiskPath } from './vmprofile';
 import { subscribeVmLifecycle, VmLifecycleEvent } from './vmregistry';
 import { snapshotCreate, snapshotApply, snapshotDelete } from './vmsnapshot';
 
@@ -31,7 +31,7 @@ function rollbackOnce(vmId: string, filesDir: string): void {
     return;
   }
   const p = new VmStore(filesDir).load(vmId);
-  const disk = p ? p.media.diskPath : '';
+  const disk = p ? mainDiskPath(p) : '';
   if (disk.length === 0) {
     /* 磁盘没了/没配：清掉标记即可（无处可回滚） */
     pending.delete(vmId);
@@ -49,7 +49,7 @@ function rollbackOnce(vmId: string, filesDir: string): void {
   /* 一次没成（进程刚退、盘锁未释放）：稍后重试一次；仍失败则留 pending 待下次会话启动前清 */
   setTimeout(() => {
     const p2 = new VmStore(filesDir).load(vmId);
-    const d2 = p2 ? p2.media.diskPath : '';
+    const d2 = p2 ? mainDiskPath(p2) : '';
     if (d2.length > 0) {
       try {
         if (snapshotApply(d2, name) === 0) {

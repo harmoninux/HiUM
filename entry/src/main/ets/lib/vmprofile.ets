@@ -6,13 +6,14 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 6;
 
 const DOMAIN = 0x0210;
 const TAG = 'QemuProf';
 
 export type VmArch = 'x86_64' | 'i386' | 'aarch64' | 'arm' | 'loongarch64' | 'riscv64';
-export type VgaType = 'std' | 'virtio';
+export type VgaType = 'std' | 'virtio' | 'cirrus' | 'vmware';
+export type MouseMode = 'tablet' | 'relative'; /* tablet=绝对注入; relative=相对(PS/2 或 usb-mouse) */
 export type VmBoard = 'pc' | 'q35' | 'virt' | 'raspi2' | 'raspi3';
 export type VmFirmware = 'seabios' | 'ovmf';
 
@@ -23,6 +24,10 @@ export interface VmMachine {
   machine: VmBoard;    /* 板卡：x86 pc/q35，arm64/arm virt/raspi2/raspi3，loongarch64/riscv64 virt */
   firmware: VmFirmware; /* 固件：seabios(BIOS) / ovmf(UEFI，暂需 OVMF 文件) */
   cpuModel: string;     /* '' = 自动（arm64/arm/loongarch64 给 max） */
+  mouse: MouseMode;             /* 输入模式；raspi 无 PS/2 无 PCI，构建期忽略（保持 tablet） */
+  serialInteractive: boolean;   /* 串口走 socket 交互（默认 true）；false=落盘 file 日志 */
+  cpuFlags: string;             /* v6：-cpu <模型>,<flags> 的 flags 部分，如 "+sse4a,-avx2"；''=无 */
+  rtcLocal: boolean;            /* v6：-rtc base=localtime（guest RTC 随宿主时区） */
 }
 
 /* 板卡是否适配某架构（aarch64/loongarch64 只认 virt/raspi2；x86 只认 pc/q35） */
@@ -36,6 +41,28 @@ export function fitBoard(arch: VmArch, board: string): VmBoard {
     arch === 'arm' ? ['virt', 'raspi2', 'raspi3'] :
     (arch === 'loongarch64' || arch === 'riscv64') ? ['virt'] : ['pc', 'q35'];
   return allowed.indexOf(board) >= 0 ? board as VmBoard : defaultBoard(arch);
+}
+
+/* 显卡收紧：cirrus/vmware 仅 x86 板卡（pc/q35）；virt/raspi 无传统 VGA，回落 std（virt 的
+ * virtio-gpu 是构建强制，此处仅保证字段合法）。 */
+export function fitVga(board: VmBoard, vga: string): VgaType {
+  const allowed: string[] = (board === 'pc' || board === 'q35') ?
+    ['std', 'virtio', 'cirrus', 'vmware'] : ['std'];
+  return allowed.indexOf(vga) >= 0 ? vga as VgaType : 'std';
+}
+
+export function fitMouse(mouse: string): MouseMode {
+  return mouse === 'relative' ? 'relative' : 'tablet';
+}
+
+/* 主盘路径（disks[0]）；无盘返回 ''。快照/临时会话/启动盘只作用于主盘。 */
+export function mainDiskPath(p: VmProfile): string {
+  return p.media.disks.length > 0 ? p.media.disks[0].path : '';
+}
+
+/* 磁盘格式判定：.qcow2 = qcow2，其余(raw/.img)按 raw（与向导导入保留扩展名的语义一致） */
+export function driveFmt(path: string): string {
+  return path.toLowerCase().endsWith('.qcow2') ? 'qcow2' : 'raw';
 }
 
 /* 内置 Alpine ISO 的「文件名 ↔ 架构」映射（vmDataDir 下的文件名，按需下载）。
@@ -53,17 +80,28 @@ export function builtinIsoFor(arch: VmArch): string {
   }
 }
 
-/* 运行时层：可被 JIT 性能预设覆盖（memory/cpus/accel） */
+/* 运行时层：可被 JIT 性能预设覆盖（memory/cpus/accel）+ 系统增强设备（v4） */
 export interface VmRuntime {
   memoryMB: number;
   cpus: number;
   mttcg: boolean;   /* TCG 多线程 */
   tbSize: number;
+  rng: boolean;     /* virtio-rng-pci 熵源（Linux guest 自带驱动；raspi 无 PCI 构建期忽略） */
+  balloon: boolean; /* virtio-balloon-pci 内存回收（同上） */
+  audio: boolean;   /* v6：声音——-audiodev driver=ohos + 板卡对应声卡（raspi 无模拟声卡，构建期忽略） */
+  gdbPort: number;  /* v6：GDB 调试后端端口，0=关闭；仅编辑页可配（向导不出现） */
 }
 
-/* 介质层 */
+/* 一张磁盘：path 为 vms/ 内资产路径（新建/导入时复制）或外部引用；readonly 挂 -drive readonly=on */
+export interface VmDisk {
+  path: string;
+  readonly: boolean;
+}
+
+/* 介质层：全部磁盘数组化（v5）；disks[0] = 系统盘（启动/快照/临时会话对象），
+ * 其余为数据盘。快照与临时会话只作用于系统盘，数据盘不参与回滚。 */
 export interface VmMedia {
-  diskPath: string;     /* 系统盘必配：新建/编辑均在标准位置生成 qcow2；创建时也可导入镜像（复制进 vms/） */
+  disks: VmDisk[];
   cdromPaths: string[];  /* 有序 ISO 列表；空数组 = 无光盘；第一张为启动盘候选 */
   bootFromCdrom: boolean;
   /* 直接内核引导（v3 新增，均 '' = 不用）：kernel/initrd 在创建时已复制进 vms/，
@@ -101,9 +139,15 @@ export function blankProfile(id: string): VmProfile {
     schemaVersion: SCHEMA_VERSION,
     id: id,
     name: '新虚拟机',
-    machine: { arch: 'x86_64', vga: 'std', machine: 'pc', firmware: 'seabios', cpuModel: '' },
-    runtime: { memoryMB: 1024, cpus: 2, mttcg: true, tbSize: 1024 },
-    media: { diskPath: '', cdromPaths: [], bootFromCdrom: false, kernelPath: '', initrdPath: '', kernelAppend: '' },
+    machine: {
+      arch: 'x86_64', vga: 'std', machine: 'pc', firmware: 'seabios', cpuModel: '',
+      mouse: 'tablet', serialInteractive: true, cpuFlags: '', rtcLocal: false,
+    },
+    runtime: { memoryMB: 1024, cpus: 2, mttcg: true, tbSize: 1024, rng: false, balloon: false, audio: true, gdbPort: 0 },
+    media: {
+      disks: [],
+      cdromPaths: [], bootFromCdrom: false, kernelPath: '', initrdPath: '', kernelAppend: '',
+    },
     net: { enabled: true, portForwards: '', sharedFolder: false },
     temporarySession: false,
     extraArgs: '',
@@ -121,7 +165,10 @@ export function migrateProfile(raw: Object): VmProfile {
   switch (v) {
     case 1:
       return migrateV1(o);
-    case 2: /* v2→v3：media 新增 kernel 三字段，统一由归一化回填 '' */
+    case 2: /* v2+：kernel 三字段、v4/v5/v6 新字段统一由 normalizeV2 回填 */
+    case 3:
+    case 4:
+    case 5:
     case SCHEMA_VERSION:
       return normalizeV2(o);
     default:
@@ -146,6 +193,27 @@ function jObj(o: Record<string, Object>, k: string): Record<string, Object> | un
   const v = o[k];
   return typeof v === 'object' ? v as Record<string, Object> : undefined;
 }
+/* 读 VmDisk[]（动态 JSON 存的是 Object[]，逐项窄化；path 空的项丢弃） */
+function jDiskArr(o: Record<string, Object>, k: string): VmDisk[] {
+  const v = o[k];
+  if (!Array.isArray(v)) {
+    return [];
+  }
+  const raw = v as Object[];
+  const out: VmDisk[] = [];
+  for (const item of raw) {
+    if (item == null) {
+      continue;
+    }
+    const o2 = item as Record<string, Object>;
+    const path = jStr(o2, 'path');
+    if (path.length > 0) {
+      out.push({ path: path, readonly: jBool(o2, 'readonly', false) });
+    }
+  }
+  return out;
+}
+
 /* 读 string[]（动态 JSON 存的是 Object[]，逐项窄化；非法项丢弃） */
 function jStrArr(o: Record<string, Object>, k: string): string[] {
   const v = o[k];
@@ -183,7 +251,10 @@ function migrateV1(o: Record<string, Object>): VmProfile {
   p.runtime.cpus = jNum(o, 'cpus', 2);
   p.runtime.mttcg = jBool(o, 'mttcg', true);
   p.runtime.tbSize = jNum(o, 'tbSize', 1024);
-  p.media.diskPath = jStr(o, 'diskPath');
+  const legDisk = jStr(o, 'diskPath');
+  if (legDisk.length > 0) {
+    p.media.disks = [{ path: legDisk, readonly: false }];
+  }
   p.media.cdromPaths = jStrArr(o, 'cdromPaths');
   if (p.media.cdromPaths.length === 0) {
     const leg = jStr(o, 'cdromPath');
@@ -212,21 +283,32 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
     if (arch === 'i386' || arch === 'aarch64' || arch === 'arm' || arch === 'loongarch64') {
       p.machine.arch = arch as VmArch;
     }
-    if (jStr(m, 'vga') === 'virtio') {
-      p.machine.vga = 'virtio';
-    }
     p.machine.machine = fitBoard(p.machine.arch, jStr(m, 'machine'));
+    p.machine.vga = fitVga(p.machine.machine, jStr(m, 'vga'));
     p.machine.firmware = jStr(m, 'firmware') === 'ovmf' ? 'ovmf' : 'seabios';
     p.machine.cpuModel = jStr(m, 'cpuModel');
+    /* v4：鼠标/串口模式，旧存档回填默认 */
+    p.machine.mouse = fitMouse(jStr(m, 'mouse'));
+    p.machine.serialInteractive = jBool(m, 'serialInteractive', true);
+    /* v6：CPU flags 原样透传（''=无）；RTC 本地时区默认关 */
+    p.machine.cpuFlags = jStr(m, 'cpuFlags');
+    p.machine.rtcLocal = jBool(m, 'rtcLocal', false);
   }
   if (r) {
     p.runtime.memoryMB = jNum(r, 'memoryMB', p.runtime.memoryMB);
     p.runtime.cpus = jNum(r, 'cpus', p.runtime.cpus);
     p.runtime.mttcg = jBool(r, 'mttcg', p.runtime.mttcg);
     p.runtime.tbSize = jNum(r, 'tbSize', p.runtime.tbSize);
+    /* v4：系统增强设备开关 */
+    p.runtime.rng = jBool(r, 'rng', false);
+    p.runtime.balloon = jBool(r, 'balloon', false);
+    /* v6：声音默认开；GDB 端口默认关 */
+    p.runtime.audio = jBool(r, 'audio', true);
+    p.runtime.gdbPort = jNum(r, 'gdbPort', 0);
   }
   if (md) {
-    p.media.diskPath = jStr(md, 'diskPath');
+    /* v5：磁盘数组化；disks[0] 为系统盘 */
+    p.media.disks = jDiskArr(md, 'disks');
     p.media.cdromPaths = jStrArr(md, 'cdromPaths');
     if (p.media.cdromPaths.length === 0) {
       const leg = jStr(md, 'cdromPath');
@@ -321,6 +403,11 @@ export function qmpSockPath(p: VmProfile, vmDataDir: string): string {
   return `${vmDataDir}/qmp-${p.id}.sock`;
 }
 
+/* 交互式串口的 unix socket 路径（serialInteractive 时 qemu `-serial chardev:socket,server=on` 监听） */
+export function serialSockPath(p: VmProfile, vmDataDir: string): string {
+  return `${vmDataDir}/serial-${p.id}.sock`;
+}
+
 /* 9p 共享宿主目录：启动时经 picker 取到的 Download 目录（唯一可共享目录），guest 挂载为 /shared。
  * 读到 AppStorage（EntryAbility prepareSharedFolder 写入）；未取到则回退 app 数据目录下 shared/。 */
 export function sharedDir(filesDir: string): string {
@@ -338,28 +425,49 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     '-smp', String(p.runtime.cpus),
     '-accel', `tcg,thread=${p.runtime.mttcg ? 'multi' : 'single'},tb-size=${p.runtime.tbSize}`,
     '-display', 'none',
-    '-device', 'virtio-tablet-pci',
     '-qmp', `unix:${qmpSockPath(p, vmDataDir)},server=on,wait=off`,
   ];
+  /* v6：GDB 调试后端（tcp 连接，编辑页配置；host 侧 gdb 经
+   * `target remote :<port>` 接入）。端口 0 = 不挂 -gdb。 */
+  if (p.runtime.gdbPort > 0) {
+    args.push('-gdb', `tcp:127.0.0.1:${p.runtime.gdbPort}`);
+  }
+  /* v6：RTC 本地时区——guest 时钟随宿主时区显示（默认 utc 是 qemu 出厂行为） */
+  if (p.machine.rtcLocal) {
+    args.push('-rtc', 'base=localtime');
+  }
   /* 板卡/固件/CPU：默认 pc(x86)/virt(arm64) 与旧行为一致（qemu 默认即 pc）；
    * 新板卡 q35/raspi2 走对应 -machine。aarch64 默认给 -cpu max，virt 挂 virtio-gpu。
    * aarch64 virt 现已接入 edk2-aarch64-code.fd（-bios）；x86 的 firmware=ovmf
    * 仍未接 pflash（需 OVMF_CODE/VARS 固件），缺件回落 seabios。 */
   const board = fitBoard(p.machine.arch, p.machine.machine);
   const isRaspi = board === 'raspi2' || board === 'raspi3';
+  /* 输入设备（v4）：tablet=绝对注入（默认，virtio-tablet-pci）；relative=相对注入——
+   * pc/q35 走 PS/2 鼠标（DOS/古董系统兼容最好），virt 板无 PS/2，usb-mouse 挂在下方
+   * 已建的 usb-ehci 上；raspi 无 PS/2 无 PCI，保持 tablet 注入（现状行为）。 */
+  const mouseRel = !isRaspi && p.machine.mouse === 'relative';
+  if (isRaspi) {
+    args.push('-device', 'virtio-tablet-pci');
+  } else if (mouseRel && board !== 'virt') {
+    args.push('-device', 'ps2-mouse');
+  } else if (!mouseRel) {
+    args.push('-device', 'virtio-tablet-pci');
+  }
   if (isRaspi) {
     /* 树莓派：qemu 10.2 实际机器名 raspi2b/raspi3b（旧代码 'raspi2' 会报 unsupported machine）。
      * 树莓派 SoC 自带引导、不依赖 edk2/BIOS；无 PCI，故不挂 virtio-gpu/net；磁盘经 SD 卡控制器。 */
     args.push('-machine', board === 'raspi2' ? 'raspi2b' : 'raspi3b');
   } else if (board === 'virt') {
     args.push('-machine', board);
-    args.push('-cpu', p.machine.cpuModel.length > 0 ? p.machine.cpuModel : 'max');
     args.push('-device', 'virtio-gpu-pci');
     /* virt 机器无 i8042 PS/2 控制器且默认不带 USB 控制器（pc/q35 才有 PS/2）。
      * 裸挂 usb-kbd 会因找不到 USB 总线而 qemu abort；须显式挂 USB EHCI 主机
      * 控制器再挂 USB 键盘，否则 aarch64/arm/loongarch64/riscv64 收不到按键。 */
     args.push('-device', 'usb-ehci,id=usb');
     args.push('-device', 'usb-kbd,bus=usb.0');
+    if (mouseRel) {
+      args.push('-device', 'usb-mouse,bus=usb.0');
+    }
     /* aarch64 的 virt 机器必须提供 UEFI 固件才能引导客户机：edk2-aarch64-code.fd
      * 由 make deps 产出、bootstrap 解到 vmDir，qemu 经 -bios(绝对路径) 载入 flash0。
      * loongarch64/arm(32位) 同理，对应各自 edk2-*.fd。 */
@@ -372,19 +480,57 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     } else if (p.machine.arch === 'riscv64') {
       args.push('-bios', vmDataDir + '/edk2-riscv-code.fd');
     }
+    /* 串口（v4）：virt 板无 ISA UART，经 virtio-serial + virtconsole 接 socket 交互 */
+    if (p.machine.serialInteractive) {
+      args.push('-chardev', `socket,path=${vmDataDir}/serial-${p.id}.sock,server=on,wait=off,id=chr0`);
+      args.push('-device', 'virtio-serial-pci');
+      args.push('-device', 'virtconsole,chardev=chr0');
+    }
   } else {
     args.push('-machine', board);
-    if (p.machine.cpuModel.length > 0) {
-      args.push('-cpu', p.machine.cpuModel);
+    args.push('-vga', fitVga(board, p.machine.vga));
+    /* 串口（v4）：默认 socket 交互（Console 串口视图读）；关掉则维持落盘 file 日志 */
+    if (p.machine.serialInteractive) {
+      args.push('-chardev', `socket,path=${vmDataDir}/serial-${p.id}.sock,server=on,wait=off,id=chr0`);
+      args.push('-serial', 'chardev:chr0');
+    } else {
+      args.push('-serial', `file:${vmDataDir}/serial-${p.id}.log`);
     }
-    args.push('-vga', p.machine.vga);
-    args.push('-serial', `file:${vmDataDir}/serial-${p.id}.log`);
   }
-  if (p.media.diskPath.length > 0) {
-    /* 默认新建的是 qcow2；导入的 raw 镜像仍按扩展名回退到 raw */
-    const fmt = p.media.diskPath.toLowerCase().endsWith('.qcow2') ? 'qcow2' : 'raw';
-    const bus = isRaspi ? 'sd' : 'virtio'; /* 树莓派经 SD 卡控制器，非 virtio-blk */
-    args.push('-drive', `file=${p.media.diskPath},if=${bus},format=${fmt}`);
+  /* -cpu（v6 关联增强）：cpuFlags（如 "+sse4a,-avx2"）与 cpuModel 合并成
+   * `-cpu <模型>,<flags>`；模型为空时用 max 承载 flags（x86 TCG 的 max 合法，
+   * 且行为与 virt 板的默认 max 一致）。两者皆空：pc/q35 交 qemu 默认，virt 给
+   * max，raspi 固定 CPU 不支持自定义——三处都不产生 -cpu。 */
+  if (!isRaspi) {
+    const cpuModel = p.machine.cpuModel;
+    const cpuFlags = p.machine.cpuFlags.trim();
+    if (cpuModel.length > 0 || cpuFlags.length > 0) {
+      let cpu = cpuModel.length > 0 ? cpuModel : 'max';
+      if (cpuFlags.length > 0) {
+        cpu += ',' + cpuFlags;
+      }
+      args.push('-cpu', cpu);
+    } else if (board === 'virt') {
+      args.push('-cpu', 'max');
+    }
+  }
+  /* 全部磁盘（v5 数组化）：disks[0]=系统盘（快照/临时会话/启动对象），其余数据盘。
+   * raspi 的 SD 卡控制器只挂一张（PC/arm 板卡经 virtio 可挂多张）。
+   * 快照与临时会话只作用于系统盘，数据盘不参与回滚。 */
+  let diskIdx = 0;
+  for (const d of p.media.disks) {
+    if (d.path.length === 0) {
+      continue;
+    }
+    if (isRaspi && diskIdx > 0) {
+      continue;
+    }
+    let ds = `file=${d.path},if=${isRaspi ? 'sd' : 'virtio'},format=${driveFmt(d.path)}`;
+    if (d.readonly) {
+      ds += ',readonly=on';
+    }
+    args.push('-drive', ds);
+    diskIdx++;
   }
   /* 直接内核引导：-kernel 由 qemu 直接装载内核，绕过固件(SeaBIOS/EDK2)的
    * 引导流程；x86 经 linuxboot 固件（deps 已产出），virt/raspi 原生支持 */
@@ -425,6 +571,25 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
   if (p.net.sharedFolder && sharedDir.length > 0) {
     /* 9p 共享宿主目录到 guest /shared（宿主目录须已存在，由调用方 mkdir） */
     args.push('-virtfs', `local,path=${sharedDir},mount_tag=shared,security_model=none,multidevs=remap`);
+  }
+  /* 系统增强设备（v4）：RNG/balloon 均需 PCI；raspi 无 PCI 跳过 */
+  if (!isRaspi) {
+    if (p.runtime.rng) {
+      args.push('-device', 'virtio-rng-pci');
+    }
+    if (p.runtime.balloon) {
+      args.push('-device', 'virtio-balloon-pci');
+    }
+  }
+  /* 声音（v6）：OHOS 音频后端（driver=ohos，见 libqemu 补丁）——
+   * pc/q35 用 AC97（UTM 同款，guest 走 snd_intel8x0/ac97），virt 用
+   * virtio-sound-pci（guest 走 snd_virtio）。每 VM 独立 qemu 进程，
+   * audiodev id=ohos0 天然无冲突。raspi 无模拟声卡，忽略并 UI 禁用。 */
+  if (!isRaspi) {
+    if (p.runtime.audio) {
+      args.push('-audiodev', 'driver=ohos,id=ohos0');
+      args.push('-device', board === 'virt' ? 'virtio-sound-pci,audiodev=ohos0' : 'AC97,audiodev=ohos0');
+    }
   }
   const extra = p.extraArgs.trim();
   if (extra.length > 0) {
@@ -489,10 +654,13 @@ export class VmStore {
     fs.closeSync(fd);
   }
 
-  /* 删配置以及位于 vms 目录内的磁盘镜像与内核/initrd 副本 */
+  /* 删配置以及位于 vms 目录内的全部磁盘镜像与内核/initrd 副本 */
   remove(p: VmProfile): void {
-    for (const path of [this.profilePath(p.id), p.media.diskPath,
-      p.media.kernelPath, p.media.initrdPath]) {
+    const paths: string[] = [this.profilePath(p.id), p.media.kernelPath, p.media.initrdPath];
+    for (const d of p.media.disks) {
+      paths.push(d.path);
+    }
+    for (const path of paths) {
       try {
         if (path.length > 0 && path.startsWith(this.dir) && fs.accessSync(path)) {
           fs.unlinkSync(path);

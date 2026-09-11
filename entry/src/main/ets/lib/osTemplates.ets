@@ -97,7 +97,7 @@ export function buildTemplateProfile(tpl: OsTemplate, id: string, filesDir: stri
   p.runtime.mttcg = tpl.mttcg;
   p.runtime.tbSize = tpl.tbSize;
   if (tpl.diskMB > 0) {
-    p.media.diskPath = `${filesDir}/vms/${id}.qcow2`;
+    p.media.disks = [{ path: `${filesDir}/vms/${id}.qcow2`, readonly: false }];
   }
   if (tpl.isoName.length > 0) {
     p.media.cdromPaths = [`${vmDataDir}/${tpl.isoName}`];

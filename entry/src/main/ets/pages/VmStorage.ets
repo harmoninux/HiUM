@@ -6,11 +6,13 @@ import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import napiModule from 'libentry.so';
-import { VmProfile, VmStore, VmArch, builtinIsoFor } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmArch, VmDisk, builtinIsoFor } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
 import { snapshotCreate } from '../lib/vmsnapshot';
 import { ensureBuiltinIso } from '../lib/isoDl';
-import { pickIsoPath } from '../lib/isoPick';
+import { pickIsoPath, pickFilePath } from '../lib/isoPick';
+import { copyFileWithProgress } from '../lib/fsutil';
+import { mainDiskPath } from '../lib/vmprofile';
 import {
   cPrimary, cDanger, cRunning, cSuccess, cText, cSub, cWeak,
   cCard, cBlock, cChip, cBorder,
@@ -50,6 +52,14 @@ export struct VmStorage {
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine 下载中 */
   @State isoPct: number = 0;
   @State snack: string = '';
+  /* v5：数据盘（disks[1..]；增/删/扩容/只读；快照不参与） */
+  @State extraDisks: VmDisk[] = [];
+  @State secondMode: boolean = false;   /* 增盘表单显隐 */
+  @State secondSrc: string = '';        /* 导入源（添加时复制进 vms/） */
+  @State secondSrcMeta: string = '';
+  @State secondNewGBText: string = '';
+  @State secondNewReadonly: boolean = false; /* 新增加数据盘即设为只读 */
+  @State secondExpandIdx: number = -1;       /* 扩容模式的目标盘下标；-1=添加模式 */
 
   aboutToAppear(): void {
     const p = this.profile;
@@ -58,8 +68,9 @@ export struct VmStorage {
     }
     this.name = p.name;
     this.arch = p.machine.arch;
-    this.diskPath = p.media.diskPath;
+    this.diskPath = mainDiskPath(p);
     this.cdromPaths = p.media.cdromPaths.length > 0 ? p.media.cdromPaths.slice() : [];
+    this.extraDisks = p.media.disks.slice(1);
     this.refreshDisk();
   }
 
@@ -101,6 +112,201 @@ export struct VmStorage {
     } catch {
       /* 解析失败保持默认 */
     }
+  }
+
+  /* ================= 数据盘（v5：disks[1..]，系统盘=disks[0] 走 diskPath） ================= */
+
+  /* 数据盘增/删/扩容需停机（盘被 qemu 锁）；只读开关只改 profile 随时可以 */
+  private canSecondOp(): boolean {
+    return this.profile !== null && !vmIsRunning(this.profile.id);
+  }
+
+  /* 把 extraDisks 写回 profile（第 0 张系统盘保留原只读值），save + bump */
+  private syncExtraDisks(): void {
+    const p = this.profile;
+    if (!p) {
+      return;
+    }
+    const first: VmDisk = p.media.disks.length > 0
+      ? p.media.disks[0]
+      : { path: this.diskPath, readonly: false };
+    p.media.disks = [first].concat(this.extraDisks);
+    new VmStore(this.filesDir).save(p);
+    this.vmListVersion++;
+  }
+
+  private pickSecondSrc(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    pickFilePath(ctx, ['.qcow2', '.img', '.raw']).then((p: string) => {
+      if (p.length === 0) {
+        promptAction.showToast({ message: '未选择文件 / 路径不可读' });
+        return;
+      }
+      this.secondSrc = p;
+      this.secondSrcMeta = '';
+      const s = napi.diskInfo(p);
+      if (s.length > 0) {
+        try {
+          const j = JSON.parse(s) as Record<string, number | string>;
+          const fmt = typeof j['format'] === 'string' ? j['format'] as string : '?';
+          const vs = typeof j['virtual-size'] === 'number' ? j['virtual-size'] as number : 0;
+          this.secondSrcMeta = `${fmt} · 虚拟 ${(vs / GB).toFixed(1)}G`;
+        } catch {
+          this.secondSrcMeta = '';
+        }
+      }
+    });
+  }
+
+  private secondSrcExt(): string {
+    const s = this.secondSrc.toLowerCase();
+    const i = s.lastIndexOf('.');
+    return i >= 0 ? s.substring(i) : '.img';
+  }
+
+  /* 新增一张数据盘：新建空白 qcow2 或导入镜像（复制进 vms/），push 进 extraDisks */
+  private doSecondAdd(): void {
+    const p = this.profile;
+    if (!p) {
+      return;
+    }
+    if (!this.canSecondOp()) {
+      promptAction.showToast({ message: 'VM 运行中不能增改数据盘' });
+      return;
+    }
+    if (this.extraDisks.length >= 8) {
+      promptAction.showToast({ message: '数据盘最多 8 张' });
+      return;
+    }
+    const store = new VmStore(this.filesDir);
+    const finish = (dst: string, msg: string): void => {
+      const next = this.extraDisks.slice();
+      next.push({ path: dst, readonly: this.secondNewReadonly });
+      this.extraDisks = next;
+      this.syncExtraDisks();
+      this.secondMode = false;
+      this.secondSrc = '';
+      this.secondSrcMeta = '';
+      this.secondNewGBText = '';
+      this.secondNewReadonly = false;
+      this.showSnack(msg);
+    };
+    if (this.secondSrc.length > 0) {
+      const dst = `${store.dir}/${p.id}-d2-${this.extraDisks.length + 1}${this.secondSrcExt()}`;
+      copyFileWithProgress(this.secondSrc, dst, () => {}).then((ok: boolean) => {
+        if (!ok) {
+          promptAction.showToast({ message: '复制数据盘失败' });
+          return;
+        }
+        finish(dst, '数据盘已添加');
+      });
+      return;
+    }
+    const gbNum = Number(this.secondNewGBText);
+    if (!Number.isInteger(gbNum) || gbNum <= 0 || gbNum > 512) {
+      promptAction.showToast({ message: '请输入有效的大小（1-512 GB）' });
+      return;
+    }
+    const dst = `${store.dir}/${p.id}-d2-${this.extraDisks.length + 1}.qcow2`;
+    const ret = napi.createDisk(dst, gbNum * 1024, 'dynamic');
+    if (ret !== 0) {
+      promptAction.showToast({ message: '创建数据盘失败' });
+      return;
+    }
+    finish(dst, `数据盘 ${gbNum}GB 已创建`);
+  }
+
+  /* 某张数据盘的只读开关（同步 extraDisks + profile） */
+  private doSecondReadonly(idx: number, v: boolean): void {
+    if (idx < 0 || idx >= this.extraDisks.length) {
+      return;
+    }
+    const next = this.extraDisks.slice();
+    next[idx] = { path: next[idx].path, readonly: v };
+    this.extraDisks = next;
+    this.syncExtraDisks();
+  }
+
+  /* qcow2 扩容（只能扩大；只读不阻碍扩容，管理操作不受 readonly 限制） */
+  private doSecondExpand(idx: number): void {
+    if (idx < 0 || idx >= this.extraDisks.length) {
+      return;
+    }
+    const path = this.extraDisks[idx].path;
+    if (!path) {
+      return;
+    }
+    if (!this.canSecondOp()) {
+      promptAction.showToast({ message: 'VM 运行中不能扩容' });
+      return;
+    }
+    const gbNum = Number(this.secondNewGBText);
+    if (!Number.isInteger(gbNum) || gbNum <= 0) {
+      promptAction.showToast({ message: '请输入新大小（GB）' });
+      return;
+    }
+    /* 目标须大于当前大小：从 diskInfo 现读（行内不缓存每盘 meta） */
+    const info = napi.diskInfo(path);
+    let cur = 0;
+    try {
+      const j = JSON.parse(info) as Record<string, number | string>;
+      const vsize = typeof j['virtual-size'] === 'number' ? j['virtual-size'] as number : 0;
+      cur = vsize;
+    } catch {
+      cur = 0;
+    }
+    if (cur > 0 && gbNum * GB <= cur) {
+      promptAction.showToast({ message: '扩容目标须大于当前大小' });
+      return;
+    }
+    const ret = napi.diskResize(path, gbNum * 1024);
+    if (ret !== 0) {
+      promptAction.showToast({ message: '扩容失败' });
+      return;
+    }
+    this.secondMode = false;
+    this.secondNewGBText = '';
+    this.showSnack(`数据盘已扩容到 ${gbNum} GB`);
+  }
+
+  /* 移除某张数据盘：删引用 + vms 内镜像文件一并删（不可恢复，强确认） */
+  private doSecondRemove(idx: number): void {
+    const p = this.profile;
+    if (!p) {
+      return;
+    }
+    if (!this.canSecondOp()) {
+      promptAction.showToast({ message: 'VM 运行中不能移除数据盘' });
+      return;
+    }
+    if (idx < 0 || idx >= this.extraDisks.length) {
+      return;
+    }
+    const path = this.extraDisks[idx].path;
+    AlertDialog.show({
+      title: '移除数据盘',
+      message: '将移除对这块数据盘的引用；镜像文件如在本应用 vms 目录内会一并删除，不可恢复。确认？',
+      primaryButton: { value: '取消', action: () => {} },
+      secondaryButton: {
+        value: '移除',
+        fontColor: cDanger,
+        action: () => {
+          try {
+            const store = new VmStore(this.filesDir);
+            if (path.length > 0 && path.startsWith(store.dir) && fs.accessSync(path)) {
+              fs.unlinkSync(path);
+            }
+          } catch {
+            /* best effort */
+          }
+          const next = this.extraDisks.slice();
+          next.splice(idx, 1);
+          this.extraDisks = next;
+          this.syncExtraDisks();
+          this.showSnack('已移除数据盘');
+        },
+      },
+    });
   }
 
   /* 快照需 qcow2 且 VM 停机（运行中盘被 qemu 锁死，改了会丢） */
@@ -189,10 +395,10 @@ export struct VmStorage {
           const path = `${store.dir}/${cur.id}.qcow2`;
           this.diskPath = path; /* 本页读取/渲染统一走 new 后的路径 */
           /* 删旧镜像：仅在应用 vms 目录内（同 VmStore.remove 的守卫）；删失败不阻塞 */
+          const oldMain = cur.media.disks.length > 0 ? cur.media.disks[0].path : '';
           try {
-            const old = cur.media.diskPath;
-            if (old.length > 0 && old.startsWith(store.dir) && fs.accessSync(old)) {
-              fs.unlinkSync(old);
+            if (oldMain.length > 0 && oldMain.startsWith(store.dir) && fs.accessSync(oldMain)) {
+              fs.unlinkSync(oldMain);
             }
           } catch {
             /* 删除失败不阻塞，仍重建 */
@@ -202,9 +408,13 @@ export struct VmStorage {
             promptAction.showToast({ message: '重建系统盘失败' });
             return;
           }
-          /* 引用与其他配置一致；bump 版本让详情页/列表重读 */
-          if (cur.media.diskPath !== path) {
-            cur.media.diskPath = path;
+          /* 引用与其他配置一致（数据盘不动）；bump 版本让详情页/列表重读 */
+          const first: VmDisk = cur.media.disks.length > 0
+            ? cur.media.disks[0]
+            : { path: '', readonly: false };
+          if (first.path !== path) {
+            const newFirst: VmDisk = { path: path, readonly: first.readonly };
+            cur.media.disks = [newFirst].concat(cur.media.disks.slice(1));
             new VmStore(this.filesDir).save(cur);
           }
           this.vmListVersion++;
@@ -385,6 +595,112 @@ export struct VmStorage {
     }
   }
 
+  /* 数据盘（v5）：列表逐行 只读/扩容/移除 + 底部「添加数据盘」表单（新建/导入）。
+   * 系统盘（disks[0]）在本弹窗「系统盘」区；快照与临时会话只含系统盘。 */
+  @Builder
+  secSecondDisk() {
+    this.secHead('数据盘')
+    Column({ space: sp2 }) {
+      /* 逐行：名字 + 只读 Toggle + 扩容 + 移除 */
+      ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
+        Row({ space: sp2 }) {
+          Text(this.baseName(d.path))
+            .fontSize(tSub).fontColor(cSub).layoutWeight(1).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text('只读').fontSize(tSub).fontColor(cSub)
+          Toggle({ type: ToggleType.Switch, isOn: d.readonly })
+            .onChange((v: boolean) => this.doSecondReadonly(idx, v))
+          Button('扩容').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .enabled(this.canSecondOp())
+            .backgroundColor(Color.Transparent).fontColor(cSub)
+            .onClick(() => {
+              this.secondNewGBText = '';
+              this.secondMode = !this.secondMode;
+              this.secondExpandIdx = idx;
+            })
+          Button('移除').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .enabled(this.canSecondOp())
+            .backgroundColor(Color.Transparent).fontColor(cDanger)
+            .onClick(() => this.doSecondRemove(idx))
+        }.width('100%').padding({ top: sp1, bottom: sp1 })
+      }, (d: VmDisk) => d.path)
+
+      if (this.extraDisks.length === 0) {
+        Text('未配置数据盘（系统盘之外再加一块）。可经下面表单新建或导入。')
+          .fontSize(tSub).fontColor(cWeak).width('100%')
+      }
+
+      /* 增盘/扩容表单（secondMode 切换；newGBText 复用两者） */
+      if (!this.secondMode) {
+        Row({ space: sp2 }) {
+          Text('本弹窗是数据盘的全部管理入口（系统盘在上一区）').fontSize(tSub).fontColor(cWeak).layoutWeight(1)
+          Button(this.canSecondOp() ? '添加数据盘…' : 'VM 运行中').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .enabled(this.canSecondOp())
+            .backgroundColor(Color.Transparent).fontColor(cPrimary)
+            .onClick(() => { this.secondMode = true; this.secondExpandIdx = -1 })
+        }.width('100%')
+      } else {
+        if (this.secondExpandIdx >= 0) {
+          /* —— 扩容模式：目标=第 secondExpandIdx 张 —— */
+          Row({ space: sp2 }) {
+            Text('新大小(GB)').fontSize(tSub).fontColor(cSub)
+            TextInput({ text: this.secondNewGBText }).type(InputType.Number).layoutWeight(1).fontSize(tBody)
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+              .onChange((v: string) => this.secondNewGBText = v)
+            Button('确定').focusable(false).fontSize(tSub)
+              .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
+              .backgroundColor(cPrimary).fontColor(Color.White)
+              .onClick(() => this.doSecondExpand(this.secondExpandIdx))
+            Button('取消').focusable(false).fontSize(tSub)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cSub)
+              .onClick(() => { this.secondMode = false; this.secondNewGBText = ''; this.secondExpandIdx = -1; })
+          }.width('100%')
+        } else {
+          /* —— 添加模式：导入镜像 or 新建空白 —— */
+          Row({ space: sp2 }) {
+            Text('导入镜像').fontSize(tBody)
+              .fontColor(this.secondSrc.length > 0 ? cPrimary : cSub)
+              .onClick(() => this.pickSecondSrc())
+            if (this.secondSrc.length > 0) {
+              Text(this.baseName(this.secondSrc) + (this.secondSrcMeta.length > 0 ? `（${this.secondSrcMeta}）` : ''))
+                .fontSize(tSub).fontColor(cSub).layoutWeight(1).maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+              Button('清除').focusable(false).fontSize(tSub)
+                .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                .backgroundColor(Color.Transparent).fontColor(cDanger)
+                .onClick(() => { this.secondSrc = ''; this.secondSrcMeta = ''; })
+            }
+          }.width('100%')
+          Row({ space: sp2 }) {
+            Text('新大小(GB)').fontSize(tSub).fontColor(cSub)
+            TextInput({ text: this.secondNewGBText, placeholder: '新建时填写（1-512）' })
+              .layoutWeight(1).fontSize(tBody)
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+              .onChange((v: string) => this.secondNewGBText = v)
+            Button(this.secondSrc.length > 0 ? '导入' : '创建').focusable(false).fontSize(tSub)
+              .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
+              .backgroundColor(cPrimary).fontColor(Color.White)
+              .onClick(() => this.doSecondAdd())
+            Button('取消').focusable(false).fontSize(tSub)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .backgroundColor(Color.Transparent).fontColor(cSub)
+              .onClick(() => { this.secondMode = false; this.secondSrc = ''; this.secondSrcMeta = ''; })
+          }.width('100%')
+          Row() {
+            Text('新盘只读').fontSize(tSub).layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.secondNewReadonly })
+              .onChange((v: boolean) => this.secondNewReadonly = v)
+          }.width('100%')
+        }
+      }
+      Text('快照仅含系统盘，数据盘不参与').fontSize(tSub).fontColor(cWeak).width('100%')
+    }.alignItems(HorizontalAlign.Start).width('100%')
+  }
+
   /* 光盘 ISO：该 VM 的 ISO 引用列表（可加/移除；第一张为启动盘候选） */
   @Builder
   secCdrom() {
@@ -450,6 +766,7 @@ export struct VmStorage {
         Scroll() {
           Column() {
             this.secSystemDisk()
+            this.secSecondDisk()
             this.secCdrom()
           }
           .width('100%')

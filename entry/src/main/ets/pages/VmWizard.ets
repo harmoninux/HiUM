@@ -7,8 +7,8 @@ import { pathExists, isoReadable, copyFileWithProgress, fileSizeOf, readAsciiAt 
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
 import {
-  VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType,
-  newProfileId, fitBoard, buildArgs, sharedDir, SCHEMA_VERSION, builtinIsoFor,
+  VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType, MouseMode, VmDisk,
+  newProfileId, fitBoard, fitVga, buildArgs, sharedDir, SCHEMA_VERSION, builtinIsoFor,
   forwardErrors,
 } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
@@ -74,6 +74,12 @@ export struct VmWizard {
   @State tcgCollapsed: boolean = true;      /* TCG 模拟组默认折叠（步骤③） */
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine ISO 下载中 */
   @State isoPct: number = 0;
+  /* v4：输入模式/显卡（步骤②）；系统增强（步骤③）。数据盘不进向导（同 UTM：创建后经
+   * 「存储管理」弹窗按需添加，那里的磁盘列表才是全部管理入口） */
+  @State mouse: MouseMode = 'tablet';
+  @State rng: boolean = false;
+  @State balloon: boolean = false;
+  @State audio: boolean = true; /* v6：声音默认开（raspi 板卡无模拟声卡，步骤内禁用） */
 
   aboutToAppear(): void {
     /* 每次打开都重置到默认，防止组件实例跨 if(showWizard) 开关复用残留上一次状态 */
@@ -105,6 +111,10 @@ export struct VmWizard {
     this.sharedFolder = false;
     this.cpuModelCollapsed = true;
     this.tcgCollapsed = true;
+    this.mouse = 'tablet';
+    this.rng = false;
+    this.balloon = false;
+    this.audio = true;
   }
 
   /* 「内置 Alpine」按钮：按当前架构确保内置 iso 就绪（缺失则按需下载），完成后挂到光驱 */
@@ -210,6 +220,17 @@ export struct VmWizard {
     if (this.arch === 'arm') { return ['virt', 'raspi2', 'raspi3']; }
     if (this.arch === 'loongarch64' || this.arch === 'riscv64') { return ['virt']; }
     return ['pc', 'q35'];
+  }
+
+  /* v4：x86 板卡可切换显卡/PS/2 相对鼠标；virt 固定 virtio-gpu；raspi 无 PS/2 无 PCI */
+  private isX86Board(): boolean {
+    const b = fitBoard(this.arch, this.board);
+    return b === 'pc' || b === 'q35';
+  }
+
+  private isRaspiBoard(): boolean {
+    const b = fitBoard(this.arch, this.board);
+    return b === 'raspi2' || b === 'raspi3';
   }
 
   /* 架构卡片显示名：存储值(loongarch64)较长，UI 主标题用短称 loongarch */
@@ -337,6 +358,12 @@ export struct VmWizard {
   /* 从当前步装配一份 VmProfile（不落盘、不建盘；用于预览/完成）。
    * 导入/内核文件的路径在这里就定为 vms/ 内的复制目标路径——finish 按它复制，
    * profile 引用的始终是复制后的自有资产。 */
+  /* 向导只建系统盘（v5）：数据盘不进向导（同 UTM——创建后经「存储管理」弹窗按需添加，
+   * 那里才是全部磁盘的管理入口） */
+  private assembleDisks(mainPath: string): VmDisk[] {
+    return [{ path: mainPath, readonly: false }];
+  }
+
   private assemble(id: string): VmProfile {
     const diskPath = this.diskSource === 'import'
       ? `${this.filesDir}/vms/${id}${this.importDiskExt()}`
@@ -348,19 +375,27 @@ export struct VmWizard {
       name: this.name.trim().length > 0 ? this.name.trim() : '未命名',
       machine: {
         arch: this.arch,
-        vga: this.vga,
+        vga: fitVga(fitBoard(this.arch, this.board), this.vga),
         machine: fitBoard(this.arch, this.board),
         firmware: this.autoFirmware(),
         cpuModel: this.cpuModel.trim(),
+        mouse: this.mouse,
+        serialInteractive: true, /* 向导默认交互串口；改回落盘日志在编辑页 */
+        cpuFlags: '',   /* v6：CPU flags 仅编辑页可配 */
+        rtcLocal: false, /* v6：RTC 默认 utc（qemu 出厂行为）；本地时区在编辑页 */
       },
       runtime: {
         memoryMB: Math.round(this.memoryMB),
         cpus: Math.round(this.cpus),
         mttcg: this.mttcg,
         tbSize: Number.isInteger(tbSize) && tbSize > 0 ? tbSize : 1024,
+        rng: this.rng,
+        balloon: this.balloon,
+        audio: this.audio, /* v6：声音默认开；开关在编辑页高级区 */
+        gdbPort: 0,        /* v6：GDB 仅编辑页可配（向导不出现） */
       },
       media: {
-        diskPath: diskPath,
+        disks: this.assembleDisks(diskPath),
         cdromPaths: this.cdromPaths,
         bootFromCdrom: this.bootFromCdrom,
         kernelPath: this.kernelSrc.length > 0 ? `${this.filesDir}/vms/${id}.kernel` : '',
@@ -405,9 +440,11 @@ export struct VmWizard {
       });
   }
 
-  /* finish 的介质准备：按来源把系统盘/内核/initrd 备齐，全部成功才 resolve(true) */
+  /* finish 的介质准备：按来源把系统盘/内核/initrd/数据盘备齐，全部成功才 resolve(true)。
+   * 顺序：系统盘 → 内核/initrd → 数据盘（复制进度共用 copyPct）。 */
   private prepareMedia(p: VmProfile): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
+      /* 向导只备系统盘/内核/initrd（数据盘不进向导：创建后「存储管理」弹窗添加） */
       const doKernel = (): void => {
         if (this.kernelSrc.length === 0) {
           resolve(true);
@@ -458,8 +495,14 @@ export struct VmWizard {
         });
       };
       const doDisk = (): void => {
+        /* 主盘永远是 disks[0]（向导必配系统盘；裸内核流程同样走新建/导入） */
+        if (p.media.disks.length === 0) {
+          doKernel();
+          return;
+        }
+        const mainDst = p.media.disks[0].path;
         if (this.diskSource === 'import') {
-          copyFileWithProgress(this.importDiskSrc, p.media.diskPath, (pct: number) => {
+          copyFileWithProgress(this.importDiskSrc, mainDst, (pct: number) => {
             this.copyPct = pct;
           }).then((ok: boolean) => {
             if (!ok) {
@@ -468,13 +511,13 @@ export struct VmWizard {
               return;
             }
             hilog.info(DOMAIN, TAG, 'disk copy src=%{public}s (%{public}d) → dst %{public}d bytes',
-              this.importDiskSrc, fileSizeOf(this.importDiskSrc), fileSizeOf(p.media.diskPath));
+              this.importDiskSrc, fileSizeOf(this.importDiskSrc), fileSizeOf(mainDst));
             doKernel();
           });
           return;
         }
-        if (!pathExists(p.media.diskPath)) {
-          const ret = napi.createDisk(p.media.diskPath, Math.round(this.diskGB * 1024), this.diskAlloc);
+        if (!pathExists(mainDst)) {
+          const ret = napi.createDisk(mainDst, Math.round(this.diskGB * 1024), this.diskAlloc);
           if (ret !== 0) {
             promptAction.showToast({ message: '创建磁盘失败' });
             resolve(false);
@@ -529,6 +572,7 @@ export struct VmWizard {
           .onClick(() => {
             this.arch = a;
             this.board = fitBoard(a, this.board);
+            this.vga = fitVga(this.board, this.vga);
           })
         }, (a: VmArch) => a)
       }
@@ -553,12 +597,62 @@ export struct VmWizard {
           .padding(spCard)
           .backgroundColor(this.board === b ? cPrimary : Color.White)
           .borderRadius(rElem)
-          .onClick(() => { this.board = b as VmBoard; })
+          .onClick(() => {
+            this.board = b as VmBoard;
+            this.vga = fitVga(b as VmBoard, this.vga);
+          })
         }, (b: string) => b)
       }
       .width('100%')
 
       Text(this.firmwareHint()).fontSize(tSub).fontColor(cWeak).width('100%')
+
+      /* —— v4 显卡（x86 板卡可换；virt 固定 virtio-gpu；raspi 板载） —— */
+      this.groupHeader('显卡')
+      if (this.isX86Board()) {
+        Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
+          ForEach(['std', 'cirrus', 'vmware', 'virtio'], (g: string) => {
+            Text(g).fontSize(tBody)
+              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              .margin({ right: sp2, bottom: sp2 })
+              .fontColor(this.vga === g ? Color.White : cText)
+              .backgroundColor(this.vga === g ? cPrimary : cBg)
+              .borderRadius(rBtn)
+              .onClick(() => { this.vga = g as VgaType; })
+          }, (g: string) => g)
+        }
+        .width('100%')
+        Text('cirrus/vmware 对老系统（Win9x/旧 DOS）兼容性更好；virtio 性能最好')
+          .fontSize(tSub).fontColor(cWeak).width('100%')
+      } else {
+        Text(this.isRaspiBoard()
+          ? '当前板卡显示设备固定（树莓派 = SoC 板载）'
+          : 'virt 板卡固定 virtio-gpu（无传统 VGA 总线）')
+          .fontSize(tSub).fontColor(cWeak).width('100%')
+      }
+
+      /* —— v4 输入模式（tablet 绝对 / relative 相对） —— */
+      this.groupHeader('输入模式')
+      Row({ space: sp2 }) {
+        Text('绝对 (触摸精确)').fontSize(tBody)
+          .fontColor(this.mouse === 'tablet' ? Color.White : cSub)
+          .backgroundColor(this.mouse === 'tablet' ? cPrimary : cChip)
+          .borderRadius(rBadge)
+          .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+          .enabled(!this.isRaspiBoard())
+          .onClick(() => { this.mouse = 'tablet' })
+        Text('相对 (PS/2 兼容)').fontSize(tBody)
+          .fontColor(this.mouse === 'relative' ? Color.White : cSub)
+          .backgroundColor(this.mouse === 'relative' ? cPrimary : cChip)
+          .borderRadius(rBadge)
+          .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+          .enabled(!this.isRaspiBoard())
+          .onClick(() => { this.mouse = 'relative' })
+      }.width('100%')
+      Text(this.isRaspiBoard()
+        ? '树莓派板卡无 PS/2 控制器，保持绝对注入'
+        : '绝对 = virtio-tablet 触摸精确；相对 = 传统鼠标语义（PC=PS/2，virt=usb-mouse），老系统兼容')
+        .fontSize(tSub).fontColor(cWeak).width('100%')
 
       /* CPU 机型组：默认折叠，点组头展开/收起 */
       /* CPU 机型组：默认折叠，点组头展开/收起。
@@ -624,6 +718,35 @@ export struct VmWizard {
       Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
       Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
         .onChange((v: number) => this.cpus = v)
+
+      /* —— v4 系统增强：RNG/balloon（需 PCI；raspi 禁用） —— */
+      this.groupHeader('系统增强')
+      Row() {
+        Text('随机数发生器 (RNG)').fontSize(tLabel).layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.rng })
+          .enabled(!this.isRaspiBoard())
+          .onChange((v: boolean) => this.rng = v)
+      }.padding({ top: sp1, bottom: sp1 })
+      Text('virtio-rng：给 Linux guest 注入熵源（crypto 应用/随机数初始化更快），内核自带驱动')
+        .fontSize(tSub).fontColor(cWeak).width('100%')
+      Row() {
+        Text('内存回收 (Balloon)').fontSize(tLabel).layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.balloon })
+          .enabled(!this.isRaspiBoard())
+          .onChange((v: boolean) => this.balloon = v)
+      }.padding({ top: sp1, bottom: sp1 })
+      Text('virtio-balloon：空闲内存可交还宿主（平板内存宝贵），自动回收')
+        .fontSize(tSub).fontColor(cWeak).width('100%')
+      /* v6：声音——默认开；raspi 无 PCI 且 QEMU 未模拟树莓派声卡，禁用 */
+      Row() {
+        Text('声音').fontSize(tLabel).layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.audio })
+          .enabled(!this.isRaspiBoard())
+          .onChange((v: boolean) => this.audio = v)
+      }.padding({ top: sp1, bottom: sp1 })
+      Text('客机声卡按板卡生成（AC97 / virtio-sound），宿主侧走 OHOS 音频')
+        .fontSize(tSub).fontColor(cWeak).width('100%')
+
       /* TCG 模拟组：默认折叠，点组头展开/收起 */
       Row({ space: sp8 }) {
         Text() {
@@ -767,8 +890,11 @@ export struct VmWizard {
           .onChange((v: string) => this.kernelAppend = v)
         Text('指定内核后由 qemu 直接装载引导（-kernel），绕过 BIOS/UEFI 流程；内核与 initrd 在创建时复制进虚拟机目录')
           .fontSize(tSub).fontColor(cWeak).width('100%')
+        Text('提示：加 console=ttyS0 可在运行页串口视图交互')
+          .fontSize(tSub).fontColor(cWeak).width('100%')
       }
 
+      /* 数据盘不入向导（同 UTM：创建后「存储管理」弹窗按需添加；快照仅含系统盘） */
       this.groupHeader('光盘')
       /* 多 ISO 有序列表：第一张为启动盘候选（从光盘启动时）；每张一行可独立移除 */
       if (this.cdromPaths.length > 0) {

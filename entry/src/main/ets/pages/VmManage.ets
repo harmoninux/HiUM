@@ -5,14 +5,15 @@ import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import napiModule from 'libentry.so';
-import { VmProfile, VmStore, buildArgs, sharedDir, qmpSockPath } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmDisk, buildArgs, sharedDir, qmpSockPath, mainDiskPath } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
+import { cloneVm } from '../lib/vmclone';
 import {
   VmSnapshotEntry, snapshotApply, snapshotDelete, parseSnapshots,
 } from '../lib/vmsnapshot';
 import { isTempSnapshot } from '../lib/tempSession';
 import {
-  cPrimary, cDanger, cRunning, cSuccess, cText, cSub, cWeak,
+  cPrimary, cDanger, cRunning, cSuccess, cWarn, cText, cSub, cWeak,
   cCard, cBlock, cChip, cBorder,
   tCard, tLabel, tBody, tSub, tSubL, tMono,
   sp1, sp2, sp3, sp4, sp5, sp8, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
@@ -48,9 +49,13 @@ export struct VmManage {
   @State diskFmt: string = '?';
   @State diskVirtualGB: number = 0;
   @State diskActualGB: number = 0;
+  @State extraDisks: VmDisk[] = []; /* 数据盘（disks[1..]），仅展示 + 只读徽标 */
   @State snapshots: VmSnapshotEntry[] = [];
   @State netEnabled: boolean = false;
   @State snack: string = '';
+  /* v6 克隆：cloneStage != '' = 克隆进行中（进度条显示 stage+pct） */
+  @State cloneStage: string = '';
+  @State clonePct: number = 0;
   @State nowSec: number = 0; /* 进入页面时的时间基准，供「当前」快照节点稳定展示 */
   @State isWide: boolean = false; /* 宽屏(Split)下隐藏返回；getWindowSize 判宽 */
   @Consume('showStorage') showStorage: boolean; /* 存储弹窗开关（Index 全窗口遮罩层） */
@@ -62,6 +67,34 @@ export struct VmManage {
 
   /* 本页 VM 是否运行：build 直接依赖 @StorageLink('runningMap')（响应式），
    * runningMap 每 2s 由 VmList poll 刷新，变化即触发重绘，此处拿到最新值。 */
+  /* v6 克隆入口：复制磁盘/内核资产为新 id 副本并在列表可见。
+   * 运行中或被页面其它克隆占用时按钮已禁用，这里再兜底一次。 */
+  private startClone(): void {
+    const p = this.profile;
+    if (!p || this.cloneStage.length > 0) {
+      return;
+    }
+    if (this.isRunningNow()) {
+      promptAction.showToast({ message: '运行中无法克隆' });
+      return;
+    }
+    this.cloneStage = '准备';
+    this.clonePct = 0;
+    cloneVm(new VmStore(this.filesDir), p, (stage: string, pct: number) => {
+      this.cloneStage = stage;
+      this.clonePct = pct;
+    }).then((err: string) => {
+      this.cloneStage = '';
+      this.clonePct = 0;
+      if (err.length > 0) {
+        promptAction.showToast({ message: '克隆失败：' + err });
+        return;
+      }
+      this.vmListVersion++;
+      this.snack = '已克隆为副本';
+    });
+  }
+
   private isRunningNow(): boolean {
     const p = this.profile;
     if (!p) {
@@ -89,7 +122,8 @@ export struct VmManage {
     this.profile = p; /* 让后续 isTempSnapshot/canSnapshot 也用最新对象 */
     this.name = p.name;
     this.arch = p.machine.arch;
-    this.diskPath = p.media.diskPath;
+    this.diskPath = mainDiskPath(p);
+    this.extraDisks = p.media.disks.slice(1);
     this.cdromPaths = p.media.cdromPaths;
     this.bootFromCdrom = p.media.bootFromCdrom;
     this.netEnabled = p.net.enabled;
@@ -403,6 +437,55 @@ export struct VmManage {
     return this.profile ? this.profile.machine.firmware : '';
   }
 
+  /* v4：概览 chips 补充项（显卡/鼠标/增强/串口） */
+  private vgaLabel(): string {
+    return this.profile ? '显卡 ' + this.profile.machine.vga : '';
+  }
+
+  private mouseLabel(): string {
+    return this.profile ? '鼠标 ' + (this.profile.machine.mouse === 'relative' ? '相对' : '绝对') : '';
+  }
+
+  private enhanceLabel(): string {
+    const p = this.profile;
+    if (!p) { return ''; }
+    const parts: string[] = [];
+    if (p.runtime.rng) { parts.push('RNG'); }
+    if (p.runtime.balloon) { parts.push('Balloon'); }
+    return parts.length > 0 ? '增强 ' + parts.join('·') : '';
+  }
+
+  private serialLabel(): string {
+    return this.profile ? (this.profile.machine.serialInteractive ? '串口 交互' : '串口 日志') : '';
+  }
+
+  /* v6：声音 / GDB 后端 / CPU 关联 概览 chips（关闭项不显示） */
+  private audioLabel(): string {
+    return this.profile ? (this.profile.runtime.audio ? '声音 开' : '声音 关') : '';
+  }
+
+  private gdbLabel(): string {
+    const p = this.profile;
+    if (!p || p.runtime.gdbPort <= 0) { return ''; }
+    return 'GDB :' + p.runtime.gdbPort;
+  }
+
+  private cpuFlagLabel(): string {
+    const p = this.profile;
+    if (!p || p.machine.cpuFlags.trim().length === 0) { return ''; }
+    return 'CPU ' + p.machine.cpuFlags.trim();
+  }
+
+  /* 「只读」徽标：与 bootBadge 同款，注意 cWarn 配色区分 */
+  @Builder
+  readonlyBadge() {
+    Text('只读')
+      .fontSize(tSub).fontColor(cWarn)
+      .padding({ left: sp1, right: sp1 })
+      .borderRadius(rBadge)
+      .backgroundColor(cChip)
+  }
+
   /* ================= 分区 ================= */
 
   /* 分区标题（与 VmWizard groupHeader 同款：灰字在左，细线延伸至右） */
@@ -428,6 +511,10 @@ export struct VmManage {
           if (this.bootDevice() === 'disk') {
             this.bootBadge()
           }
+          if (this.profile !== null && this.profile.media.disks.length > 0
+            && this.profile.media.disks[0].readonly) {
+            this.readonlyBadge()
+          }
         }.width('100%')
         Row({ space: sp2 }) {
           Text(`光盘 ${this.cdromName()}`)
@@ -437,6 +524,17 @@ export struct VmManage {
             this.bootBadge()
           }
         }.width('100%')
+        /* 数据盘（v5）：一行一张 + 只读徽标 */
+        ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
+          Row({ space: sp2 }) {
+            Text(`数据盘${idx + 1} ${this.baseName(d.path)}`)
+              .fontSize(tSubL).fontColor(cSub).maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            if (d.readonly) {
+              this.readonlyBadge()
+            }
+          }.width('100%').padding({ top: sp1 })
+        }, (d: VmDisk) => d.path)
       }.alignItems(HorizontalAlign.Start).layoutWeight(1)
       Button('存储管理').focusable(false).fontSize(tBody)
         .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
@@ -593,6 +691,16 @@ export struct VmManage {
           .width(btnH).height(btnH)
           .backgroundColor(Color.Transparent)
           .onClick(() => this.openEdit())
+          /* v6：克隆入口（copy 图标在 SDK 符号库版本间不稳定，用文字按钮） */
+          Button('克隆')
+            .focusable(false)
+            .fontSize(tSub)
+            .fontColor(cPrimary)
+            .height(btnH)
+            .padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent)
+            .enabled(!this.isRunningNow() && this.cloneStage.length === 0)
+            .onClick(() => this.startClone())
           Button() {
             SymbolGlyph($r('sys.symbol.trash'))
               .fontSize(20)
@@ -628,6 +736,34 @@ export struct VmManage {
                 Text(this.firmwareLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
+              if (this.vgaLabel().length > 0) {
+                Text(this.vgaLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
+              if (this.mouseLabel().length > 0) {
+                Text(this.mouseLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
+              if (this.enhanceLabel().length > 0) {
+                Text(this.enhanceLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
+              if (this.serialLabel().length > 0) {
+                Text(this.serialLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
+              if (this.audioLabel().length > 0) {
+                Text(this.audioLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
+              if (this.gdbLabel().length > 0) {
+                Text(this.gdbLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
+              if (this.cpuFlagLabel().length > 0) {
+                Text(this.cpuFlagLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              }
             }
             .width('100%')
             .padding({ top: sp1, bottom: sp2 })
@@ -647,6 +783,18 @@ export struct VmManage {
       .width('100%')
       .height('100%')
       .backgroundColor(cCard)
+
+      /* v6：克隆进度（复制大磁盘时可见 stage + 百分比） */
+      if (this.cloneStage.length > 0) {
+        Row({ space: sp2 }) {
+          Text(this.cloneStage + ' ' + this.clonePct + '%').fontSize(tSub).fontColor(cSub).layoutWeight(1)
+          Progress({ value: this.clonePct, total: 100, type: ProgressType.Linear })
+            .width(120).color(cPrimary)
+        }
+        .width('100%')
+        .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+        .backgroundColor(cCard)
+      }
 
       if (this.snack.length > 0) {
         Row() {
