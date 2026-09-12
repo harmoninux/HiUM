@@ -6,7 +6,8 @@ import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { ensureAppBootstrap } from '../lib/bootstrap';
-import { setConsoleWindow, removeConsoleWindow, pushPendingVmId, isPadOrPhone } from '../lib/vmwindows';
+import { setConsoleWindow, removeConsoleWindow, pushPendingVmId, isPadOrPhone, getConsoleWindow } from '../lib/vmwindows';
+import { windowCloseGuardCount, showQuitDialog } from '../lib/quitguard';
 import napi from 'libentry.so';
 
 const DOMAIN = 0x0002;
@@ -30,6 +31,25 @@ export default class VmConsoleAbility extends UIAbility {
     const vmId = this.vmId;
     const vmName = this.vmName;
     pushPendingVmId(vmId);
+    /* 三键区 X 关闭守卫：本窗是最后一个（且仍有 VM 在跑）时拦下弹确认框，
+     * 「强制退出」由守卫 terminateSelf；其余放行（窗口关了 VM 仍后台运行）。
+     * 与 EntryAbility 同一套判定（lib/quitguard）。 */
+    try {
+      windowStage.on('windowStageClose', () => {
+        const n = windowCloseGuardCount(this.context.filesDir);
+        if (n <= 0) {
+          return false;
+        }
+        showQuitDialog(getConsoleWindow(vmId), n).then((stay: boolean) => {
+          if (!stay) {
+            this.context.terminateSelf();
+          }
+        });
+        return true;
+      });
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'windowStageClose register err: %{public}s', JSON.stringify(e));
+    }
     windowStage.loadContent('pages/VmConsole', (err) => {
       if (err.code) {
         hilog.error(DOMAIN, TAG, 'loadContent failed: %{public}s', JSON.stringify(err));

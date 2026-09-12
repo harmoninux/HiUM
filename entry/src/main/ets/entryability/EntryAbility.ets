@@ -4,6 +4,8 @@ import { window } from '@kit.ArkUI';
 import { picker, fileUri } from '@kit.CoreFileKit';
 import { ensureAppBootstrap } from '../lib/bootstrap';
 import { initTempSession } from '../lib/tempSession';
+import { setMainWindow, removeMainWindow, getMainWindow } from '../lib/vmwindows';
+import { windowCloseGuardCount, showQuitDialog } from '../lib/quitguard';
 
 const DOMAIN = 0x0001;
 const TAG = 'QemuEntry';
@@ -22,6 +24,25 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
+    /* 三键区 X 关闭守卫（office 同款正路）：仍有 VM 在跑且这是最后一个窗口时
+     * 拦下（return true）并弹确认框，「强制退出」由守卫 terminateSelf；其余放行。
+     * 注册了本监听后系统不再走 onPrepareToTerminate。 */
+    try {
+      windowStage.on('windowStageClose', () => {
+        const n = windowCloseGuardCount(this.context.filesDir);
+        if (n <= 0) {
+          return false;
+        }
+        showQuitDialog(getMainWindow(), n).then((stay: boolean) => {
+          if (!stay) {
+            this.context.terminateSelf();
+          }
+        });
+        return true;
+      });
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'windowStageClose register err: %{public}s', JSON.stringify(e));
+    }
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         hilog.error(DOMAIN, TAG, 'Failed to load the content. Cause: %{public}s', JSON.stringify(err));
@@ -29,6 +50,9 @@ export default class EntryAbility extends UIAbility {
       }
       hilog.info(DOMAIN, TAG, 'Succeeded in loading the content.');
     });
+    windowStage.getMainWindow().then((win: window.Window) => {
+      setMainWindow(win); /* 退出守卫数窗口用，见 lib/quitguard */
+    }).catch((e: Object) => hilog.warn(DOMAIN, TAG, 'getMainWindow: %{public}s', JSON.stringify(e)));
     /* 启动即取 Download 作为唯一可共享目录（fire-and-forget，不阻塞界面） */
     this.prepareSharedFolder();
   }
@@ -48,6 +72,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageDestroy(): void {
+    removeMainWindow();
     hilog.info(DOMAIN, TAG, '%{public}s', 'Ability onWindowStageDestroy');
   }
 

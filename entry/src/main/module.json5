@@ -18,6 +18,9 @@
       },
       {
         "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.PREPARE_APP_TERMINATE"
       }
     ],
     "abilities": [
