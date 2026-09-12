@@ -353,12 +353,18 @@ struct VmConsole {
     /* 每次启动都是一个新的 NCP 子进程；多实例按 vmId 各起各的。
      * 不可读的辅助盘在下方按 isoReadable 过滤剔出本次启动列表（不动 this.profile），
      * 避免污染后续配置页/下次结算。 */
-    /* 多 ISO：把不可读盘从本次启动列表剔除（不动 profile），其余原样传给 buildArgs。 */
+    /* 多 ISO：把不可读盘从本次启动列表剔除（不动 profile）+ toast 告知，其余原样传给 buildArgs。 */
     const allIsos = this.profile.media.cdromPaths;
     const launchIsos = allIsos.filter((p: string): boolean => isoReadable(p));
     if (launchIsos.length !== allIsos.length) {
+      const skipped = allIsos.filter((p: string): boolean => launchIsos.indexOf(p) < 0);
       hilog.warn(DOMAIN, TAG, 'doStart skip unreadable ISO vm=%{public}s %{public}d -> %{public}d',
         this.vmId, allIsos.length, launchIsos.length);
+      const nm = skipped[0].substring(skipped[0].lastIndexOf('/') + 1);
+      promptAction.showToast({
+        message: skipped.length > 1 ?
+          `${nm} 等${skipped.length}张光盘不可读，本次启动已跳过` : `光盘 ${nm} 不可读，本次启动已跳过`,
+      });
     }
     const launchArgs = buildArgs(this.profile, this.vmDataDir, share, launchIsos);
     hilog.info(DOMAIN, TAG, 'doStart buildArgs vm=%{public}s argc=%{public}d isoCount=%{public}d',
