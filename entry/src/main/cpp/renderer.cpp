@@ -105,7 +105,12 @@ void setupGl()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
 
-void drawFrame()
+/* letterbox viewport：等比缩放（取 min 保证两个方向都装得下）+ 居中，比例不一致
+ * 的部分留给外层清黑的边。**渲染与输入反查共用这一个源**：drawFrame 用它摆画面，
+ * input.cpp 经 renderer_get_viewport 用它把点击坐标反算回 guest 像素。两处各算
+ * 一份迟早漂移，症状是「画面在这、点下去却偏了」——viewport 是两边的公共契约。
+ * guest 尺寸或窗口尺寸未就绪时返回 false，出参退化为全窗口（w/h 可能为 0）。 */
+bool computeViewport(int *x, int *y, int *w, int *h)
 {
     int fbW, fbH;
     {
@@ -114,19 +119,31 @@ void drawFrame()
         fbH = g_fb.h;
     }
     if (fbW <= 0 || fbH <= 0 || g_rs.winW <= 0 || g_rs.winH <= 0) {
+        *x = 0;
+        *y = 0;
+        *w = g_rs.winW;
+        *h = g_rs.winH;
+        return false;
+    }
+    float scaleX = (float)g_rs.winW / fbW;
+    float scaleY = (float)g_rs.winH / fbH;
+    float scale = scaleX < scaleY ? scaleX : scaleY;
+    *w = (int)(fbW * scale);
+    *h = (int)(fbH * scale);
+    *x = (g_rs.winW - *w) / 2;
+    *y = (g_rs.winH - *h) / 2;
+    return true;
+}
+
+void drawFrame()
+{
+    int vpX, vpY, vpW, vpH;
+    if (!computeViewport(&vpX, &vpY, &vpW, &vpH)) {
+        /* 尺寸还没到（窗口刚建 / guest 尚未出帧）：整屏清黑 */
         glClearColor(0.f, 0.f, 0.f, 1.f);
         glClear(GL_COLOR_BUFFER_BIT);
         return;
     }
-
-    /* letterbox viewport keeping the guest aspect ratio */
-    float scaleX = (float)g_rs.winW / fbW;
-    float scaleY = (float)g_rs.winH / fbH;
-    float scale = scaleX < scaleY ? scaleX : scaleY;
-    int vpW = (int)(fbW * scale);
-    int vpH = (int)(fbH * scale);
-    int vpX = (g_rs.winW - vpW) / 2;
-    int vpY = (g_rs.winH - vpH) / 2;
 
     glViewport(0, 0, g_rs.winW, g_rs.winH);
     glClearColor(0.f, 0.f, 0.f, 1.f);
@@ -208,6 +225,11 @@ void renderLoop()
                     g_fb.resized = false;
                     g_fb.dirty = false;
                     didWork = true;
+                    /* guest 改分辨率（gfx_switch）或挂窗/重建后全量重传时打一行：
+                     * 诊断「画面糊 / 黑边异常 / 点击偏移」时，第一件要知道的事就是
+                     * guest 表面与窗口的实际尺寸（viewport 由这两者算出来）。 */
+                    OH_LOG_INFO(LOG_APP, "fb geometry: %{public}dx%{public}d win=%{public}dx%{public}d",
+                                g_fb.w, g_fb.h, g_rs.winW, g_rs.winH);
                 } else if (g_fb.dirty && g_fb.dirtyY1 > g_fb.dirtyY0) {
                     /* upload the dirty band (full width rows) */
                     int y0 = g_fb.dirtyY0, y1 = g_fb.dirtyY1;
@@ -265,27 +287,11 @@ void renderLoop()
 
 } // namespace
 
+/* 输入侧入口：与 drawFrame 同一份 viewport（见 computeViewport 的说明），
+ * input.cpp 拿它把 surface 坐标反算回 guest 像素坐标。 */
 void renderer_get_viewport(int *x, int *y, int *w, int *h)
 {
-    int fbW, fbH;
-    {
-        std::lock_guard<std::mutex> lock(g_fb.mu);
-        fbW = g_fb.w;
-        fbH = g_fb.h;
-    }
-    if (fbW <= 0 || fbH <= 0 || g_rs.winW <= 0 || g_rs.winH <= 0) {
-        *x = *y = 0;
-        *w = g_rs.winW;
-        *h = g_rs.winH;
-        return;
-    }
-    float scaleX = (float)g_rs.winW / fbW;
-    float scaleY = (float)g_rs.winH / fbH;
-    float scale = scaleX < scaleY ? scaleX : scaleY;
-    *w = (int)(fbW * scale);
-    *h = (int)(fbH * scale);
-    *x = (g_rs.winW - *w) / 2;
-    *y = (g_rs.winH - *h) / 2;
+    computeViewport(x, y, w, h);
 }
 
 int renderer_attach_window(OHNativeWindow *win)
