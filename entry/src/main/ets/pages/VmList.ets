@@ -3,7 +3,6 @@
 // 多实例：每台 VM 独立子进程，可同时运行多台（受内存约束）；
 // console 为每台 VM 一个 VmConsoleAbility 独立窗口（specified 模式按 vmId 归并）。
 // 工坊为内嵌居中模态：Stack 遮罩浮层承载 VmWizard（showWizard 开关）。
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { pathExists } from '../lib/fsutil';
 import { promptAction } from '@kit.ArkUI';
@@ -11,7 +10,7 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import napiModule from 'libentry.so';
 import {
-  VmProfile, VmStore, qmpSockPath, mainDiskPath,
+  VmProfile, VmStore, mainDiskPath,
 } from '../lib/vmprofile';
 import {
   initVmRegistry, refreshRunningMap, vmIsRunning,
@@ -21,21 +20,8 @@ import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
   cBg, cCard, cBorder, cChip, cSel, cSelBg,
   tPage, tCard, tLabel, tBody, tSub,
-  sp1, sp2, sp3, sp4, sp5, rCard, rElem, rBadge, bw, rBtn, btnH, btnSh, btnPadX,
+  sp1, sp2, sp3, sp4, sp5, rCard, rElem, rBadge, bw, btnH, btnPadX,
 } from '../lib/uiTokens';
-
-const DOMAIN = 0x0002;
-const TAG = 'QemuUI';
-
-/* 只用于「运行中 VM 安全关机/断电」的一次性 QMP 调用（连接是 per-vm 单例，无抢占） */
-interface QmpNapi {
-  qmpConnect: (vmId: string, sockPath: string) => number;
-  qmpCommand: (vmId: string, cmd: string) => string;
-  vmRunning: (vmId: string) => boolean;
-  /* 强制断电兜底：qemu 卡死时 QMP 必然超时，靠它让子进程整体退出 */
-  forceStopVm: (vmId: string) => number;
-}
-const qmpNapi = napiModule as QmpNapi;
 
 /* 磁盘信息（侧栏显示虚拟大小；diskInfo 返回 qemu-img info JSON 串） */
 interface DiskNapi {
@@ -161,59 +147,6 @@ export struct VmList {
     return ` · 磁盘${(bytes / 1024 / 1024 / 1024).toFixed(1)}G`;
   }
 
-  /* 运行中 VM 安全关机(ACPI)/断电：走 QMP（连接是 per-vm 单例，无抢占）。 */
-  private confirmPowerOff(p: VmProfile, force: boolean): void {
-    const label = force ? '强制断电' : '安全关机(ACPI)';
-    const message = force
-      ? `将立即结束「${p.name}」的虚拟机进程，未保存的数据可能丢失。确认？`
-      : `向「${p.name}」发送 ACPI 关机信号（客机保存后自行退出）。确认？`;
-    AlertDialog.show({
-      title: label,
-      message: message,
-      primaryButton: { value: '取消', action: () => {} },
-      secondaryButton: {
-        value: label,
-        fontColor: force ? cDanger : cPrimary,
-        action: () => this.powerOff(p, force),
-      },
-    });
-  }
-
-  private powerOff(p: VmProfile, force: boolean): void {
-    try {
-      qmpNapi.qmpConnect(p.id, qmpSockPath(p, this.vmDataDir));
-      const cmd = force ? '{"execute":"quit"}' : '{"execute":"system_powerdown"}';
-      /* 连接线程异步就绪，等一小下再发，避免 socket 未连上白发。
-       * 不 disconnect：连接是 per-vm 单例，可能被打开中的 console 复用；
-       * 停掉后 socket 自然消亡，reader 线程随之退出。 */
-      setTimeout(() => {
-        qmpNapi.qmpCommand(p.id, cmd);
-        this.pollTick(); /* 立刻刷一次运行态 */
-      }, 150);
-      if (force) {
-        /* 兜底：卡死的 qemu 不认 quit（命令 5s 超时、进程照旧）→ 走 IPC 强杀。
-         * 与 console 的「强制断电」同一套逻辑；正常路径 quit 3s 内就退完了。 */
-        this.forceStopLater(p.id, 0);
-      }
-    } catch {
-      promptAction.showToast({ message: '操作失败' });
-    }
-  }
-
-  /* 等 3s（6 × 500ms）仍活着才强杀，避免打断正常收尾 */
-  private forceStopLater(vmId: string, tries: number): void {
-    if (!qmpNapi.vmRunning(vmId)) {
-      return;
-    }
-    if (tries >= 6) {
-      hilog.warn(DOMAIN, TAG, 'quit 未生效，IPC 强杀 vm=%{public}s', vmId);
-      qmpNapi.forceStopVm(vmId);
-      this.pollTick();
-      return;
-    }
-    setTimeout(() => this.forceStopLater(vmId, tries + 1), 500);
-  }
-
   /* 新建 → 机器工坊（模态浮层，手工向导新建即开箱） */
   private openWizardNew(): void {
     this.showWizard = true;
@@ -231,29 +164,6 @@ export struct VmList {
     });
   }
 
-  private confirmDelete(p: VmProfile): void {
-    if (this.isRunning(p)) {
-      promptAction.showToast({ message: '运行中的虚拟机不能删除' });
-      return;
-    }
-    AlertDialog.show({
-      title: '删除虚拟机',
-      message: `将删除「${p.name}」的配置、系统盘镜像及内核文件副本（仅本应用目录内），确认？`,
-      primaryButton: {
-        value: '取消',
-        action: () => {},
-      },
-      secondaryButton: {
-        value: '删除',
-        fontColor: cDanger,
-        action: () => {
-          this.store().remove(p);
-          this.reload();
-        },
-      },
-    });
-  }
-
   /* 点行：记选中态 + 在 content 区替换该 VM 详情（不叠历史栈，返回键直接退出详情） */
   private select(p: VmProfile): void {
     this.selectedId = p.id;
@@ -262,29 +172,6 @@ export struct VmList {
 
   private runningCount(): number {
     return this.profiles.filter((p: VmProfile) => this.isRunning(p)).length;
-  }
-
-  @Builder
-  cardMenu(p: VmProfile) {
-    Column({ space: sp1 }) {
-      if (this.isRunning(p)) {
-        Button('安全关机 (ACPI)').focusable(false).width('100%')
-          .height(btnSh).borderRadius(rBtn)
-          .onClick(() => this.confirmPowerOff(p, false))
-        Button('强制断电').focusable(false).width('100%')
-          .height(btnSh).borderRadius(rBtn)
-          .fontColor(cDanger)
-          .onClick(() => this.confirmPowerOff(p, true))
-      }
-      Button('删除').focusable(false).width('100%')
-        .height(btnSh).borderRadius(rBtn)
-        .fontColor(cDanger)
-        .onClick(() => this.confirmDelete(p))
-    }
-    .width(120)
-    .padding(sp2)
-    .backgroundColor(cCard)
-    .borderRadius(rCard)
   }
 
   /* 空态：无 VM 时居中提示 + 两个创建入口 */
@@ -366,7 +253,6 @@ export struct VmList {
     .border({ width: bw, color: this.selectedId === p.id ? cSel : cBorder })
     .borderRadius(rCard)
     .onClick(() => this.select(p))
-    .bindContextMenu(this.cardMenu(p), ResponseType.LongPress)
   }
 
   build() {
