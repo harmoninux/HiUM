@@ -14,9 +14,7 @@ import { pathExists, isoReadable, readTail } from '../lib/fsutil';
 import { prepareStart } from '../lib/tempSession';
 import { takePendingVmId, isPadOrPhone } from '../lib/vmwindows';
 import { VirtualKeyboard } from '../lib/VirtualKeyboard';
-import {
-  cDanger, cPrimary, cWeak, sp1, sp2,
-} from '../lib/uiTokens';
+import { sp1, sp2 } from '../lib/uiTokens';
 
 /* 多 ISO 启动前的可读性过滤在 doStart 内做：把不可读盘从本次启动的 ISO 列表里剔除，
  * 再经 buildArgs 的 isoOverride 传入（不动 profile 对象，避免污染后续配置/结算）。 */
@@ -54,6 +52,15 @@ const STATUS_BTN_H = 26;      /* 底部按钮高 (vp)，收窄让状态条更细
 const STATUS_FS = 12;         /* 底部状态栏字号（running 字样基准，按钮同） */
 const FAB_PREF = 'vmconsole_fab'; /* console 偏好文件名（现仅虚拟键盘显隐用） */
 const MENU_TEXT = '#fff5f7fa'; /* 底部栏浅色文字 */
+/* console 整个界面都是深色的（画面区纯黑、状态栏与串口面板 #20242b）。uiTokens 的
+ * cPrimary(#0563ff) / cDanger(#d92d20) / cWeak(#6b7280) 是给浅色背景设计的深色值，
+ * 搬到这里对比度只有 2.1~2.9:1 —— 实测「画面」「强制断电」这类文字看不清。
+ * 下面是对应色系的浅色版本，在该背景上均 ≥4.5:1（WCAG AA）。 */
+const DARK_ACCENT = '#ff94beff'; /* 主色：选中态/强调（亮蓝） 4.9:1 */
+const DARK_DANGER = '#ffffa8a8'; /* 危险操作（亮红） 4.8:1 */
+const DARK_WEAK = '#ffaab4c2';   /* 弱化文本（亮灰） 4.5:1 */
+/* 串口输入框的组件 id：发送后要把焦点交还给它（见 sendAndRefocus） */
+const SERIAL_INPUT_ID = 'hium-serial-input';
 
 interface QmpEvent {
   event: string;
@@ -484,7 +491,9 @@ struct VmConsole {
         this.status = '运行中';
         break;
       case 'RESET':
-        this.status = '运行中 (复位)';
+        /* 复位是瞬时事件，复位完就是普通的运行中；标「复位」既像"卡在复位"，
+         * 又会一直挂到下一个状态事件才被覆盖 */
+        this.status = '运行中';
         break;
       case 'SHUTDOWN':
       case 'QMP_DISCONNECT':
@@ -756,6 +765,14 @@ struct VmConsole {
     return ch;
   }
 
+  /* 发送（回车 / 点「发送」）后把焦点交还输入框：onSubmit 会让输入框失焦，
+   * 用户得再点一下才能继续输入，连续调试串口时很别扭。空回车与发送失败也回焦，
+   * 否则同样要重新点一次。 */
+  private sendAndRefocus(): void {
+    this.serialSendText();
+    focusControl.requestFocus(SERIAL_INPUT_ID);
+  }
+
   private serialSendText(): void {
     const t = this.serialInput;
     if (t.length === 0) {
@@ -878,7 +895,7 @@ struct VmConsole {
             Row({ space: sp2 }) {
               Text('Ctrl').fontSize(STATUS_FS).height(STATUS_BTN_H)
                 .padding({ left: sp1, right: sp1 })
-                .fontColor(this.ctrlOn ? cPrimary : MENU_TEXT)
+                .fontColor(this.ctrlOn ? DARK_ACCENT : MENU_TEXT)
                 .backgroundColor(Color.Transparent)
                 .onClick(() => { this.ctrlOn = !this.ctrlOn })
               Text('Esc').fontSize(STATUS_FS).height(STATUS_BTN_H)
@@ -889,7 +906,7 @@ struct VmConsole {
                 .padding({ left: sp1, right: sp1 })
                 .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
                 .onClick(() => { this.serialSendByte(0x0d) })
-              Text(this.ctrlOn ? 'Ctrl 开' : '发送键序').fontSize(STATUS_FS).fontColor(cWeak)
+              Text(this.ctrlOn ? 'Ctrl 开' : '发送键序').fontSize(STATUS_FS).fontColor(DARK_WEAK)
               Text('清屏').fontSize(STATUS_FS).height(STATUS_BTN_H)
                 .padding({ left: sp1, right: sp1 })
                 .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
@@ -907,14 +924,21 @@ struct VmConsole {
                 .fontSize(STATUS_FS)
                 .height(STATUS_H)
                 .fontColor(MENU_TEXT)
-                .backgroundColor('#e620242b')
+                /* placeholder/光标必须显式给色：不设就跟随系统主题，深色主题下是深色，
+                 * 落在深色面板（半透明 #20242b + 底下 VM 常是黑屏）上等于隐形（实测踩过）。
+                 * 背景也要与所在行分开：原来同为 #e620242b，看不出输入框边界。 */
+                .placeholderColor('#ff9aa4b2')
+                .placeholderFont({ size: STATUS_FS }) /* 不给就用默认字号，比同栏其他文字大一圈 */
+                .caretColor(DARK_ACCENT)
+                .backgroundColor('#ff2b313b')
                 .padding({ left: sp2, right: sp2 })
+                .id(SERIAL_INPUT_ID)
                 .onChange((v: string) => this.serialInput = v)
-                .onSubmit(() => this.serialSendText())
+                .onSubmit(() => this.sendAndRefocus())
               Text('发送').fontSize(STATUS_FS).height(STATUS_BTN_H)
                 .padding({ left: sp1, right: sp1 })
                 .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
-                .onClick(() => { this.serialSendText() })
+                .onClick(() => this.sendAndRefocus())
             }
             .width('100%')
             .height(STATUS_H)
@@ -951,7 +975,7 @@ struct VmConsole {
             .onClick(() => { this.qmp('system_reset') })
           Button('强制断电').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
-            .fontColor(cDanger).backgroundColor(Color.Transparent)
+            .fontColor(DARK_DANGER).backgroundColor(Color.Transparent)
             .onClick(() => { this.forcePowerOff() })
           Button('Ctrl+Alt+Del').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
@@ -959,12 +983,12 @@ struct VmConsole {
             .onClick(() => { this.actReset() })
           Button(this.serialView ? '画面' : '串口').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
-            .fontColor(this.serialView ? cPrimary : MENU_TEXT).backgroundColor(Color.Transparent)
+            .fontColor(this.serialView ? DARK_ACCENT : MENU_TEXT).backgroundColor(Color.Transparent)
             .onClick(() => { this.toggleSerialView() })
           if (isPadOrPhone()) {
             Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
               .padding({ left: sp1, right: sp1 })
-              .fontColor(this.showKbd ? cPrimary : MENU_TEXT).backgroundColor(Color.Transparent)
+              .fontColor(this.showKbd ? DARK_ACCENT : MENU_TEXT).backgroundColor(Color.Transparent)
               .onClick(() => { this.toggleKbd() })
           }
         }
