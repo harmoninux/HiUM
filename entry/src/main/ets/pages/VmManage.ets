@@ -638,6 +638,23 @@ export struct VmManage {
     });
   }
 
+  /* 顶部「更多」菜单：克隆与删除都收进来，顶部行不再堆按钮。
+   * 必须用原生 Menu/MenuItem：Column+Button 拼出来的「菜单」里 Button 自带
+   * 背景色，会渲染成几个按钮而不是菜单项（实测踩过）。
+   * 克隆沿用原来的可用性条件（运行中/正在克隆时禁用）；删除标 cDanger，
+   * 点击后仍有确认框兜底。 */
+  @Builder
+  vmOpsMenu() {
+    Menu() {
+      MenuItem({ content: '克隆' })
+        .enabled(!this.isRunningNow() && this.cloneStage.length === 0)
+        .onClick(() => this.startClone())
+      MenuItem({ content: '删除' })
+        .contentFontColor(cDanger)
+        .onClick(() => this.confirmDeleteVm())
+    }
+  }
+
   build() {
     Stack() {
       Column() {
@@ -660,9 +677,10 @@ export struct VmManage {
             }.alignItems(VerticalAlign.Center)
             Text(this.arch).fontSize(tSubL).fontColor(cSub)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          /* 操作图标钮：启动(play_fill) / 进入(rectangle) / 关机(power, 仅运行中) / 编辑(slider_vertical_3) / 删除(trash) */
+          /* 操作图标钮：启动(play_fill) / 进入 console(arrow_up_left_and_arrow_down_right) /
+           * 关机(power, 仅运行中) / 编辑(slider_vertical_3) / 更多(dot_grid_1x2) */
           Button() {
-            SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.rectangle') : $r('sys.symbol.play_fill'))
+            SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.arrow_up_left_and_arrow_down_right') : $r('sys.symbol.play_fill'))
               .fontSize(20)
               .fontColor([cPrimary])
           }
@@ -694,25 +712,17 @@ export struct VmManage {
           .width(btnH).height(btnH)
           .backgroundColor(Color.Transparent)
           .onClick(() => this.openEdit())
-          /* v6：克隆入口（copy 图标在 SDK 符号库版本间不稳定，用文字按钮） */
-          Button('克隆')
-            .focusable(false)
-            .fontSize(tSub)
-            .fontColor(cPrimary)
-            .height(btnH)
-            .padding({ left: sp2, right: sp2 })
-            .backgroundColor(Color.Transparent)
-            .enabled(!this.isRunningNow() && this.cloneStage.length === 0)
-            .onClick(() => this.startClone())
+          /* v6：克隆 / 删除收进「更多」菜单（见 vmOpsMenu）。原来两者各占一个
+           * 顶部按钮，再加上启动/关机/编辑，一行塞了五种操作。 */
           Button() {
-            SymbolGlyph($r('sys.symbol.trash'))
+            SymbolGlyph($r('sys.symbol.dot_grid_1x2'))
               .fontSize(20)
-              .fontColor([cDanger])
+              .fontColor([cText])
           }
           .focusable(false)
           .width(btnH).height(btnH)
           .backgroundColor(Color.Transparent)
-          .onClick(() => this.confirmDeleteVm())
+          .bindMenu(this.vmOpsMenu)
         }
         .width('100%')
         .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
