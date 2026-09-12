@@ -46,8 +46,11 @@ output/.stamp: $(STAMP) Makefile
 	mkdir -p ../entry/src/main/resources/rawfile/vm/keymaps
 	cp output/en-us ../entry/src/main/resources/rawfile/vm/keymaps/
 	mkdir -p ../entry/src/main/resources/rawfile/vm/firmware
+	# vgabios-* 的清单必须覆盖编辑页所有 -vga 型号（cirrus/vmware 各要一份），
+	# 缺哪个哪个就启动跑飞。见 deps/libqemu/Makefile 的 FIRMWARE 注释。
 	for fw in bios-256k.bin bios.bin kvmvapic.bin linuxboot.bin linuxboot_dma.bin \
 		vgabios-stdvga.bin vgabios-virtio.bin vgabios-ramfb.bin \
+		vgabios-cirrus.bin vgabios-vmware.bin \
 		efi-virtio.rom edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd; do cp output/$$fw ../entry/src/main/resources/rawfile/vm/firmware/ 2>/dev/null || true; done
 	touch output/.stamp
 

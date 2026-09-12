@@ -9,7 +9,12 @@ import { BusinessError } from '@kit.BasicServicesKit';
 const DOMAIN = 0x0001;
 const TAG = 'QemuEntry';
 
-/* firmware blobs produced by deps/ (packed as rawfile/vm/...) */
+/* firmware blobs produced by deps/ (packed as rawfile/vm/...)。
+ * vgabios-* 必须覆盖编辑页所有 -vga 型号，qemu 是按型号各取一份 romfile 的：
+ * std=vgabios-stdvga / virtio=vgabios-virtio / cirrus=vgabios-cirrus /
+ * vmware=vgabios-vmware（ramfb 属 -device ramfb，不是 -vga 型号）。缺哪个，
+ * 用哪个型号启动就会跑飞灌盘（不是干净报错）。改 UI 的 vga 选项时同步三处：
+ * 本文件 + deps/libqemu/Makefile 的 FIRMWARE + deps/Makefile 的 rawfile 拷贝。 */
 const FIRMWARE_FILES: string[] = [
   'bios-256k.bin',
   'bios.bin',
@@ -19,6 +24,8 @@ const FIRMWARE_FILES: string[] = [
   'vgabios-stdvga.bin',
   'vgabios-virtio.bin',
   'vgabios-ramfb.bin',
+  'vgabios-cirrus.bin',
+  'vgabios-vmware.bin',
   'efi-virtio.rom',
   'edk2-aarch64-code.fd', /* aarch64 客户机 UEFI 固件（virt 机器经 -bios 加载） */
   'edk2-arm-code.fd', /* arm(32位) 客户机 UEFI 固件（virt 机器经 -bios 加载） */

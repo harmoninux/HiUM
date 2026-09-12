@@ -11,8 +11,19 @@ TARGET_LIST := x86_64-softmmu,i386-softmmu,aarch64-softmmu,arm-softmmu,loongarch
 QEMU_LIBS := libqemu-system-x86_64.so libqemu-system-i386.so libqemu-system-aarch64.so libqemu-system-arm.so libqemu-system-loongarch64.so libqemu-system-riscv64.so libqemu-img.so
 
 # firmware blobs needed at runtime (packed into HAP rawfile)
+#
+# vgabios-*.bin 必须与编辑页可选的每个 -vga 型号一一对应。缺一个的后果不是干净报错，
+# 而是 qemu 陷入重复打印 `failed to find romfile "vgabios-<x>.bin"` 的死循环
+# （不退 + 满速灌盘，实测 2GB/30s）。romfile 需求出自 qemu 源码：
+#   hw/display/vga-pci.c:385     std     → vgabios-stdvga.bin
+#   hw/display/virtio-vga.c:232  virtio  → vgabios-virtio.bin
+#   hw/display/cirrus_vga.c      cirrus  → vgabios-cirrus.bin
+#   hw/display/vmware_vga.c:1348 vmware  → vgabios-vmware.bin
+# （ramfb 是 -device ramfb 用的，不属于 -vga 型号。）
+# 改动 UI 的 vga 选项时，务必同步这一行 + deps/Makefile 的 rawfile 拷贝 + bootstrap.ets。
 FIRMWARE := bios-256k.bin bios.bin kvmvapic.bin linuxboot.bin linuxboot_dma.bin \
 	vgabios-stdvga.bin vgabios-virtio.bin vgabios-ramfb.bin \
+	vgabios-cirrus.bin vgabios-vmware.bin \
 	efi-virtio.rom keymaps/en-us
 # optional blobs (present only when the corresponding firmware is shipped)
 FIRMWARE_OPT := edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd
