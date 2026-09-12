@@ -7,7 +7,7 @@ import { pathExists, isoReadable, copyFileWithProgress, fileSizeOf, readAsciiAt 
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
 import {
-  VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType, MouseMode, VmDisk,
+  VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType, VmDisk,
   newProfileId, fitBoard, fitVga, buildArgs, sharedDir, SCHEMA_VERSION, builtinIsoFor,
   forwardErrors,
 } from '../lib/vmprofile';
@@ -74,9 +74,8 @@ export struct VmWizard {
   @State tcgCollapsed: boolean = true;      /* TCG 模拟组默认折叠（步骤③） */
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine ISO 下载中 */
   @State isoPct: number = 0;
-  /* v4：输入模式/显卡（步骤②）；系统增强（步骤③）。数据盘不进向导（同 UTM：创建后经
+  /* v4：显卡（步骤②）；系统增强（步骤③）。数据盘不进向导（同 UTM：创建后经
    * 「存储管理」弹窗按需添加，那里的磁盘列表才是全部管理入口） */
-  @State mouse: MouseMode = 'tablet';
   @State rng: boolean = false;
   @State balloon: boolean = false;
   @State audio: boolean = true; /* v6：声音默认开（raspi 板卡无模拟声卡，步骤内禁用） */
@@ -111,7 +110,6 @@ export struct VmWizard {
     this.sharedFolder = false;
     this.cpuModelCollapsed = true;
     this.tcgCollapsed = true;
-    this.mouse = 'tablet';
     this.rng = false;
     this.balloon = false;
     this.audio = true;
@@ -379,7 +377,6 @@ export struct VmWizard {
         machine: fitBoard(this.arch, this.board),
         firmware: this.autoFirmware(),
         cpuModel: this.cpuModel.trim(),
-        mouse: this.mouse,
         serialInteractive: true, /* 向导默认交互串口；改回落盘日志在编辑页 */
         cpuFlags: '',   /* v6：CPU flags 仅编辑页可配 */
         rtcLocal: false, /* v6：RTC 默认 utc（qemu 出厂行为）；本地时区在编辑页 */
@@ -630,29 +627,6 @@ export struct VmWizard {
           : 'virt 板卡固定 virtio-gpu（无传统 VGA 总线）')
           .fontSize(tSub).fontColor(cWeak).width('100%')
       }
-
-      /* —— v4 输入模式（tablet 绝对 / relative 相对） —— */
-      this.groupHeader('输入模式')
-      Row({ space: sp2 }) {
-        Text('绝对 (触摸精确)').fontSize(tBody)
-          .fontColor(this.mouse === 'tablet' ? Color.White : cSub)
-          .backgroundColor(this.mouse === 'tablet' ? cPrimary : cChip)
-          .borderRadius(rBadge)
-          .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-          .enabled(!this.isRaspiBoard())
-          .onClick(() => { this.mouse = 'tablet' })
-        Text('相对 (PS/2 兼容)').fontSize(tBody)
-          .fontColor(this.mouse === 'relative' ? Color.White : cSub)
-          .backgroundColor(this.mouse === 'relative' ? cPrimary : cChip)
-          .borderRadius(rBadge)
-          .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-          .enabled(!this.isRaspiBoard())
-          .onClick(() => { this.mouse = 'relative' })
-      }.width('100%')
-      Text(this.isRaspiBoard()
-        ? '树莓派板卡无 PS/2 控制器，保持绝对注入'
-        : '绝对 = virtio-tablet 触摸精确；相对 = 传统鼠标语义（PC=PS/2，virt=usb-mouse），老系统兼容')
-        .fontSize(tSub).fontColor(cWeak).width('100%')
 
       /* CPU 机型组：默认折叠，点组头展开/收起 */
       /* CPU 机型组：默认折叠，点组头展开/收起。

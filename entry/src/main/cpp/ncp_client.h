@@ -17,8 +17,7 @@ int ncp_client_attach(const std::string &vmId, int64_t surfaceId);
 /* Console surface 销毁（VM 继续在后台跑） */
 void ncp_client_detach(const std::string &vmId);
 void ncp_client_resize(const std::string &vmId, int32_t w, int32_t h);
-void ncp_client_pointer(const std::string &vmId, int32_t x, int32_t y, int32_t buttons,
-                        int32_t mode = 0); /* mode 0=abs 1=rel（qemu_ipc kPointer） */
+void ncp_client_pointer(const std::string &vmId, int32_t x, int32_t y, int32_t buttons);
 void ncp_client_scroll(const std::string &vmId, int32_t dx, int32_t dy); /* 滚轮步进 */
 void ncp_client_key(const std::string &vmId, int32_t qcode, bool down);
 bool ncp_client_running(const std::string &vmId);

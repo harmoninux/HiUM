@@ -10,7 +10,10 @@
 
 namespace qemu_ipc {
 
-constexpr int32_t kProtoVersion = 2; /* v2: kPointer 带 mode 字段（0=abs/1=rel） */
+/* v2：kPointer 曾带 mode 字段（0=abs/1=rel）。「输入模式」功能已整体移除，
+ * 该字段随之删除（只发绝对坐标 virtio-tablet）。版本号不 bump：父子同包
+ * 同批构建，不存在新旧混跑，字段移除不需要迁移。 */
+constexpr int32_t kProtoVersion = 2;
 constexpr const char *kDescriptor = "qemuohos.qemu.Runtime";
 constexpr const char *kChildLib = "libqemu_child.so";
 
@@ -19,7 +22,7 @@ constexpr uint32_t kStart = 1;         /* [ver][arch][argc][argv...][window parc
 constexpr uint32_t kAttachSurface = 2; /* [ver][window parcel] → int32 */
 constexpr uint32_t kDetachSurface = 3; /* [ver] → int32 */
 constexpr uint32_t kResizeSurface = 4; /* [ver][w][h] → int32 */
-constexpr uint32_t kPointer = 5;       /* [ver][x][y][buttons][mode] → int32；mode 0=abs(virtio-tablet) 1=rel(PS/2或usb-mouse) */
+constexpr uint32_t kPointer = 5;       /* [ver][x][y][buttons] → int32，绝对坐标（virtio-tablet） */
 constexpr uint32_t kKey = 6;           /* [ver][qcode][down] → int32 */
 constexpr uint32_t kQuery = 7;         /* [ver] → [ver][fbW][fbH][running] */
 constexpr uint32_t kScreenshot = 8;    /* [ver][maxW] → [ver][w][h][rgba bytes] */

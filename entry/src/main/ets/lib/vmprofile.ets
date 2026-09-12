@@ -13,7 +13,6 @@ const TAG = 'QemuProf';
 
 export type VmArch = 'x86_64' | 'i386' | 'aarch64' | 'arm' | 'loongarch64' | 'riscv64';
 export type VgaType = 'std' | 'virtio' | 'cirrus' | 'vmware';
-export type MouseMode = 'tablet' | 'relative'; /* tablet=绝对注入; relative=相对(PS/2 或 usb-mouse) */
 export type VmBoard = 'pc' | 'q35' | 'virt' | 'raspi2' | 'raspi3';
 export type VmFirmware = 'seabios' | 'ovmf';
 
@@ -24,7 +23,6 @@ export interface VmMachine {
   machine: VmBoard;    /* 板卡：x86 pc/q35，arm64/arm virt/raspi2/raspi3，loongarch64/riscv64 virt */
   firmware: VmFirmware; /* 固件：seabios(BIOS) / ovmf(UEFI，暂需 OVMF 文件) */
   cpuModel: string;     /* '' = 自动（arm64/arm/loongarch64 给 max） */
-  mouse: MouseMode;             /* 输入模式；raspi 无 PS/2 无 PCI，构建期忽略（保持 tablet） */
   serialInteractive: boolean;   /* 串口走 socket 交互（默认 true）；false=落盘 file 日志 */
   cpuFlags: string;             /* v6：-cpu <模型>,<flags> 的 flags 部分，如 "+sse4a,-avx2"；''=无 */
   rtcLocal: boolean;            /* v6：-rtc base=localtime（guest RTC 随宿主时区） */
@@ -49,10 +47,6 @@ export function fitVga(board: VmBoard, vga: string): VgaType {
   const allowed: string[] = (board === 'pc' || board === 'q35') ?
     ['std', 'virtio', 'cirrus', 'vmware'] : ['std'];
   return allowed.indexOf(vga) >= 0 ? vga as VgaType : 'std';
-}
-
-export function fitMouse(mouse: string): MouseMode {
-  return mouse === 'relative' ? 'relative' : 'tablet';
 }
 
 /* 主盘路径（disks[0]）；无盘返回 ''。快照/临时会话/启动盘只作用于主盘。 */
@@ -141,7 +135,7 @@ export function blankProfile(id: string): VmProfile {
     name: '新虚拟机',
     machine: {
       arch: 'x86_64', vga: 'std', machine: 'pc', firmware: 'seabios', cpuModel: '',
-      mouse: 'tablet', serialInteractive: true, cpuFlags: '', rtcLocal: false,
+      serialInteractive: true, cpuFlags: '', rtcLocal: false,
     },
     runtime: { memoryMB: 1024, cpus: 2, mttcg: true, tbSize: 1024, rng: false, balloon: false, audio: true, gdbPort: 0 },
     media: {
@@ -287,8 +281,8 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
     p.machine.vga = fitVga(p.machine.machine, jStr(m, 'vga'));
     p.machine.firmware = jStr(m, 'firmware') === 'ovmf' ? 'ovmf' : 'seabios';
     p.machine.cpuModel = jStr(m, 'cpuModel');
-    /* v4：鼠标/串口模式，旧存档回填默认 */
-    p.machine.mouse = fitMouse(jStr(m, 'mouse'));
+    /* v4：串口模式，旧存档回填默认。
+     * 旧存档残留的 mouse 键不再读取（输入模式已整体移除），按未知键静默忽略。 */
     p.machine.serialInteractive = jBool(m, 'serialInteractive', true);
     /* v6：CPU flags 原样透传（''=无）；RTC 本地时区默认关 */
     p.machine.cpuFlags = jStr(m, 'cpuFlags');
@@ -442,17 +436,10 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
    * 仍未接 pflash（需 OVMF_CODE/VARS 固件），缺件回落 seabios。 */
   const board = fitBoard(p.machine.arch, p.machine.machine);
   const isRaspi = board === 'raspi2' || board === 'raspi3';
-  /* 输入设备（v4）：tablet=绝对注入（默认，virtio-tablet-pci）；relative=相对注入——
-   * pc/q35 走 PS/2 鼠标（DOS/古董系统兼容最好），virt 板无 PS/2，usb-mouse 挂在下方
-   * 已建的 usb-ehci 上；raspi 无 PS/2 无 PCI，保持 tablet 注入（现状行为）。 */
-  const mouseRel = !isRaspi && p.machine.mouse === 'relative';
-  if (isRaspi) {
-    args.push('-device', 'virtio-tablet-pci');
-  } else if (mouseRel && board !== 'virt') {
-    args.push('-device', 'ps2-mouse');
-  } else if (!mouseRel) {
-    args.push('-device', 'virtio-tablet-pci');
-  }
+  /* 输入设备：统一 virtio-tablet-pci（绝对注入，触摸精确）。四类板卡都挂同一个，
+   * 与重构前 raspi / tablet 两条分支的合并结果逐字等价。
+   * 注：pc/q35 的 i8042 另外自带 PS/2 鼠标与键盘，无需（也无法）用 -device 添加。 */
+  args.push('-device', 'virtio-tablet-pci');
   if (isRaspi) {
     /* 树莓派：qemu 10.2 实际机器名 raspi2b/raspi3b（旧代码 'raspi2' 会报 unsupported machine）。
      * 树莓派 SoC 自带引导、不依赖 edk2/BIOS；无 PCI，故不挂 virtio-gpu/net；磁盘经 SD 卡控制器。 */
@@ -465,9 +452,6 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
      * 控制器再挂 USB 键盘，否则 aarch64/arm/loongarch64/riscv64 收不到按键。 */
     args.push('-device', 'usb-ehci,id=usb');
     args.push('-device', 'usb-kbd,bus=usb.0');
-    if (mouseRel) {
-      args.push('-device', 'usb-mouse,bus=usb.0');
-    }
     /* aarch64 的 virt 机器必须提供 UEFI 固件才能引导客户机：edk2-aarch64-code.fd
      * 由 make deps 产出、bootstrap 解到 vmDir，qemu 经 -bios(绝对路径) 载入 flash0。
      * loongarch64/arm(32位) 同理，对应各自 edk2-*.fd。 */
@@ -480,18 +464,23 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     } else if (p.machine.arch === 'riscv64') {
       args.push('-bios', vmDataDir + '/edk2-riscv-code.fd');
     }
-    /* 串口（v4）：virt 板无 ISA UART，经 virtio-serial + virtconsole 接 socket 交互 */
+    /* 串口（v4）：virt 板无 ISA UART，经 virtio-serial + virtconsole 接 socket 交互。
+     * logfile 是 chardev 的通用选项（qemu_chr_parse_common，见 chardev/char.c）：
+     * 交互之外把数据同时落盘，恢复 v4 之前 `-serial file:` 的可事后诊断能力——
+     * 没有它，没人连 Console 串口视图时 guest 往串口写的东西会直接丢弃。
+     * 与历史行为一致，该文件无轮转上限（guest 行为决定，非本应用可控）。 */
     if (p.machine.serialInteractive) {
-      args.push('-chardev', `socket,path=${vmDataDir}/serial-${p.id}.sock,server=on,wait=off,id=chr0`);
+      args.push('-chardev', `socket,path=${vmDataDir}/serial-${p.id}.sock,server=on,wait=off,id=chr0,logfile=${vmDataDir}/serial-${p.id}.log`);
       args.push('-device', 'virtio-serial-pci');
       args.push('-device', 'virtconsole,chardev=chr0');
     }
   } else {
     args.push('-machine', board);
     args.push('-vga', fitVga(board, p.machine.vga));
-    /* 串口（v4）：默认 socket 交互（Console 串口视图读）；关掉则维持落盘 file 日志 */
+    /* 串口（v4）：默认 socket 交互（Console 串口视图读）+ logfile 同时落盘（见上）；
+     * 关掉则维持纯落盘 file 日志 */
     if (p.machine.serialInteractive) {
-      args.push('-chardev', `socket,path=${vmDataDir}/serial-${p.id}.sock,server=on,wait=off,id=chr0`);
+      args.push('-chardev', `socket,path=${vmDataDir}/serial-${p.id}.sock,server=on,wait=off,id=chr0,logfile=${vmDataDir}/serial-${p.id}.log`);
       args.push('-serial', 'chardev:chr0');
     } else {
       args.push('-serial', `file:${vmDataDir}/serial-${p.id}.log`);
@@ -654,8 +643,60 @@ export class VmStore {
     fs.closeSync(fd);
   }
 
+  /* ---- 「上次启动失败」标记（熔断）----
+   * 背景：跑飞的 qemu 子进程会以 ~38MB/s 灌盘且不退；配置又落在应用私有目录，
+   * 用户侧无手段自救（hdc shell rm 被 SELinux 拒）。若 console 一打开就自动重启，
+   * 应用等于被锁死。故失败后落一个标记，下次进入不自动启动，由用户显式重试。
+   * 文件名以 .bootfail 结尾，而 list() 只收 *.json —— 不会被误列成一台 VM。 */
+  private bootFailPath(id: string): string {
+    return `${this.dir}/${id}.bootfail`;
+  }
+
+  markBootFail(id: string, reason: string): void {
+    try {
+      const fd = fs.openSync(this.bootFailPath(id),
+        fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      fs.writeSync(fd.fd, JSON.stringify({ at: Date.now(), reason }));
+      fs.closeSync(fd);
+    } catch {
+      /* best effort：写不进就不熔断，不能因为标记失败把正常使用挡住 */
+    }
+  }
+
+  /* 上次失败原因；无标记返回 ''。读法同 load()：固定 4KB 缓冲 + UTF-8 解码。 */
+  readBootFail(id: string): string {
+    try {
+      const path = this.bootFailPath(id);
+      if (!fs.accessSync(path)) {
+        return '';
+      }
+      const fd = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      const buf = new ArrayBuffer(4096);
+      const n = fs.readSync(fd.fd, buf);
+      fs.closeSync(fd);
+      const text = util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n));
+      const obj = JSON.parse(text) as Record<string, Object>;
+      const r = obj['reason'];
+      return typeof r === 'string' ? r as string : '';
+    } catch {
+      return '';
+    }
+  }
+
+  clearBootFail(id: string): void {
+    try {
+      const path = this.bootFailPath(id);
+      if (fs.accessSync(path)) {
+        fs.unlinkSync(path);
+      }
+    } catch {
+      /* best effort */
+    }
+  }
+
   /* 删配置以及位于 vms 目录内的全部磁盘镜像与内核/initrd 副本 */
   remove(p: VmProfile): void {
+    this.clearBootFail(p.id);
     const paths: string[] = [this.profilePath(p.id), p.media.kernelPath, p.media.initrdPath];
     for (const d of p.media.disks) {
       paths.push(d.path);

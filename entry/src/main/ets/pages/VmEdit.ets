@@ -3,7 +3,7 @@
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
-import { VmProfile, VmStore, VmArch, VgaType, MouseMode, VmDisk, SCHEMA_VERSION, fitBoard, fitVga, builtinIsoFor, forwardErrors, mainDiskPath } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmArch, VgaType, VmDisk, SCHEMA_VERSION, fitBoard, fitVga, builtinIsoFor, forwardErrors, mainDiskPath } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { isoReadable } from '../lib/fsutil';
 import { pickIsoPath } from '../lib/isoPick';
@@ -42,9 +42,8 @@ export struct VmEdit {
   @State tbSizeText: string = '1024';
   @State extraArgs: string = '';
   @State kernelAppend: string = ''; /* 内核参数（-append）；仅当 VM 已配 kernel 时展示可编辑 */
-  /* v4：显卡/输入模式/系统增强/只读与第二盘 */
+  /* v4：显卡/系统增强/只读与第二盘 */
   @State vga: VgaType = 'std';
-  @State mouse: MouseMode = 'tablet';
   @State rng: boolean = false;
   @State balloon: boolean = false;
   @State diskReadonly: boolean = false;
@@ -84,7 +83,6 @@ export struct VmEdit {
     this.extraArgs = p.extraArgs;
     this.kernelAppend = p.media.kernelAppend;
     this.vga = p.machine.vga;
-    this.mouse = p.machine.mouse;
     this.rng = p.runtime.rng;
     this.balloon = p.runtime.balloon;
     this.diskReadonly = p.media.disks.length > 0 ? p.media.disks[0].readonly : false;
@@ -274,7 +272,6 @@ export struct VmEdit {
         machine: fitBoard(this.arch, this.profile.machine.machine),
         firmware: this.profile.machine.firmware,
         cpuModel: this.profile.machine.cpuModel,
-        mouse: this.mouse,
         serialInteractive: this.serialInteractive,
         cpuFlags: this.cpuFlags.trim(),
         rtcLocal: this.rtcLocal,
@@ -418,25 +415,6 @@ export struct VmEdit {
               Text(this.isRaspiBoard() ? '板载（固定）' : 'virtio-gpu（固定）')
                 .fontSize(tSub).fontColor(cSub).layoutWeight(1)
             }
-          }.width('100%').padding({ top: sp1, bottom: sp1 })
-
-          /* v4 输入模式：tablet 绝对 / relative 相对（raspi 板卡禁用） */
-          Row({ space: sp2 }) {
-            Text('输入模式').fontSize(tLabel).width(72)
-            Text('绝对 (触摸)').fontSize(tSub)
-              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-              .fontColor(this.mouse === 'tablet' ? Color.White : cText)
-              .backgroundColor(this.mouse === 'tablet' ? cPrimary : cBg)
-              .borderRadius(rBtn)
-              .enabled(!this.isRaspiBoard())
-              .onClick(() => { this.mouse = 'tablet' })
-            Text('相对 (PS/2)').fontSize(tSub)
-              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-              .fontColor(this.mouse === 'relative' ? Color.White : cText)
-              .backgroundColor(this.mouse === 'relative' ? cPrimary : cBg)
-              .borderRadius(rBtn)
-              .enabled(!this.isRaspiBoard())
-              .onClick(() => { this.mouse = 'relative' })
           }.width('100%').padding({ top: sp1, bottom: sp1 })
 
           /* —— 存储 —— */

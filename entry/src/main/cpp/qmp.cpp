@@ -25,6 +25,12 @@ namespace {
 struct QmpState {
     std::atomic<int> fd{-1};
     std::atomic<bool> readerRunning{false};
+    /* 已建连但 qmp_capabilities 的回复还没回来 */
+    std::atomic<bool> capsPending{false};
+    /* 已完成一次成功的命令往返 = qemu 主循环确认活着（见 qmp.h 的说明） */
+    std::atomic<bool> ready{false};
+    std::mutex readyMu;
+    std::condition_variable readyCv;
     std::thread reader;
 
     /* one command in flight: cmdMu serializes qmp_command callers, the
@@ -77,6 +83,24 @@ void handleLine(QmpState *st, const std::string &line)
         return; /* greeting */
     }
     if (isResponse(line)) {
+        /* qmp_capabilities 的回复 = 第一次成功往返 → 此后才算「qemu 起来了」。
+         * handleLine 由 reader 线程自己调用，所以这里只能用标志位、不能阻塞等
+         * 回复（在 reader 线程上 wait 会把 recv 循环卡死，永远等不到这行）。
+         *
+         * 这条回复**不能**写进 resp：它与并发的普通命令共用一个响应槽，写进去就
+         * 会被 qmp_command 的等待者当成自己的结果拿走。协商回复没有任何命令在等，
+         * 直接消化掉即可——此前的实现把它当普通回复投递，是既有的抢答缺陷。 */
+        if (st->capsPending.exchange(false)) {
+            if (line.find("\"return\"") != std::string::npos) {
+                st->ready.store(true);
+                OH_LOG_INFO(LOG_APP, "qmp ready (capabilities negotiated)");
+                std::lock_guard<std::mutex> lk(st->readyMu);
+                st->readyCv.notify_all();
+            } else {
+                OH_LOG_ERROR(LOG_APP, "qmp_capabilities rejected: %{public}s", line.c_str());
+            }
+            return;
+        }
         std::lock_guard<std::mutex> lk(st->respMu);
         st->resp = line;
         st->hasResp = true;
@@ -139,8 +163,10 @@ void readerMain(QmpState *st, std::string path)
     }
     OH_LOG_INFO(LOG_APP, "qmp connected on %{public}s", path.c_str());
 
-    /* capability negotiation: greeting is read in the main loop below */
+    /* capability negotiation: greeting is read in the main loop below。
+     * capsPending 必须在 send 之前置位——回复可能在同一轮 recv 里就到达。 */
     static const char caps[] = "{\"execute\":\"qmp_capabilities\"}\n";
+    st->capsPending.store(true);
     sendAll(fd, caps, sizeof(caps) - 1);
 
     std::string buf;
@@ -160,6 +186,13 @@ void readerMain(QmpState *st, std::string path)
 
     close(fd);
     st->fd.store(-1);
+    st->ready.store(false);
+    st->capsPending.store(false);
+    {
+        /* 唤醒等在「就绪」上的命令：连接已死，它不该再干等满超时 */
+        std::lock_guard<std::mutex> lk(st->readyMu);
+        st->readyCv.notify_all();
+    }
     /* wake any blocked command, then tell ArkTS the monitor is gone */
     {
         std::lock_guard<std::mutex> lk(st->respMu);
@@ -204,6 +237,18 @@ std::string qmp_command(const std::string &vmId, const std::string &json)
     if (fd < 0) {
         return "";
     }
+    /* 协商之前 qemu 的 QMP 只认 qmp_capabilities，别的命令一律 CommandNotFound；
+     * 调用方（列表页关机）连上 150ms 就发，那时协商多半还没跑完，所以等一下。
+     * 上限 2s：本函数是 napi 同步调用，跑在 ArkTS 主线程上，不能无限等。 */
+    if (!st->ready.load()) {
+        std::unique_lock<std::mutex> lk(st->readyMu);
+        st->readyCv.wait_for(lk, std::chrono::seconds(2),
+                             [st] { return st->ready.load() || st->fd.load() < 0; });
+    }
+    if (!st->ready.load()) {
+        OH_LOG_WARN(LOG_APP, "qmp not ready, dropping: %{public}s", json.c_str());
+        return "";
+    }
     {
         std::lock_guard<std::mutex> lk(st->respMu);
         st->hasResp = false;
@@ -225,16 +270,24 @@ void qmp_disconnect(const std::string &vmId)
 {
     QmpState *st = stateOf(vmId);
     st->readerRunning.store(false);
+    st->ready.store(false);
     int fd = st->fd.exchange(-1);
     if (fd >= 0) {
         shutdown(fd, SHUT_RDWR);
         close(fd);
     }
+    std::lock_guard<std::mutex> lk(st->readyMu);
+    st->readyCv.notify_all();
 }
 
 bool qmp_connected(const std::string &vmId)
 {
     return stateOf(vmId)->fd.load() >= 0;
+}
+
+bool qmp_ready(const std::string &vmId)
+{
+    return stateOf(vmId)->ready.load();
 }
 
 void qmp_set_event_callback(const std::string &vmId, napi_env env, napi_value cb)

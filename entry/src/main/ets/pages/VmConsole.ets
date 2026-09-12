@@ -2,7 +2,6 @@
 // 顶部工具条（电源/QMP 控制/截图/全屏）。vmId 经 LocalStorage 传入，页面按
 // vmId 自载 profile。VM 跑在 NCP 子进程，关窗只是摘窗，重开窗口即重新挂窗。
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { util } from '@kit.ArkTS';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { promptAction, window } from '@kit.ArkUI';
@@ -11,7 +10,7 @@ import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
 import { VmProfile, VmStore, buildArgs, qmpSockPath, serialSockPath, sharedDir, builtinIsoFor, mainDiskPath } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
-import { pathExists, isoReadable } from '../lib/fsutil';
+import { pathExists, isoReadable, readTail } from '../lib/fsutil';
 import { prepareStart } from '../lib/tempSession';
 import { takePendingVmId, isPadOrPhone } from '../lib/vmwindows';
 import { VirtualKeyboard } from '../lib/VirtualKeyboard';
@@ -28,11 +27,13 @@ interface QemuNapi {
   createSurface: (vmId: string, surfaceId: bigint) => number;
   resizeSurface: (vmId: string, w: number, h: number) => number;
   destroySurface: (vmId: string) => number;
-  sendPointer: (vmId: string, x: number, y: number, buttons: number, mode?: number) => void;
+  sendPointer: (vmId: string, x: number, y: number, buttons: number) => void;
   sendKey: (vmId: string, qcode: number, down: boolean) => void;
   scroll: (vmId: string, dx: number, dy: number) => void;
   qmpConnect: (vmId: string, sockPath: string) => number;
   qmpCommand: (vmId: string, cmd: string) => string;
+  qmpReady: (vmId: string) => boolean;
+  forceStopVm: (vmId: string) => number;
   setQmpEventCallback: (vmId: string, cb: ((evt: string) => void) | null) => void;
   serialOpen: (vmId: string, sockPath: string) => number;
   serialWrite: (vmId: string, text: string) => number;
@@ -105,8 +106,18 @@ struct VmConsole {
   @State serialText: string = '';
   @State serialInput: string = '';
   @State ctrlOn: boolean = false; /* Ctrl 修饰（发送时对字母做 ^C 类映射） */
+  /* 上次启动失败留下的熔断标记（非空 = 本次进入不自动启动，需用户点「仍要启动」） */
+  @State bootFailReason: string = '';
   private vmId: string = '';
   private profile: VmProfile | null = null;
+  /* 就绪轮询：QMP 一次成功往返才算「起来了」（见 native qmpReady 的说明）。
+   * 启动中 → qmpReady → 运行中；T 内 !vmRunning → 启动失败；T 内仍活着但没就绪 → 疑似卡死。 */
+  private readyTimer: number = -1;
+  private readySeen: boolean = false; /* 本窗口内是否见过 qemu 就绪；决定「死了」怎么处理 */
+  private stuck: boolean = false; /* 超出等待窗口仍未就绪：跳过 quit，直接走 IPC 强杀 */
+  /* 用户主动停止（关机/强制断电）：QMP_DISCONNECT 随之而来，但那不是「启动失败」，
+   * 不能写熔断标记，否则每次正常关机都会让下次进入不自动启动。 */
+  private userStopped: boolean = false;
   private xcController: VmXComponentController = new VmXComponentController();
   private immersiveMaximized: boolean = false;  /* 防递归：maximize() 自身也触发窗口状态回调 */
   private areaW: number = 0;
@@ -126,7 +137,6 @@ struct VmConsole {
   private scrollAcc: number = 0;
   private lastX: number = 0;
   private lastY: number = 0;
-  private mouseRel: boolean = false; /* 本 VM 输入模式：relative=发送 delta（不裁 viewport 映射） */
   private serialScroller: Scroller = new Scroller();
 
   private toSurfacePx(vp: number, vpSize: number, surfaceSize: number): number {
@@ -150,9 +160,6 @@ struct VmConsole {
         this.startVm();
       }
     };
-    if (this.profile) {
-      this.mouseRel = this.profile.machine.mouse === 'relative';
-    }
     napi.setQmpEventCallback(this.vmId, (evt: string) => this.onQmpEvent(evt));
     this.loadKbd();
     this.enterVm();
@@ -164,6 +171,7 @@ struct VmConsole {
   }
 
   aboutToDisappear(): void {
+    this.stopReadyWatch();
     napi.setQmpEventCallback(this.vmId, null);
     this.closeSerial();
   }
@@ -174,9 +182,20 @@ struct VmConsole {
       return;
     }
     if (napi.vmRunning(this.vmId)) {
-      /* 已在后台运行（上次关窗只是摘窗）：重新挂窗，接管 QMP */
+      /* 已在后台运行（上次关窗只是摘窗）：重新挂窗，接管 QMP。
+       * 仍走一遍就绪轮询——「子进程活着」不等于「qemu 起来了」（可能是上次卡死的
+       * 残留），没就绪时它会在 T 后翻成「疑似卡死」。 */
       this.status = '运行中';
       napi.qmpConnect(this.vmId, qmpSockPath(this.profile, this.vmDataDir));
+      this.beginReadyWatch();
+      return;
+    }
+    /* 熔断：上次启动失败且未修好配置 → 不自动重来。跑飞的 qemu 子进程会满速灌盘
+     * 且不退（实测 38MB/s），而 console 一开窗就自动启动，用户会被反复拖进去，
+     * 应用等于打不开。改为把原因摆出来，由用户显式点「仍要启动」再冒一次险。 */
+    this.bootFailReason = new VmStore(this.filesDir).readBootFail(this.vmId);
+    if (this.bootFailReason.length > 0) {
+      this.status = '上次启动失败，未自动启动';
       return;
     }
     if (this.surfaceReady) {
@@ -184,6 +203,21 @@ struct VmConsole {
     } else {
       this.startPending = true; /* 等 surface 起来再启动，避免黑屏竞态 */
     }
+  }
+
+  /* 「仍要启动」：清掉熔断标记后走正常启动流程（失败会再落一次标记）。
+   * **先重读磁盘上的 profile**：窗口是独立 Ability，this.profile 是开窗那一刻的
+   * 快照；用户修参数只能去编辑页（另一个窗口写盘），本窗口不会自己重载。不重读的话
+   * 「改好了再重试」必然拿旧参数再失败一次（实测踩过）。 */
+  private retryAnyway(): void {
+    const fresh = new VmStore(this.filesDir).load(this.vmId);
+    if (fresh) {
+      this.profile = fresh;
+    }
+    new VmStore(this.filesDir).clearBootFail(this.vmId);
+    this.bootFailReason = '';
+    this.status = '';
+    this.startVm();
   }
 
   private startVm(): void {
@@ -242,28 +276,19 @@ struct VmConsole {
    * vm.cpp 重定向 stdout/stderr 写到 <vmDataDir>/qemu-<vmId>.log（多实例各写各文件，
    * 对齐 qmp-<id>.sock/serial-<id>.log），是语义错误的唯一权威来源。启动失败时透出
    * 具体原因，替代笼统的「启动失败」——因为自定义 qemu 参数(extraArgs)永远无法静态
-   * 校验，唯一的兜底就是让 qemu 自己把话说出来。旧版全局 qemu.log 作回退。 */
+   * 校验，唯一的兜底就是让 qemu 自己把话说出来。旧版全局 qemu.log 作回退。
+   * 只读尾部 64KB：日志在启动失败时会涨到 GB 级（实测 38MB/s），按整文件大小
+   * 分配 ArrayBuffer 会直接 OOM。 */
   private qemuLogTail(): string {
     const candidates: string[] = [
       this.vmDataDir + '/qemu-' + this.vmId + '.log',
       this.vmDataDir + '/qemu.log',
     ];
     for (const log of candidates) {
-      try {
-        if (!pathExists(log)) { continue; }
-        const st = fs.statSync(log);
-        if (st.size <= 0) { continue; }
-        const fd = fs.openSync(log, fs.OpenMode.READ_ONLY);
-        const buf = new ArrayBuffer(st.size);
-        const n = fs.readSync(fd.fd, buf);
-        fs.closeSync(fd);
-        const text = util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n));
-        const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-        if (lines.length === 0) { continue; }
-        return lines.slice(-60).join('\n');
-      } catch {
-        continue;
-      }
+      const text = readTail(log, 64 * 1024);
+      const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+      if (lines.length === 0) { continue; }
+      return lines.slice(-60).join('\n');
     }
     return '';
   }
@@ -340,20 +365,107 @@ struct VmConsole {
       return;
     }
     this.status = '启动中...';
+    this.stuck = false;
     const qmpRet = napi.qmpConnect(this.vmId, qmpSockPath(this.profile, this.vmDataDir));
     hilog.info(DOMAIN, TAG, 'doStart qmpConnect vm=%{public}s ret=%{public}d', this.vmId, qmpRet);
-    /* 首次启动 qemu 不发 RESUME 事件，按实际运行状态翻牌；长时间没起来
-     * 说明子进程早夭（如参数/资源问题），给个可见的失败 */
-    setTimeout(() => {
-      if (this.status === '启动中...' && napi.vmRunning(this.vmId)) {
+    this.beginReadyWatch();
+  }
+
+  /* 启动就绪判定：轮询 qmpReady（= QMP 成功往返过一次，qemu 主循环确认活着）。
+   * 绝不能用「socket 连上了」「DCL 注册了」「出首帧了」当锚点 —— 实测跑飞时三者
+   * 都已发生，而 qemu 根本不进主循环（-qmp 的 chardev 建在 device init 之前，
+   * unix socket 一进内核 backlog，connect 就会成功）。旧代码的 2s「vmRunning 即
+   * 运行中」是假成功：vmRunning 的真实语义只是「子进程收到了 START」。
+   * 窗口 T=45s：edk2 + 大内存 + 多 ISO 首次启动会超过旧代码的 10s，而误判「卡死」
+   * 的代价是让用户以为好 VM 坏了。 */
+  private beginReadyWatch(): void {
+    this.stopReadyWatch();
+    this.readySeen = false;
+    this.bootFailReason = ''; /* 新一轮启动，旧失败提示作废（再失败会重新落标记） */
+    const started = Date.now();
+    const WAIT_MS = 45000;
+    this.readyTimer = setInterval(() => {
+      if (napi.qmpReady(this.vmId)) {
+        this.stopReadyWatch();
+        this.readySeen = true;
         this.status = '运行中';
+        /* 起来了就把熔断标记销掉（用户已修好配置） */
+        new VmStore(this.filesDir).clearBootFail(this.vmId);
+        this.bootFailReason = '';
+        return;
       }
-    }, 2000);
-    setTimeout(() => {
-      if (this.status === '启动中...' && !napi.vmRunning(this.vmId)) {
+      if (!napi.vmRunning(this.vmId)) {
+        this.stopReadyWatch();
+        this.noteBootFail('子进程在就绪前退出');
         this.failStart('启动失败：子进程退出');
+        return;
       }
-    }, 10000);
+      if (Date.now() - started > WAIT_MS) {
+        this.stopReadyWatch();
+        this.stuck = true;
+        this.status = '疑似卡死（qemu 无响应，可强制断电）';
+        this.noteBootFail('启动后 ' + Math.round((Date.now() - started) / 1000) + 's 未就绪');
+      }
+    }, 500);
+  }
+
+  private stopReadyWatch(): void {
+    if (this.readyTimer >= 0) {
+      clearInterval(this.readyTimer);
+      this.readyTimer = -1;
+    }
+  }
+
+  /* 落熔断标记。用户主动停止（关机/强制断电）不算失败，不落。 */
+  private noteBootFail(reason: string): void {
+    if (this.userStopped) {
+      return;
+    }
+    new VmStore(this.filesDir).markBootFail(this.vmId, reason);
+    this.bootFailReason = reason;
+  }
+
+  /* 强制断电：先礼后兵 —— QMP quit 让 qemu 自己收尾；卡死时 quit 必然超时
+   * （qmpCommand 同步阻塞 5s 后返回空），所以已判卡死就跳过它直接走 IPC 强杀。
+   * 强杀走 kShutdown → 子进程 MainProc 置位后 _exit(0)，不依赖 qemu 合作。 */
+  private forcePowerOff(): void {
+    this.userStopped = true;
+    this.stopReadyWatch();
+    if (!napi.vmRunning(this.vmId)) {
+      this.status = '已关机';
+      return;
+    }
+    this.status = '正在断电...';
+    if (this.stuck) {
+      /* 已判卡死：quit 必然白等 5s，直接强杀，然后只轮询「死没死」 */
+      hilog.warn(DOMAIN, TAG, '已判卡死，直接 IPC 强杀 vm=%{public}s', this.vmId);
+      napi.forceStopVm(this.vmId);
+      this.pollGone(0, true);
+      return;
+    }
+    napi.qmpCommand(this.vmId, '{"execute":"quit"}');
+    this.pollGone(0, false);
+  }
+
+  /* 轮询子进程退出（500ms × 6 = 3s）。第一阶段超时则升级为 IPC 强杀，再等一轮。
+   * 必须等到真死才结束：旧 qemu 仍握 qcow2 写锁时重启会撞
+   * "Failed to get write lock"（在 ncp_client_start 里被显示成笼统的「启动失败」）。 */
+  private pollGone(tries: number, forced: boolean): void {
+    if (!napi.vmRunning(this.vmId)) {
+      this.status = '已关机';
+      return;
+    }
+    if (tries >= 6) {
+      if (forced) {
+        this.status = '强制断电未生效';
+        return;
+      }
+      hilog.warn(DOMAIN, TAG, 'quit 未生效，改走 IPC 强杀 vm=%{public}s', this.vmId);
+      napi.forceStopVm(this.vmId);
+      this.pollGone(0, true);
+      return;
+    }
+    setTimeout(() => this.pollGone(tries + 1, forced), 500);
   }
 
   private onQmpEvent(evt: string): void {
@@ -376,9 +488,20 @@ struct VmConsole {
         break;
       case 'SHUTDOWN':
       case 'QMP_DISCONNECT':
-        this.status = '已关机';
+        this.stopReadyWatch();
         this.vmListVersion++;
         this.closeSerial(); /* 串口随 VM 死亡断线，回画面视图 */
+        /* 从没就绪过 → 这是一次「启动失败」，不是「运行中的 VM 死了」，不能按
+         * 关机处理：窗口一关，用户只看到一闪而过、什么原因都不知道。留着窗口
+         * 显示失败横幅 + 「仍要启动」，标记也在这里落（就绪轮询常常等不到这一轮
+         * —— 子进程死掉时 socket 立刻断开，这个事件先到，随后 aboutToDisappear
+         * 就把轮询停了。实测踩过：不在这里补，熔断标记永远写不出来）。 */
+        if (!this.readySeen && !this.userStopped) {
+          this.noteBootFail('子进程在就绪前退出');
+          this.status = '启动失败：子进程退出';
+          break;
+        }
+        this.status = '已关机';
         /* VM 进程已死（意外退出 / ACPI / 强制断电 / quit 一律如此）：
          * 窗口是「存活 VM 的视图」，死机就应该销毁窗口——下次从列表「进入」
          * 会走全新的窗口→enterVm→startVm 自动重启。避免窗口停在「已关机」
@@ -419,21 +542,12 @@ struct VmConsole {
   /* ================= 触摸手势（单指移动/点击/长按右键，双指滚轮） ================= */
 
   private sendPtrMedia(vx: number, vy: number, buttons: number): void {
-    if (this.mouseRel) {
-      /* 相对注入（PS/2 / usb-mouse）：坐标语义是 delta（view px），
-       * 传给 native 的是与上次位置的差值；native 端不再做 viewport 映射 */
-      const dx = vx - this.lastX;
-      const dy = vy - this.lastY;
-      this.lastX = vx;
-      this.lastY = vy;
-      napi.sendPointer(this.vmId, dx, dy, buttons, 1);
-      return;
-    }
+    /* 绝对注入：view 坐标按 viewport 比例映射到 guest 表面坐标（virtio-tablet 语义） */
     const px = this.toSurfacePx(vx, this.areaW, this.xcController.surfaceWidth);
     const py = this.toSurfacePx(vy, this.areaH, this.xcController.surfaceHeight);
     this.lastX = vx;
     this.lastY = vy;
-    napi.sendPointer(this.vmId, px, py, buttons, 0);
+    napi.sendPointer(this.vmId, px, py, buttons);
   }
 
   private cancelLongPress(): void {
@@ -720,6 +834,31 @@ struct VmConsole {
         if (isPadOrPhone() && this.showKbd) {
           VirtualKeyboard({ vmId: this.vmId, showKbd: this.$showKbd })
         }
+        /* 熔断横幅：上次启动失败且本次没有自动启动 —— 把原因和「仍要启动」摆出来。
+         * 不自动重试是因为跑飞的 qemu 会满速灌盘且不退（详见 enterVm 注释）。 */
+        /* 判定只看 bootFailReason：它在熔断/失败时置位，就绪或「仍要启动」时清空。
+         * 不在 build 里问 napi.vmRunning —— 那是同步 IPC 往返，每次重绘都打一次。 */
+        if (this.bootFailReason.length > 0) {
+          Column({ space: sp2 }) {
+            Text('上次启动失败').fontSize(STATUS_FS).fontColor('#fffecaca')
+            Text(this.bootFailReason).fontSize(STATUS_FS).fontColor(MENU_TEXT).maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Row({ space: sp2 }) {
+              Button('仍要启动').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+                .padding({ left: sp2, right: sp2 })
+                .fontColor(MENU_TEXT).backgroundColor('#40ffffff')
+                .onClick(() => { this.retryAnyway() })
+              Button('看日志').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+                .padding({ left: sp2, right: sp2 })
+                .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+                .onClick(() => { this.failStart('上次启动失败'); })
+            }
+          }
+          .width('100%')
+          .backgroundColor('#e6601b1b')
+          .padding(sp2)
+          .alignItems(HorizontalAlign.Start)
+        }
         /* 交互式串口 overlay（v4）：盖住画面，只读滚动区 + 键帽/输入行。
          * 键帽发送原始字节：Ctrl=切换修饰、Esc=0x1b、Enter=0x0d */
         if (this.serialView) {
@@ -801,15 +940,19 @@ struct VmConsole {
           Button('关机').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
             .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
-            .onClick(() => { this.qmp('system_powerdown') })
+            .onClick(() => {
+              /* 用户主动停止：别让随后到来的 QMP_DISCONNECT 被当成启动失败写熔断标记 */
+              this.userStopped = true;
+              this.qmp('system_powerdown');
+            })
           Button('重启').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
             .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
             .onClick(() => { this.qmp('system_reset') })
           Button('强制断电').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
-            .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
-            .onClick(() => { this.qmp('quit') })
+            .fontColor(cDanger).backgroundColor(Color.Transparent)
+            .onClick(() => { this.forcePowerOff() })
           Button('Ctrl+Alt+Del').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
             .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)

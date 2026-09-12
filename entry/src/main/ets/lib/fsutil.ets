@@ -1,6 +1,7 @@
 /* 路径存在守卫：fs.accessSync 在文件不存在时抛异常，统一 try 包裹，
  * 避免列表/渲染/点击路径因失效媒体崩溃。所有「读一下盘在不在」都应走这里。 */
 import { fileIo as fs } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 
 export function pathExists(path: string): boolean {
   try {
@@ -81,6 +82,37 @@ export function readAsciiAt(path: string, offset: number, len: number): string {
       s += String.fromCharCode(b);
     }
     return s;
+  } catch {
+    return '';
+  } finally {
+    if (f) {
+      try { fs.closeSync(f); } catch { /* best effort */ }
+    }
+  }
+}
+
+/* 读文件尾部至多 maxBytes 字节（UTF-8 解码）。专供 qemu 日志诊断：日志会涨到
+ * GB 级（启动失败时实测 38MB/s），按整文件大小 new ArrayBuffer 会直接 OOM，
+ * 必须只取尾部。offset>0 时首行可能是被截断的残片（多字节字符也会被切），丢弃。
+ * 任何失败返回 ''。 */
+export function readTail(path: string, maxBytes: number): string {
+  let f: fs.File | null = null;
+  try {
+    const size = fs.statSync(path).size;
+    if (size <= 0 || maxBytes <= 0) {
+      return '';
+    }
+    const len = Math.min(size, maxBytes);
+    const offset = size - len;
+    f = fs.openSync(path, fs.OpenMode.READ_ONLY);
+    const buf = new ArrayBuffer(len);
+    const n = fs.readSync(f.fd, buf, { offset: offset, length: len });
+    const text = util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n));
+    if (offset === 0) {
+      return text;
+    }
+    const nl = text.indexOf('\n');
+    return nl >= 0 ? text.substring(nl + 1) : text;
   } catch {
     return '';
   } finally {

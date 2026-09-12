@@ -98,11 +98,9 @@ typedef QemuConsole *(*qemu_console_lookup_default_fn)(void);
 typedef void (*graphic_hw_update_fn)(QemuConsole *con);
 typedef void (*qemu_input_event_send_key_qcode_fn)(QemuConsole *src, int q, bool down);
 typedef void (*qemu_input_queue_abs_fn)(QemuConsole *src, int axis, int value, int min_in, int max_in);
-typedef void (*qemu_input_queue_rel_fn)(QemuConsole *src, int axis, int value);
 typedef void (*qemu_input_queue_btn_fn)(QemuConsole *src, int btn, bool down);
 typedef void (*qemu_input_event_sync_fn)(void);
 typedef bool (*qemu_input_is_absolute_fn)(QemuConsole *con);
-typedef int (*qemu_input_scale_axis_fn)(int value, int min_in, int max_in, int min_out, int max_out);
 
 /* resolved symbols of the currently loaded qemu .so (set by vm.cpp) */
 extern qemu_system_entry_fn qe_system_entry;
@@ -111,11 +109,9 @@ extern qemu_console_lookup_default_fn qe_console_lookup_default;
 extern graphic_hw_update_fn qe_graphic_hw_update;
 extern qemu_input_event_send_key_qcode_fn qe_input_send_key;
 extern qemu_input_queue_abs_fn qe_input_queue_abs;
-extern qemu_input_queue_rel_fn qe_input_queue_rel;
 extern qemu_input_queue_btn_fn qe_input_queue_btn;
 extern qemu_input_event_sync_fn qe_input_event_sync;
 extern qemu_input_is_absolute_fn qe_input_is_absolute;
-extern qemu_input_scale_axis_fn qe_input_scale_axis;
 extern pixman_image_get_width_fn qe_surface_width;
 extern pixman_image_get_height_fn qe_surface_height;
 extern pixman_image_get_stride_fn qe_surface_stride;

@@ -332,6 +332,10 @@ export struct VmStorage {
     }
     this.snapCreateMode = false;
     this.snapNameText = '';
+    /* 本弹窗是 Stack 遮罩（不压栈），详情页始终 active：bump 即触发它的
+     * @Watch('onVmListChanged') → refreshProfile → refreshSnapshot，
+     * 否则新建的快照要等离开详情页再回来才出现 */
+    this.vmListVersion++;
     this.showSnack(`已创建快照「${name}」`);
   }
 

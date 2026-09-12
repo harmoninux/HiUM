@@ -159,23 +159,20 @@ static napi_value DestroySurface(napi_env env, napi_callback_info info)
     return intResult(env, 0);
 }
 
-/* sendPointer(vmId: string, x: number, y: number, buttons: number, mode=0|1)
- * mode 0=absolute（默认，virtio-tablet），1=relative（PS/2、usb-mouse） */
+/* sendPointer(vmId: string, x: number, y: number, buttons: number)
+ * 绝对坐标（guest 表面 px），由 virtio-tablet 消费。 */
 static napi_value SendPointer(napi_env env, napi_callback_info info)
 {
-    size_t argc = 5;
-    napi_value args[5] = {nullptr};
+    size_t argc = 4;
+    napi_value args[4] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
 
     std::string vmId = stringArg(env, args[0]);
-    int32_t x = 0, y = 0, buttons = 0, mode = 0;
+    int32_t x = 0, y = 0, buttons = 0;
     napi_get_value_int32(env, args[1], &x);
     napi_get_value_int32(env, args[2], &y);
     napi_get_value_int32(env, args[3], &buttons);
-    if (argc > 4) {
-        napi_get_value_int32(env, args[4], &mode);
-    }
-    ncp_client_pointer(vmId, x, y, buttons, mode);
+    ncp_client_pointer(vmId, x, y, buttons);
     return nullptr;
 }
 
@@ -253,6 +250,34 @@ static napi_value QmpConnected(napi_env env, napi_callback_info info)
     napi_value result;
     napi_get_boolean(env, qmp_connected(stringArg(env, args[0])), &result);
     return result;
+}
+
+/* qmpReady(vmId: string): boolean —— 已成功往返过一次命令（qemu 主循环活着）。
+ * 「启动成功」的权威判据：connected 只说明 socket 连上了，而 -qmp 的 unix socket
+ * 在 device init 之前就建好、一进内核 backlog connect 就能成功，启动失败跑飞时
+ * connected 依然为 true（实测）。 */
+static napi_value QmpReady(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    napi_value result;
+    napi_get_boolean(env, qmp_ready(stringArg(env, args[0])), &result);
+    return result;
+}
+
+/* forceStopVm(vmId: string): number —— 强制断电：让子进程整体退出（含卡死的 qemu
+ * 线程）。走 IPC kShutdown → 子进程 MainProc 置位后 _exit(0)，不依赖 qemu 合作，
+ * 也绕开可能永不返回的 renderer_detach_window()。返回 0。 */
+static napi_value ForceStopVm(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    ncp_client_shutdown(stringArg(env, args[0]));
+    return intResult(env, 0);
 }
 
 /* setQmpEventCallback(vmId: string, cb: ((evt: string) => void) | null) */
@@ -538,6 +563,8 @@ static napi_value Init(napi_env env, napi_value exports)
         { "qmpCommand", nullptr, QmpCommand, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "qmpDisconnect", nullptr, QmpDisconnect, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "qmpConnected", nullptr, QmpConnected, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "qmpReady", nullptr, QmpReady, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "forceStopVm", nullptr, ForceStopVm, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "setQmpEventCallback", nullptr, SetQmpEventCallback, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "captureScreen", nullptr, CaptureScreen, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "createDisk", nullptr, CreateDisk, nullptr, nullptr, nullptr, napi_default, nullptr },

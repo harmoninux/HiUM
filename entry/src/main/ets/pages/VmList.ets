@@ -3,6 +3,7 @@
 // 多实例：每台 VM 独立子进程，可同时运行多台（受内存约束）；
 // console 为每台 VM 一个 VmConsoleAbility 独立窗口（specified 模式按 vmId 归并）。
 // 工坊为内嵌居中模态：Stack 遮罩浮层承载 VmWizard（showWizard 开关）。
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { pathExists } from '../lib/fsutil';
 import { promptAction } from '@kit.ArkUI';
@@ -23,10 +24,16 @@ import {
   sp1, sp2, sp3, sp4, sp5, rCard, rElem, rBadge, bw, rBtn, btnH, btnSh, btnPadX,
 } from '../lib/uiTokens';
 
+const DOMAIN = 0x0002;
+const TAG = 'QemuUI';
+
 /* 只用于「运行中 VM 安全关机/断电」的一次性 QMP 调用（连接是 per-vm 单例，无抢占） */
 interface QmpNapi {
   qmpConnect: (vmId: string, sockPath: string) => number;
   qmpCommand: (vmId: string, cmd: string) => string;
+  vmRunning: (vmId: string) => boolean;
+  /* 强制断电兜底：qemu 卡死时 QMP 必然超时，靠它让子进程整体退出 */
+  forceStopVm: (vmId: string) => number;
 }
 const qmpNapi = napiModule as QmpNapi;
 
@@ -183,9 +190,28 @@ export struct VmList {
         qmpNapi.qmpCommand(p.id, cmd);
         this.pollTick(); /* 立刻刷一次运行态 */
       }, 150);
+      if (force) {
+        /* 兜底：卡死的 qemu 不认 quit（命令 5s 超时、进程照旧）→ 走 IPC 强杀。
+         * 与 console 的「强制断电」同一套逻辑；正常路径 quit 3s 内就退完了。 */
+        this.forceStopLater(p.id, 0);
+      }
     } catch {
       promptAction.showToast({ message: '操作失败' });
     }
+  }
+
+  /* 等 3s（6 × 500ms）仍活着才强杀，避免打断正常收尾 */
+  private forceStopLater(vmId: string, tries: number): void {
+    if (!qmpNapi.vmRunning(vmId)) {
+      return;
+    }
+    if (tries >= 6) {
+      hilog.warn(DOMAIN, TAG, 'quit 未生效，IPC 强杀 vm=%{public}s', vmId);
+      qmpNapi.forceStopVm(vmId);
+      this.pollTick();
+      return;
+    }
+    setTimeout(() => this.forceStopLater(vmId, tries + 1), 500);
   }
 
   /* 新建 → 机器工坊（模态浮层，手工向导新建即开箱） */

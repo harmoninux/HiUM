@@ -23,6 +23,12 @@ void qmp_disconnect(const std::string &vmId);
 /* true while the socket is live */
 bool qmp_connected(const std::string &vmId);
 
+/* true once the monitor has answered one command round-trip (capabilities
+ * negotiated). 这是「qemu 起来了」的唯一权威信号：socket connect / DCL 注册 /
+ * 首帧都发生得太早（-qmp chardev 建在 device init 之前，unix socket 一进内核
+ * backlog，connect 就能成功），只有一次成功的往返证明 qemu 主循环活着。 */
+bool qmp_ready(const std::string &vmId);
+
 /* register (or clear, with nullptr) the ArkTS event callback for one VM;
  * invoked with the raw JSON of every QMP async event, plus a synthetic
  * {"event":"QMP_DISCONNECT"} when the socket dies */

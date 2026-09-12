@@ -21,6 +21,11 @@ struct Index {
   @Provide('showStorage') showStorage: boolean = false;
   @Provide('storageParam') storageParam: VmProfile | null = null;
   @StorageLink('vmListVersion') vmListVersion: number = 0;
+  /* 详情页重新显示的信号。编辑页压栈期间 VmManage 处于 inactive —— 官方文档明确
+   * 「非栈顶 NavDestination 不响应状态变量变化、不触发 @Watch 回调」，而 pop 回来
+   * 组件又不重建、aboutToAppear 不重跑，于是编辑页保存的 vmListVersion++ 打不到它，
+   * 概览 chips 会停在旧值。NavDestination.onShown 是唯一能捕获「重新显示」的时机。 */
+  @StorageLink('manageShownTick') manageShownTick: number = 0;
 
   @Builder
   pageMap(name: string, param: Object) {
@@ -45,6 +50,12 @@ struct Index {
       }
     }
     .hideTitleBar(true)
+    .onShown(() => {
+      /* 只对详情页发信号；edit 页自身不需要（它每次都是新建的） */
+      if (name === 'manage') {
+        this.manageShownTick++;
+      }
+    })
   }
 
   aboutToAppear(): void {

@@ -31,11 +31,18 @@ const GB = 1024 * 1024 * 1024;
 
 @Component
 export struct VmManage {
-  profile: VmProfile | null = null; /* 由导航参数传入 */
+  /* 必须 @State：概览 chips（显卡/增强/串口…）直接读本对象，而 refreshProfile()
+   * 重读磁盘后走的这条赋值是唯一的变更信号。若为普通成员，赋值不可观测 ——
+   * 编辑页只改显卡这类「其余 @State 值都没变」的场景下，ArkUI 对相同值的赋值
+   * 不发通知，整页零重绘，chip 会永远停在旧文本（实测踩过）。 */
+  @State profile: VmProfile | null = null; /* 由导航参数传入 */
   @Consume('navStack') navStack: NavPathStack;
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmDataDir') vmDataDir: string = '';
   @StorageLink('vmListVersion') @Watch('onVmListChanged') vmListVersion: number = 0;
+  /* 本页被重新显示（编辑页 pop 回来）的信号，见 Index.ets 的说明：隐藏期间本组件
+   * inactive，vmListVersion++ 打不进来，只能靠这个 tick 触发重读 profile */
+  @StorageLink('manageShownTick') @Watch('onVmListChanged') manageShownTick: number = 0;
   /* 运行态权威源（侧栏每 2s 刷新）。build 里经 isRunningNow() 直接读本字段：
    * runningMap 变化 → 组件（框架强保证）重绘 → 按钮/徽标拿到最新 running。
    * 不走 @State 中转——@State 在异步事件回调里赋值不驱动本次重绘，会停留旧值。 */
@@ -437,13 +444,9 @@ export struct VmManage {
     return this.profile ? this.profile.machine.firmware : '';
   }
 
-  /* v4：概览 chips 补充项（显卡/鼠标/增强/串口） */
+  /* v4：概览 chips 补充项（显卡/增强/串口） */
   private vgaLabel(): string {
     return this.profile ? '显卡 ' + this.profile.machine.vga : '';
-  }
-
-  private mouseLabel(): string {
-    return this.profile ? '鼠标 ' + (this.profile.machine.mouse === 'relative' ? '相对' : '绝对') : '';
   }
 
   private enhanceLabel(): string {
@@ -738,10 +741,6 @@ export struct VmManage {
               }
               if (this.vgaLabel().length > 0) {
                 Text(this.vgaLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
-                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-              }
-              if (this.mouseLabel().length > 0) {
-                Text(this.mouseLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
               if (this.enhanceLabel().length > 0) {

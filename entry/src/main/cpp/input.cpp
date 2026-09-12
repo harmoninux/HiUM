@@ -20,7 +20,7 @@ static const struct { int mask; int btn; } kBtns[] = {
     {0x04, INPUT_BUTTON_MIDDLE},
 };
 
-/* 按钮 diff：只对变化位发按下/抬起（abs/rel 两条路径共用） */
+/* 按钮 diff：只对变化位发按下/抬起 */
 static void send_buttons(int buttons)
 {
     int diff = s_buttons ^ buttons;
@@ -64,19 +64,6 @@ void input_send_pointer(int viewX, int viewY, int buttons)
 
     qe_input_queue_abs(g_qemu_con, INPUT_AXIS_X, x, 0, fw - 1);
     qe_input_queue_abs(g_qemu_con, INPUT_AXIS_Y, y, 0, fh - 1);
-    send_buttons(buttons);
-    qe_input_event_sync();
-}
-
-/* 相对注入（PS/2 或 usb-mouse，v4）：dx/dy 是触摸 deltas（view px）。
- * 鼠标设备在其内部状态机上累积增量，无需（也不应）做 viewport→framebuffer 映射。 */
-void input_send_rel(int dx, int dy, int buttons)
-{
-    if (!g_qemu_con || !qe_input_queue_rel) {
-        return;
-    }
-    qe_input_queue_rel(g_qemu_con, INPUT_AXIS_X, dx);
-    qe_input_queue_rel(g_qemu_con, INPUT_AXIS_Y, dy);
     send_buttons(buttons);
     qe_input_event_sync();
 }

@@ -31,6 +31,11 @@ namespace {
 using namespace qemu_ipc;
 
 std::atomic<bool> g_quit{false};
+/* kShutdown（父进程「强制断电」）置位：MainProc 直接 _exit，跳过 renderer_detach_window()。
+ * 正常退出时要 detach（join 渲染线程 + EGL teardown）；强制路径不能等——qemu 已经卡死时
+ * 那个 join 可能永不返回，而进程不死的代价是 qcow2 写锁不释放，下次启动必撞
+ * "Failed to get write lock"。进程整体消失是内核保证的，_exit 是不依赖任何线程合作的兜底。 */
+std::atomic<bool> g_force{false};
 
 int replyInt(OHIPCParcel *reply, int32_t v)
 {
@@ -110,16 +115,11 @@ int onRequest(uint32_t code, const OHIPCParcel *data, OHIPCParcel *reply, void *
             return replyInt(reply, 0);
         }
         case kPointer: {
-            int32_t x = 0, y = 0, buttons = 0, mode = 0;
+            int32_t x = 0, y = 0, buttons = 0;
             OH_IPCParcel_ReadInt32(data, &x);
             OH_IPCParcel_ReadInt32(data, &y);
             OH_IPCParcel_ReadInt32(data, &buttons);
-            OH_IPCParcel_ReadInt32(data, &mode);
-            if (mode == 1) {
-                input_send_rel(x, y, buttons);
-            } else {
-                input_send_pointer(x, y, buttons);
-            }
+            input_send_pointer(x, y, buttons);
             return replyInt(reply, 0);
         }
         case kKey: {
@@ -169,6 +169,7 @@ int onRequest(uint32_t code, const OHIPCParcel *data, OHIPCParcel *reply, void *
         }
         case kShutdown:
             replyInt(reply, 0);
+            g_force.store(true);
             g_quit.store(true);
             return 0;
         default:
@@ -206,7 +207,10 @@ extern "C" __attribute__((visibility("default"))) void NativeChildProcess_MainPr
         }
         usleep(200 * 1000);
     }
-    OH_LOG_INFO(LOG_APP, "child: MainProc exiting (wasRunning=%{public}d quit=%{public}d)",
-                wasRunning ? 1 : 0, g_quit.load() ? 1 : 0);
+    OH_LOG_INFO(LOG_APP, "child: MainProc exiting (wasRunning=%{public}d quit=%{public}d force=%{public}d)",
+                wasRunning ? 1 : 0, g_quit.load() ? 1 : 0, g_force.load() ? 1 : 0);
+    if (g_force.load()) {
+        _exit(0); /* 强制断电：不等渲染线程（见 g_force 注释） */
+    }
     renderer_detach_window();
 }

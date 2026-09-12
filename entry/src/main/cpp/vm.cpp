@@ -15,6 +15,7 @@
 #include <fstream>
 #include <signal.h>
 #include <thread>
+#include <time.h>
 #include <vector>
 
 #undef LOG_DOMAIN
@@ -28,11 +29,9 @@ qemu_console_lookup_default_fn qe_console_lookup_default;
 graphic_hw_update_fn qe_graphic_hw_update;
 qemu_input_event_send_key_qcode_fn qe_input_send_key;
 qemu_input_queue_abs_fn qe_input_queue_abs;
-qemu_input_queue_rel_fn qe_input_queue_rel;
 qemu_input_queue_btn_fn qe_input_queue_btn;
 qemu_input_event_sync_fn qe_input_event_sync;
 qemu_input_is_absolute_fn qe_input_is_absolute;
-qemu_input_scale_axis_fn qe_input_scale_axis;
 pixman_image_get_width_fn qe_surface_width;
 pixman_image_get_height_fn qe_surface_height;
 pixman_image_get_stride_fn qe_surface_stride;
@@ -267,6 +266,37 @@ void installCrashHandlers()
     sigaction(SIGILL, &sa, nullptr);
 }
 
+/* ---- 日志速率熔断（防 GB 级灌盘）----
+ * 背景：qemu 启动失败时会陷入「重复打印同一行错误、且不退」的状态，实测
+ * 38MB/s 灌盘，几秒就 GB 级——典型触发是非法 -device（error_fatal 路径）。
+ * 父进程侧的「强制断电」兜底要用户点一下才生效，这里做进程内自止，让失控
+ * 自行结束。挂在现成的 relay 线程上（本就每 60ms 读一次文件尾），不新起线程。
+ *
+ * 判据前提：本项目 guest 输出不落 stderr —— 串口走 -serial file:/socket、
+ * 画面走 DCL，所以 stderr 的增长率就代表 qemu 自己的报错刷屏。正常启动日志是
+ * KB 量级；唯一现实噪声源是 -audiodev driver=ohos 的告警（约 10KB/s），比阈值
+ * 低两个数量级。
+ *
+ * 退出只能 _exit：崩溃/跑飞路径上 exit() 已经不返回（实测探针 0 命中），
+ * 且不能碰 hilog（IPC 带锁路径，在失控进程里可能自己卡住）。哨兵行写 fd 2 ——
+ * fd 2 已被 dup2 到同一份 qemu-<id>.log，所以它会成为日志的最后一行，
+ * 由父进程的失败弹窗（只读尾部 64KB）呈现给用户。 */
+constexpr double kFloodBps = 4.0 * 1024 * 1024;      /* 4MB/s */
+constexpr int kFloodStreak = 2;                      /* 连续 2 个采样窗口 */
+constexpr long long kFloodTotal = 256LL * 1024 * 1024; /* 单文件累计 256MB（抓慢速刷屏） */
+constexpr int kFloodExitCode = 70;                   /* EX_SOFTWARE */
+
+void logFloodExit(const char *reason, long long bytes)
+{
+    char buf[192];
+    int n = snprintf(buf, sizeof(buf), "\nHIUM-FAULT: reason=%s bytes=%lld\n", reason, bytes);
+    if (n > 0) {
+        ssize_t w = write(STDERR_FILENO, buf, (size_t)n);
+        (void)w;
+    }
+    _exit(kFloodExitCode);
+}
+
 /* 后台线程：轮询读取 qemu-<vmId>.log 的新增内容，按行转发到 hilog（QemuVM 域）。
  * qemu 的 stderr 已被 dup2 到该文件——正常退出的报错与崩溃时的 backtrace 都落在
  * 这里；实时转发让 hdc 直接可见，无需访问 app 沙箱 nor 等 qemu 退出。 */
@@ -275,6 +305,12 @@ void relayQemuLogThread(const std::string &logPath, std::atomic<bool> *stop)
     pthread_setname_np(pthread_self(), "qemu-log-relay");
     off_t pos = 0;
     std::string partial;
+    /* 熔断统计：1s 一个采样窗口，窗口内字节数换算成速率 */
+    long long total = 0;
+    long long winBytes = 0;
+    int streak = 0;
+    struct timespec winStart{};
+    clock_gettime(CLOCK_MONOTONIC, &winStart);
     while (!stop->load()) {
         std::ifstream f(logPath, std::ios::in | std::ios::binary);
         if (f.is_open()) {
@@ -286,7 +322,14 @@ void relayQemuLogThread(const std::string &logPath, std::atomic<bool> *stop)
                 if (!chunk.empty()) {
                     f.read(&chunk[0], static_cast<std::streamsize>(end - pos));
                 }
+                long long grew = (long long)(end - pos);
+                total += grew;
+                winBytes += grew;
                 pos = end;
+                /* 累计超限：抓「速率不高但一直写」的慢速刷屏，不必等窗口结算 */
+                if (total > kFloodTotal) {
+                    logFloodExit("logflood-total", total);
+                }
                 partial += chunk;
                 std::string line;
                 size_t nl;
@@ -299,6 +342,21 @@ void relayQemuLogThread(const std::string &logPath, std::atomic<bool> *stop)
                 }
             }
             f.close();
+        }
+        /* 速率结算：窗口 >=1s 时算一次，超阈值要连续 kFloodStreak 个窗口才熔断，
+         * 避免启动瞬间的合理突发（例如 qemu 一次打一大段 backtrace）被误杀。 */
+        struct timespec now{};
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        double elapsed = (double)(now.tv_sec - winStart.tv_sec) +
+                         (double)(now.tv_nsec - winStart.tv_nsec) / 1e9;
+        if (elapsed >= 1.0) {
+            double bps = (double)winBytes / elapsed;
+            streak = (bps > kFloodBps) ? streak + 1 : 0;
+            if (streak >= kFloodStreak) {
+                logFloodExit("logflood-rate", total);
+            }
+            winStart = now;
+            winBytes = 0;
         }
         usleep(60 * 1000); /* 快速轮询，捕捉崩溃瞬间写入的 abort/backtrace */
     }
@@ -339,11 +397,9 @@ int vm_start(const std::string &arch, const std::vector<std::string> &args)
     ok &= resolveSym(so, "graphic_hw_update", &qe_graphic_hw_update);
     ok &= resolveSym(so, "qemu_input_event_send_key_qcode", &qe_input_send_key);
     ok &= resolveSym(so, "qemu_input_queue_abs", &qe_input_queue_abs);
-    ok &= resolveSym(so, "qemu_input_queue_rel", &qe_input_queue_rel);
     ok &= resolveSym(so, "qemu_input_queue_btn", &qe_input_queue_btn);
     ok &= resolveSym(so, "qemu_input_event_sync", &qe_input_event_sync);
     ok &= resolveSym(so, "qemu_input_is_absolute", &qe_input_is_absolute);
-    ok &= resolveSym(so, "qemu_input_scale_axis", &qe_input_scale_axis);
     /* pixman is statically linked into the qemu .so: reuse its accessors */
     ok &= resolveSym(so, "pixman_image_get_width", &qe_surface_width);
     ok &= resolveSym(so, "pixman_image_get_height", &qe_surface_height);
