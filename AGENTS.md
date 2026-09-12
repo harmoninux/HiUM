@@ -8,16 +8,16 @@ HarmonyOS 上的 QEMU TCG 模拟器 PoC。架构与方案细节见 `docs/DESIGN.
 export TOOL_HOME=/apps/harmony   # HarmonyOS 命令行工具根目录
 
 make deps     # 交叉编译 qemu（deps/，产物进 entry/libs/<abi>/ 与 rawfile/vm/）
-make hap      # 构建 HAP：entry/build/default/outputs/default/entry-default-unsigned.hap
+make hap      # 构建 HAP（assembleHap 自带签名）：entry/build/default/outputs/default/entry-default-signed.hap
 make deploy   # hap + 推送安装到测试设备并启动
 make log      # 过滤抓取应用 hilog
 ```
 
 - 设备（HarmonyOS 真机，API 24）：无线调试连接，地址随环境变化不入库——
   `make deploy HDC_TARGET=<ip>:<port>`（先 `hdc tconn <ip>:<port>`）。
-  **设备要求签名包**：`make deploy` 会先经 `sign.py`（用 `.ohos/` 下自备
-  调试证书 + hap-sign-tool 本地签名）产出 entry-default-signed.hap 再安装；
-  `.ohos/` 不入库，签名配置见 `build-profile.json5` 的 signingConfigs。
+  **设备要求签名包**：`assembleHap` 内置 SignHap 任务，按 `build-profile.json5`
+  的 signingConfigs 自动签名后产出 entry-default-signed.hap；`.ohos/` 下的
+  调试证书与口令材料不入库。
 - 沙箱路径映射（hdc 视角 → 应用内视角；hdc shell/file 用左列可直接读写）：
   - `/data/app/el2/100/base/app.hackeris.hium/haps/entry/files/` → 应用内
     `/data/storage/el2/base/haps/entry/files/`（vms/ 配置与镜像、vm/ 固件与日志）

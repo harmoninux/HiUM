@@ -19,7 +19,6 @@ OHOS_ABI ?= arm64-v8a
 HDC_TARGET ?=
 HDC := $(TOOL_HOME)/sdk/default/openharmony/toolchains/hdc $(if $(HDC_TARGET),-t $(HDC_TARGET),)
 BUNDLE := app.hackeris.hium
-HAP_UNSIGNED := entry/build/default/outputs/default/entry-default-unsigned.hap
 HAP := entry/build/default/outputs/default/entry-default-signed.hap
 
 all: deps hap
@@ -27,15 +26,12 @@ all: deps hap
 deps:
 	$(MAKE) -C deps $(OHOS_ARCH) TOOL_HOME=$(TOOL_HOME)
 
+# assembleHap 内置 SignHap 任务：按 build-profile.json5 的 signingConfigs
+# （.ohos/ 下的调试证书 + 口令密文，均不入库）直接产出 entry-default-signed.hap
 hap:
 	hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
 
-# 新设备要求已签名包：用 .ohos/ 下的调试证书经 hap-sign-tool 本地签名
-#（sign.py/sign.js 借自 wineohos，口令密文由 .ohos/material 解出）
-sign: $(HAP_UNSIGNED)
-	TOOL_HOME=$(TOOL_HOME) python3 sign.py $(HAP_UNSIGNED) $(HAP)
-
-install: sign
+install: hap
 	$(HDC) shell "aa force-stop $(BUNDLE)" || true
 	$(HDC) install $(HAP)
 	$(HDC) shell "aa start -a EntryAbility -b $(BUNDLE)"
@@ -45,4 +41,4 @@ deploy: hap install
 log:
 	$(HDC) hilog | grep -E "QemuVM|QemuFB|QemuRender|QemuNapi|QemuInput|QemuUI|QemuEntry|CRASH|SIGSEGV"
 
-.PHONY: all deps hap sign install deploy log
+.PHONY: all deps hap install deploy log
