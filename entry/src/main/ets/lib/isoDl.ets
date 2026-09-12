@@ -98,6 +98,16 @@ function downloadFrom(dst: string, url: string, sizeMB: number, onProgress?: (pc
   });
 }
 
+/* 模板创建用：该架构内置镜像的版本主次号（3.21/3.23，自动命名用）与约大小（MB，提示用） */
+export function alpineRelFor(arch: VmArch): string {
+  const s = specFor(arch);
+  return s ? s.rel : '';
+}
+export function alpineSizeFor(arch: VmArch): number {
+  const s = specFor(arch);
+  return s ? s.sizeMB : 0;
+}
+
 /* 确保 vmdir 下该架构内置 iso 存在；缺失则按镜像顺序下载到 vmdir/<builtinIsoFor(arch)>。
  * 进度经 onProgress(0..100) 上报。返回 true 表示文件已就绪。
  * @param ctx 兼容旧签名（@ohos.http 实际不使用），保留避免多处调用点改动。 */

@@ -40,6 +40,7 @@ export struct VmList {
   @State runningIds: Record<string, boolean> = {};
   @State diskUsage: Record<string, number> = {}; /* vmId → 磁盘实占字节数 */
   @Consume('showWizard') showWizard: boolean; /* 全窗口工坊模态开关（Index @Provide） */
+  @Consume('showTemplate') showTemplate: boolean; /* 模板创建模态开关（Index @Provide） */
   @State selectedId: string = ''; /* 当前选中行（详情区正在展示的 VM） */
   private pollTimer: number = -1;
   private lifecycleCb: ((e: VmLifecycleEvent) => void) | null = null;
@@ -152,6 +153,20 @@ export struct VmList {
     this.showWizard = true;
   }
 
+  /* 「+ 新建」弹出菜单分流：模板创建在前（普通用户主路径，Alpine 一键开箱），
+   * 自定义创建在后（进阶 6 步工坊，原 openWizardNew 行为不变）。
+   * 必须用原生 Menu/MenuItem（同 VmManage.vmOpsMenu 的既有结论：自拼 Button 样式嘈杂）。
+   * 两个流程是独立组件、独立模态开关，互不知道对方存在。 */
+  @Builder
+  newVmMenu() {
+    Menu() {
+      MenuItem({ content: '模板创建' })
+        .onClick(() => { this.showTemplate = true; })
+      MenuItem({ content: '自定义创建' })
+        .onClick(() => { this.openWizardNew(); })
+    }
+  }
+
   private openConsole(p: VmProfile): void {
     /* 拉起（或复用并置前）该 VM 的独立 console 窗口；VM 未运行则由窗口页自启 */
     const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -194,9 +209,7 @@ export struct VmList {
         .focusable(false)
         .width(btnH).height(btnH)
         .backgroundColor(Color.Transparent)
-        .onClick(() => {
-          this.openWizardNew();
-        })
+        .bindMenu(this.newVmMenu)
       }
     }
     .width('100%')
@@ -268,9 +281,7 @@ export struct VmList {
         .focusable(false)
         .width(btnH).height(btnH)
         .backgroundColor(Color.Transparent)
-        .onClick(() => {
-          this.openWizardNew();
-        })
+        .bindMenu(this.newVmMenu)
       }
       .width('100%')
       .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })

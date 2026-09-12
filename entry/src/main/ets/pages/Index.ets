@@ -9,6 +9,7 @@ import { VmEdit } from './VmEdit';
 import { VmManage } from './VmManage';
 import { VmStorage } from './VmStorage';
 import { VmWizard } from './VmWizard';
+import { VmTemplate } from './VmTemplate';
 import { VmProfile } from '../lib/vmprofile';
 import { tBody, tSub, tCard, cSub, cWeak, cPrimary, cCard, cBorder, rCard, bw, sp2, spCard, rBtn, btnH, btnPadX } from '../lib/uiTokens';
 
@@ -16,8 +17,9 @@ import { tBody, tSub, tCard, cSub, cWeak, cPrimary, cCard, cBorder, rCard, bw, s
 @Component
 struct Index {
   @Provide('navStack') navStack: NavPathStack = new NavPathStack();
-  /* 工坊/存储模态：都由 VmList/VmManage @Consume 同一对变量，在本层(全窗口)渲染遮罩覆盖侧栏+内容 */
+  /* 工坊/存储/模板模态：都由 VmList/VmManage @Consume 对应变量，在本层(全窗口)渲染遮罩覆盖侧栏+内容 */
   @Provide('showWizard') showWizard: boolean = false;
+  @Provide('showTemplate') showTemplate: boolean = false; /* 模板创建模态（与工坊并列的独立流程） */
   @Provide('showStorage') showStorage: boolean = false;
   @Provide('storageParam') storageParam: VmProfile | null = null;
   @StorageLink('vmListVersion') vmListVersion: number = 0;
@@ -69,6 +71,11 @@ struct Index {
     this.vmListVersion++;
   }
 
+  private closeTemplate(): void {
+    this.showTemplate = false;
+    this.vmListVersion++;
+  }
+
   private closeStorage(): void {
     this.showStorage = false;
   }
@@ -87,6 +94,30 @@ struct Index {
       Column().width('100%').height('100%').backgroundColor('rgba(0,0,0,0.45)')
         .onClick(() => this.closeWizard())
       Column() { this.wizardCover() }
+        .width('88%').constraintSize({ maxWidth: 640 })
+        .height(500)
+        .backgroundColor(cCard)
+        .border({ width: bw, color: cBorder })
+        .borderRadius(rCard)
+        .clip(true) /* 裁掉子组件(直角背景)超出圆角的部分 */
+        .onClick(() => { /* 吃掉卡片区点击，避免透传遮罩误关 */ })
+    }
+    .width('100%').height('100%')
+    .alignContent(Alignment.Center)
+  }
+
+  /* 模板创建弹窗：与工坊同款的全窗口遮罩 + 居中卡片（独立流程，见 docs/vm-template-creation.md）。 */
+  @Builder
+  templateCover() {
+    VmTemplate({ onClose: () => this.closeTemplate() })
+  }
+
+  @Builder
+  templateOverlay() {
+    Stack() {
+      Column().width('100%').height('100%').backgroundColor('rgba(0,0,0,0.45)')
+        .onClick(() => this.closeTemplate())
+      Column() { this.templateCover() }
         .width('88%').constraintSize({ maxWidth: 640 })
         .height(500)
         .backgroundColor(cCard)
@@ -132,6 +163,9 @@ struct Index {
 
       if (this.showWizard) {
         this.wizardOverlay()
+      }
+      if (this.showTemplate) {
+        this.templateOverlay()
       }
       if (this.showStorage) {
         this.storageOverlay()
