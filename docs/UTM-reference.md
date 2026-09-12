@@ -94,11 +94,11 @@ UTM 与 HiUM 是**同一个技术母题**（QEMU 前台），但 UTM 多走了�
 | 2 | **声音** | Sound 硬件选择(AC97/HDA/SB16/screamer/asc/pcspk)+SPICE 音频通道 | HiUM 最大功能缺口。QEMU 音频后端在 OHOS 沙箱不可用（无 ALSA/PA）→ **先行可行性 probe**：自编 OHOS 音频桥（AudioRenderer API，三方可达）或 wav 兜底；UI 先行（设备选择入 profile，后端未通时静音兜底） | **P0（含 probe 风险）** |
 | 3 | **交互式串口终端** | builtin 串口 → SwiftTerm（双向+主题+resizeCommand） | ✅ **已实现（2026-09-08）**：`-chardev socket,server=on` + serial.cpp 桥 + Console 串口视图（只读滚动区 + Ctrl/Esc/Enter 键帽 + 输入行），pc/q35 与 virt（virtconsole）双路径 | — |
 | 4 | **临时会话入口 UX** | contextMenu 一次性开关（每次启动决策） | HiUM 现为 profile 持久开关 → **启动弹窗二选一（正常/临时）**，小改、体验大增 | **P0** |
-| 5 | **详情页信息补齐** | 占用大小/MAC/端口/串口地址可复制 | ⛳ 部分：第二盘行/只读徽标/显卡/鼠标/增强/串口 chips 已实现；磁盘实际占用已有展示（qemu-img info） | **P1 余** |
+| 5 | **详情页信息补齐** | 占用大小/MAC/端口/串口地址可复制 | ⛳ 部分：第二盘行/只读徽标/显卡/增强/串口 chips 已实现；磁盘实际占用已有展示（qemu-img info）。**「鼠标」chip 已移除**（2026-09-12）：输入设备不再可配，统一 virtio-tablet 绝对注入 | **P1 余** |
 | 6 | **显示设置增强** | 多显示器数组/滤镜(linear|nearest)/VGA 型号枚举/vgaRam | ⛳ 部分：VGA 型号枚举（std/cirrus/vmware/virtio，仅 x86 板卡）已实现；滤镜/显存未做 | **P1 余** |
 | 7 | **网络细调** | vlan 网段/DNS/隔离(restrict)/网卡型号筛选 | HiUM user 模式加：网段/DNS/restrict 隔离/网卡型号（virtio-net/e1000） | **P1** |
 | 8 | **可配置快捷键/宏** | KeyboardShortcuts（默认 Ctrl+Alt+Del） | HiUM keymap 只做映射 → 加宏配置（复古 OS 常用组合）。QEMUComboBox/QKeyCode 列表 | **P1** |
-| 9 | **硬件高级结构项** | RNG/balloon/PS2/machinePropertyOverride 单选 | ⛳ 部分：RNG/balloon 结构化开关已实现；PS2/keyboard 与 machinePropertyOverride 仍走 extraArgs | **P1 余** |
+| 9 | **硬件高级结构项** | RNG/balloon/PS2/machinePropertyOverride 单选 | ⛳ 部分：RNG/balloon 结构化开关已实现；keyboard 与 machinePropertyOverride 仍走 extraArgs。**PS2 不做**（2026-09-12）：`ps2-mouse`/`ps2-kbd` 是 sysbus 设备，`user_creatable = false`（`hw/core/sysbus.c`），根本无法用 `-device` 创建；pc/q35 的 i8042 已自带 PS/2 键鼠 | **P1 余** |
 | 10 | **镜像 URL 下载导入** | Gallery 网页+zip 导入（防穿越/symlink/重名） | HiUM 内置 ISO 已解决 Alpine；补 **URL→zip/qcow2 导入器**（Pending 进度卡可参考），画廊服务自建后置 | **P2** |
 | 11 | **Gamepad / Pencil** | MFI 手柄逐键映射；Pencil 点击=鼠标 | OHOS 有笔事件 API、手柄 API 待核；**都列为试探** | P2 |
 | 12 | **QMP 工具页增强→「命令预设」** | Scripting/utmctl 的格式化接口 | HiUM QMP 工具页已存在；OHOS 无 AppleScript/Shortcuts 等价物 → 做**命令收藏/预设**（等价于脚本层的局部形态） | P2 |

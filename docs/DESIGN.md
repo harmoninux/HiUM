@@ -156,9 +156,8 @@ B（时光机）与 F（临时会话）共用同一份快照引擎，不造两�
   kernelPath 非空即绕过固件引导流程）。
 
 `VmProfile` 带 schema 版本号 + 迁移器（v1/v2→v3 自动迁移；v3 新增
-media.kernelPath/initrdPath/kernelAppend；v4 新增 machine.mouse（
-tablet|relative 注入模式）、machine.vga 扩展（cirrus/vmware）、
-machine.serialInteractive（串口 socket 交互）、runtime.rng/balloon
+media.kernelPath/initrdPath/kernelAppend；v4 新增 machine.vga 扩展（cirrus/
+vmware）、machine.serialInteractive（串口 socket 交互）、runtime.rng/balloon
 （virtio 增强设备）；**v5 磁盘数组化：`media.disks: VmDisk[]`（第 0 张 =
 系统盘，其余为数据盘，每张带 readonly；最多 8 张数据盘，型号/接口按
 板卡固定 virtio（raspi 单 SD 槽））——快照与临时会话只作用于系统盘，
@@ -167,6 +166,23 @@ machine.rtcLocal（RTC 本地时区）、runtime.audio（声音，默认开）�
 runtime.gdbPort（GDB 调试后端，0=关，仅编辑页可配；同向导「创建后
 编辑」语义）。app 未发布，新字段统一并入归一化回填，无存量迁移）。
 持久化到 `filesDir/vms/<id>.json`。
+
+输入设备不再可配：一律 `-device virtio-tablet-pci`（绝对注入，触摸精确）。
+v4 曾引入 machine.mouse（tablet|relative 开关），relative 分支依赖
+`-device ps2-mouse`——ps2 是 sysbus 设备，`user_creatable = false`
+（`hw/core/sysbus.c`），qemu 直接以 "a pluggable device type" 报错，即该
+分支自加入起从未可用；且 pc/q35 的 i8042 本来就自带 PS/2 鼠标。功能已整体
+移除，旧存档里残留的 `mouse` 键按未知键静默忽略（回落 tablet，无迁移器）。
+
+**`<id>.bootfail`（启动失败标记 / 防锁死熔断）**：启动失败的 VM 会在
+`vms/` 内留下 `<id>.bootfail`（JSON：时间戳 + 原因），该 VM 下次被打开时
+console **不再自动启动**，只显示原因 + 「仍要启动」。原因见 §9 的失控条目：
+失败的 qemu 子进程会满速灌盘且不退出，而 console 一开窗就自动启动，用户会被
+反复拖进去，等于应用打不开（配置在应用私有目录，`hdc shell rm` 被 SELinux
+拒，用户无自救手段）。`VmStore.list()` 只收 `*.json`，标记文件不会被列成
+一台 VM；启动就绪或用户点「仍要启动」时清除，`VmStore.remove()` 一并清理。
+**用户主动停止（关机/强制断电）不算失败，不落标记**——否则每次正常关机都会
+让下次进入不自动启动。
 
 **介质资产来源与复制语义**（已实现）：
 
@@ -243,3 +259,30 @@ make log           # 抓取应用日志
   AppGallery 审核：文档化说明，TCI 解释器作为后备（应急，非设计支柱）。
 - **从 ISO 打到 rawfile 的方式**不适合用户自带镜像：改用文件选择器导入，
   rawfile 只留固件。
+- **配置错误导致 qemu 失控**（非法 `-device`/`-cpu` 等，2026-09-12 实测）：
+  qemu 的 `error_fatal` 路径未能终止进程（源码上 `error_report_err()` 后
+  就是 `exit(1)`，但那行从未执行到——`atexit` 探针 0 命中，原因未知），
+  表现为子进程 ~200% CPU（qemu-main 与 qemu-log-relay 各满一核）持续重复
+  打印同一行，日志 38MB/s 涨到 GB 级。四道防线：
+  1. **就绪判定只用 QMP 往返**（`qmpReady` = `qmp_capabilities` 收到回复）。
+     socket connect / DCL 注册 / 首帧**都不能当锚点**——实测跑飞时三者都已
+     发生（`-qmp` 的 chardev 建在 device init 之前，unix socket 一进内核
+     backlog，connect 就成功）；`vmRunning` 的真实语义只是「子进程收到了
+     START」，旧代码拿它 2s 翻「运行中」是假成功。
+  2. **强制断电兜底**（`forceStopVm` → IPC `kShutdown`）：子进程 `MainProc`
+     是独立 200ms 轮询，由 binder 线程置位后 `_exit(0)`——不依赖 qemu 合作，
+     也跳过可能永不返回的 `renderer_detach_window()`；进程不死则 qcow2 写锁
+     不释放，下次启动撞 "Failed to get write lock"。QMP `quit` 只是先礼。
+  3. **进程内日志速率熔断**：`relayQemuLogThread` 本就每 60ms 读一次文件尾，
+     顺手统计增量——>4MB/s 连续 2 个 1s 窗口、或单文件累计 >256MB，就写
+     `HIUM-FAULT: reason=logflood…` 到 fd 2（即日志末尾）后 `_exit(70)`。
+     前提是 guest 输出不落 stderr（串口走 `-serial file:`/socket、画面走
+     DCL），所以 stderr 增长率 = qemu 自己的报错刷屏。
+  4. **`<id>.bootfail` 熔断**（见 §6）：失败后不再自动重启，用户显式重试。
+- **`-vga` 型号与 romfile 必须一一对应**（2026-09-12 实测，同类失控）：
+  `deps/` 只打了 `vgabios-stdvga/virtio/ramfb` 三份，而编辑页可选
+  std/cirrus/vmware/virtio → 选 cirrus 或 vmware 时 qemu 陷入
+  `failed to find romfile "vgabios-cirrus.bin"` 的重复打印（实测 2GB/30s，
+  同样是「不退 + 灌盘」）。已补齐 `vgabios-cirrus.bin`/`vgabios-vmware.bin`。
+  改动 UI 的 vga 选项时必须同步三处：`deps/libqemu/Makefile` 的 `FIRMWARE`、
+  `deps/Makefile` 的 rawfile 拷贝、`lib/bootstrap.ets` 的 `FIRMWARE_FILES`。
