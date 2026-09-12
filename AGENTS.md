@@ -11,7 +11,14 @@ make deps     # 交叉编译 qemu（deps/，产物进 entry/libs/<abi>/ 与 rawf
 make hap      # 构建 HAP（assembleHap 自带签名）：entry/build/default/outputs/default/entry-default-signed.hap
 make deploy   # hap + 推送安装到测试设备并启动
 make log      # 过滤抓取应用 hilog
+make app-release  # 发布上架包 build/outputs/release/qemuohos-release-signed.app
 ```
+
+- 发布打包（app-release）：release 签名配置（含发布材料路径/口令密文）**不入库**，
+  存放在 gitignore 的 `.ohos/build-profile.release.json5`，打包时临时换入根
+  build-profile.json5、结束自动还原（Ctrl-C 强杀则手动
+  `mv .ohos/pack-bak.json5 build-profile.json5`）；assembleApp 内置 SignApp 无需
+  手动签名。发布材料与完整流程文档都在仓库外的发布材料目录，换机器需一并同步。
 
 - 设备（HarmonyOS 真机，API 24）：无线调试连接，地址随环境变化不入库——
   `make deploy HDC_TARGET=<ip>:<port>`（先 `hdc tconn <ip>:<port>`）。

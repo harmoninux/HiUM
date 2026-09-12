@@ -3,6 +3,7 @@
 #   make            # deps (qemu .so) + hap
 #   make deps       # cross-compile qemu & friends into entry/libs/<abi>/
 #   make hap        # build HAP only (ArkTS/cpp changes)
+#   make app-release# 发布上架包 build/outputs/release/qemuohos-release-signed.app
 #   make install    # push + install + start on the test device
 #   make deploy     # hap + install
 #
@@ -31,6 +32,16 @@ deps:
 hap:
 	hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
 
+# 发布上架包：release 签名配置（含发布材料路径/口令密文）不入库，存放在
+# gitignore 的 .ohos/build-profile.release.json5；打包时临时换入根 build-profile.json5，
+# 结束（含构建失败）即还原调试配置。assembleApp 内置 SignApp，无需手动签名。
+# 注意：若构建被 Ctrl-C 强杀，还原步骤不执行，手动 mv .ohos/pack-bak.json5 build-profile.json5
+app-release:
+	cp build-profile.json5 .ohos/pack-bak.json5
+	cp .ohos/build-profile.release.json5 build-profile.json5
+	hvigorw assembleApp --mode project -p product=release -p buildMode=release --no-daemon; \
+	  ret=$$?; mv .ohos/pack-bak.json5 build-profile.json5; exit $$ret
+
 install: hap
 	$(HDC) shell "aa force-stop $(BUNDLE)" || true
 	$(HDC) install $(HAP)
@@ -41,4 +52,4 @@ deploy: hap install
 log:
 	$(HDC) hilog | grep -E "QemuVM|QemuFB|QemuRender|QemuNapi|QemuInput|QemuUI|QemuEntry|CRASH|SIGSEGV"
 
-.PHONY: all deps hap install deploy log
+.PHONY: all deps hap app-release install deploy log
