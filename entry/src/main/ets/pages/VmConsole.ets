@@ -132,6 +132,9 @@ struct VmConsole {
   private surfaceReady: boolean = false;
   private startPending: boolean = false;
   private closed: boolean = false; /* VM 已死导致本窗口即将销毁，防重复 terminate */
+  /* 物理键盘已注入未抬起的 QKeyCode：失焦/页面销毁时全量补 up。onKeyEvent 是
+   * down/up 纯镜像，按住 Alt 时切窗/失焦，Up 不会送达，guest 会一直认为 Alt 按着 */
+  private pressedKeys: Set<number> = new Set();
   /* 触摸手势状态机（单指=移动/左键/长按右键；双指=滚轮） */
   private touchButtons: number = 0;
   private singleDown: boolean = false;
@@ -175,9 +178,11 @@ struct VmConsole {
     if (!isPadOrPhone()) {
       this.initImmersive();
     }
+    this.initKeyGuard();
   }
 
   aboutToDisappear(): void {
+    this.releaseAllKeys();
     this.stopReadyWatch();
     napi.setQmpEventCallback(this.vmId, null);
     this.closeSerial();
@@ -839,6 +844,29 @@ struct VmConsole {
     });
   }
 
+  /* 释放所有已注入未抬起的物理键（失焦兜底）。幂等：无按键时直接返回 */
+  private releaseAllKeys(): void {
+    if (this.pressedKeys.size === 0 || this.vmId.length === 0) {
+      return;
+    }
+    this.pressedKeys.forEach((q: number) => napi.sendKey(this.vmId, q, false));
+    this.pressedKeys.clear();
+  }
+
+  /* 按键守卫：窗口失活（切到别的窗口/应用）时释放按下键。页内焦点转移
+   * （如点到串口输入框）由根容器 onBlur 覆盖；页面销毁由 aboutToDisappear 覆盖 */
+  private initKeyGuard(): void {
+    window.getLastWindow(this.vmCtx()).then((win: window.Window) => {
+      win.on('windowEvent', (t: number) => {
+        if (t === window.WindowEventType.WINDOW_INACTIVE) {
+          this.releaseAllKeys();
+        }
+      });
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN, TAG, 'keyGuard getLastWindow: %{public}s', JSON.stringify(e));
+    });
+  }
+
   build() {
     Column() {
       /* VM 画面区：XComponent + 虚拟键盘 overlay（键盘盖画面、不压底部状态栏） */
@@ -1015,11 +1043,17 @@ struct VmConsole {
         return;
       }
       if (event.type === KeyType.Down) {
+        this.pressedKeys.add(qcode);
         napi.sendKey(this.vmId, qcode, true);
       } else if (event.type === KeyType.Up) {
+        this.pressedKeys.delete(qcode);
         napi.sendKey(this.vmId, qcode, false);
       }
       event.stopPropagation();
+    })
+    .onBlur(() => {
+      /* 焦点离开本页内容区（如点到串口输入框/失焦）：释放按下键，防卡键 */
+      this.releaseAllKeys();
     })
   }
 }
