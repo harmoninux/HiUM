@@ -72,12 +72,23 @@ export default class VmConsoleAbility extends UIAbility {
           .catch((e: Object) => hilog.warn(DOMAIN, TAG, 'setWindowTitle: %{public}s', JSON.stringify(e)));
         /* 窗口矩形变化（最大化/全屏/还原）时同步 renderer，弥补 onSurfaceChanged
          * 偶发不触发导致的画面黑屏/错位（参考 wineohos 监听 window 事件的做法）。
-         * 注意：windowRect 含标题栏，精度略差，onSurfaceChanged 会给精确内容区尺寸。 */
+         * 注意：windowRect 含标题栏，精度略差，onSurfaceChanged 会给精确内容区尺寸。
+         * 纯移动（仅位置变化）必须丢弃：此时 XComponent 尺寸没变、onSurfaceChanged
+         * 不会触发来纠正，含标题栏的 windowRect 会把 letterbox 算歪——画面从
+         * 「左右黑边」变成「拉伸铺满」并一直错到下一次真实 resize。 */
+        let lastWinW = 0;
+        let lastWinH = 0;
         win.on('windowRectChange', () => {
           const ref = win.getWindowProperties().windowRect;
-          if (ref && ref.width > 0 && ref.height > 0) {
-            napi.resizeSurface(vmId, ref.width, ref.height);
+          if (!ref || ref.width <= 0 || ref.height <= 0) {
+            return;
           }
+          if (ref.width === lastWinW && ref.height === lastWinH) {
+            return;
+          }
+          lastWinW = ref.width;
+          lastWinH = ref.height;
+          napi.resizeSurface(vmId, ref.width, ref.height);
         });
       }).catch((e: Object) => hilog.error(DOMAIN, TAG, 'getMainWindow: %{public}s', JSON.stringify(e)));
     });
