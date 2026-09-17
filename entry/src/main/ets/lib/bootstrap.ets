@@ -37,10 +37,8 @@ const FIRMWARE_FILES: string[] = [
                                              * M-mode，再跳进 pflash 里的 edk2。riscv 走
                                              * pflash 时 machine->firmware 为空，qemu 按
                                              * 默认名找它；缺了会循环报错 + 跳空 RAM 跑飞 */
-  'edk2-riscv-vars.fd', /* riscv64 的第二块 pflash（变量存储，32MB）：edk2 的 RiscVVirt
-                         * 把代码与变量区分开，缺它时变量服务没有 flash 后备、变量读写
-                         * 会失败。**它不解决 riscv64 起不来的问题**——挂上后 edk2 仍会
-                         * 停（见 vmprofile.ets 的 riscv64 分支注释） */
+  /* 注：riscv64 的变量存储 pflash（rawfile 里的 edk2-riscv-vars.fd）**不在这里解包**，
+   * 因为它不能直接交给 qemu——见下面 unpackFirmware 里的模板解包。 */
 ];
 
 function writeRaw(resMgr: resourceManager.ResourceManager, rawPath: string, dst: string): void {
@@ -91,6 +89,13 @@ function unpackFirmware(ctx: common.UIAbilityContext): boolean {
   for (const name of FIRMWARE_FILES) {
     ok = tryWriteRaw(resMgr, 'vm/firmware/' + name, vmDir + '/' + name) && ok;
   }
+  /* riscv64 变量存储的**模板**：解成一个 qemu 永远不会碰的文件名，各 VM 启动时从它
+   * 拷贝（vmprofile.ensureRiscvVars）。不能解成 edk2-riscv-vars.fd 直接当 pflash 用——
+   * 那样 edk2 会往里写 BootOrder/Boot####，一旦内容陈旧（例如曾经开着 ACPI 跑过），
+   * edk2 就不再自动引导光盘，直接掉进 UEFI Interactive Shell（实测：参数完全相同，
+   * 只换 vars 内容，陈旧 → shell，全新 → 正常到 login）。模板与 qemu 隔离后，
+   * 它永远是随包下发的干净镜像。 */
+  ok = tryWriteRaw(resMgr, 'vm/firmware/edk2-riscv-vars.fd', vmDir + '/edk2-riscv-vars-template.fd') && ok;
   ok = tryWriteRaw(resMgr, 'vm/keymaps/en-us', vmDir + '/keymaps/en-us') && ok;
   hilog.info(DOMAIN, TAG, 'firmware unpacked to %{public}s, ok=%{public}s', vmDir, String(ok));
   return ok;

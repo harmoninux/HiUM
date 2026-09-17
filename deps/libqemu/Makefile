@@ -46,8 +46,13 @@ FIRMWARE_OPT := edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd e
 # 用例就是双 pflash（code 只读 + vars snapshot=on）。缺它时变量服务没有 flash 后备，
 # edk2 的变量读写会失败。该文件在 pc-bios 里只有 .bz2（故列在 FIRMWARE_OPT，走下面的
 # bzip2 解压分支），解压后 32MB，恰好等于 riscv virt 的 pflash1 大小。
-# ⚠️ 别把它当成「riscv64 起不来的解药」：实测挂上它之后 edk2 仍然会停（症状见
-# vmprofile.ets 的 riscv64 分支注释）。它解决的是**变量服务**，不是那个卡点。
+# ⚠️ 两份 vars 的用途不同，别混：随包的这份是**模板**，bootstrap 解成
+# edk2-riscv-vars-template.fd，各 VM 启动时从它拷一份自己的（vmprofile.ensureRiscvVars）。
+# 不能把同一份直接交给 qemu：edk2 会往里写 BootOrder/Boot####，内容一旦陈旧（例如曾用
+# 带 ACPI 的机器类型跑过），edk2 就不再自动引导光盘、直接掉进 UEFI Interactive Shell
+# （实测：参数完全相同，只换 vars 内容，陈旧 → shell，全新 → 正常起到 login）。
+# 另外它**不解决**「客户机内核在 ACPI 下 setup_smp BUG」那个问题，那是 -machine
+# virt,acpi=off 的事（见 vmprofile.ets）。
 
 all: download/qemu
 	rm -rf temp build

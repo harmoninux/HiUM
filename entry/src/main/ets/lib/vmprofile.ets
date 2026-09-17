@@ -402,6 +402,32 @@ export function serialSockPath(p: VmProfile, vmDataDir: string): string {
   return `${vmDataDir}/serial-${p.id}.sock`;
 }
 
+/* riscv64 变量存储 pflash 的每 VM 路径（buildArgs 用同一个式样，两边别写岔） */
+export function riscvVarsPath(p: VmProfile, vmDataDir: string): string {
+  return `${vmDataDir}/edk2-riscv-vars-${p.id}.fd`;
+}
+
+/* 启动前重置 riscv64 的变量存储：**每次启动都从干净模板重拷一份**。返回路径给 buildArgs。
+ *
+ * 为什么必须每次重置，而不是「留一份、以后沿用」——这一点实测吃过亏：edk2 会把
+ * BootOrder/Boot#### 之类的启动项写进这块 pflash，而**这些条目一旦指向当前不存在的设备，
+ * edk2 就不再自动引导光盘**，直接掉进 UEFI Interactive Shell（画面停在 `Shell>`）。
+ * 触发条件比想象的宽：不只是「以前开着 ACPI 跑过」，**任何设备组合变化**（比如串口接线从
+ * virtconsole 换成板载 UART）都会让旧条目失效。两台 VM 共用一份更是互相踩。
+ *  实测：同一台 VM、同一套参数，只把 vars 换成干净模板 → 正常起到 login；沿用旧的 → shell。
+ * 代价是 guest 自己写的 EFI 变量不会跨启动保留；对这个应用（启动盘/设备全由命令行决定）
+ * 可以接受，换来的是「配置怎么改都能开机」。
+ * 拷贝失败只记日志不抛：让启动继续，真缺文件 qemu 会自己报错，比静默失败好查。 */
+export function ensureRiscvVars(p: VmProfile, vmDataDir: string): string {
+  const dst = riscvVarsPath(p, vmDataDir);
+  try {
+    fs.copyFileSync(`${vmDataDir}/edk2-riscv-vars-template.fd`, dst);
+  } catch (err) {
+    hilog.error(DOMAIN, TAG, 'reset riscv vars failed: %{public}s', JSON.stringify(err));
+  }
+  return dst;
+}
+
 /* 9p 共享宿主目录：启动时经 picker 取到的 Download 目录（唯一可共享目录），guest 挂载为 /shared。
  * 读到 AppStorage（EntryAbility prepareSharedFolder 写入）；未取到则回退 app 数据目录下 shared/。 */
 export function sharedDir(filesDir: string): string {
@@ -445,7 +471,17 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
      * 树莓派 SoC 自带引导、不依赖 edk2/BIOS；无 PCI，故不挂 virtio-gpu/net；磁盘经 SD 卡控制器。 */
     args.push('-machine', board === 'raspi2' ? 'raspi2b' : 'raspi3b');
   } else if (board === 'virt') {
-    args.push('-machine', board);
+    /* riscv64 必须关 ACPI（**只对它加，别推广到 aarch64/loongarch64**）：
+     * edk2 的 RiscVVirt 默认经 ACPI 向 guest 描述平台，而 Alpine 的 riscv64 内核在
+     * ACPI 存在时走不通 SMP 初始化，直接在内核里 BUG：
+     *   kernel BUG at arch/riscv/kernel/smpboot.c:151!  (setup_smp ← setup_arch ← start_kernel)
+     * 触发点极早（t=0.000000），而且**全程没有任何可见输出**——因为 guest 的 console
+     * 还没建立，所以外部看到的现象只是「引导卡住 / vCPU 空转」，与真正的病因完全不搭。
+     * 关掉 ACPI 后内核改从设备树取 CPU 节点，引导正常。
+     * 这也是 edk2 官方 OvmfPkg/RiscVVirt/README.md 推荐的做法（原文 "-M virt,…,acpi=off"，
+     * 理由写的是 Linux ACPI guest 支持仍在推进）。
+     * 本地 A/B 各两次复核：不带 acpi=off 两次都起不来，带则两次都到 login。 */
+    args.push('-machine', p.machine.arch === 'riscv64' ? 'virt,acpi=off' : board);
     args.push('-device', 'virtio-gpu-pci');
     /* virt 机器无 i8042 PS/2 控制器且默认不带 USB 控制器（pc/q35 才有 PS/2）。
      * 裸挂 usb-kbd 会因找不到 USB 总线而 qemu abort；须显式挂 USB EHCI 主机
@@ -488,21 +524,18 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
        * 找固件）；缺了它按源码会打印 Unable to find the RISC-V BIOS
        * "opensbi-riscv64-generic-fw_dynamic.bin" 然后按空 firmware 继续跳空 RAM
        * （源码推得、未实测）。三处固件清单见 deps/libqemu/Makefile 的 FIRMWARE 注释。
-       * ⚠️ 本修复只解决「固件压根没执行」：改完之后 edk2 确实会跑（能接管 scanout、
-       * 也会写 vars pflash），但**仍会停下来且机制未查明**——最后打印的是 DxeCore 的
-       * SetUefiImageMemoryAttributes 与 TimerDriverSetTimerPeriod（都属 DXE 阶段），
-       * 之后画面静止、vCPU 单核 100% 自旋，同参数下运行间结果还不一致。别把本修复
-       * 当成「riscv64 已可用」。 */
+       * 注：走 pflash 只是让固件**跑起来**（此前 guest 一条指令都没执行）；要真引导到
+       * 客户机系统还需要 -machine 的 acpi=off，两条缺一不可，见上面 -machine 那段。 */
       args.push('-drive', `if=pflash,format=raw,readonly=on,file=${vmDataDir}/edk2-riscv-code.fd`);
       /* 第二块 pflash 作为变量存储（32MB）：edk2 的 RiscVVirt 把代码区与变量区分开，
-       * 缺它时变量读写会失败（qemu 官方 riscv64 用例就是双 pflash）。**但它不是
-       * 起不来的解药**——实测挂上它之后 edk2 照样会停，别把两者混为一谈。
+       * 缺它时变量读写会失败（qemu 官方 riscv64 用例就是双 pflash）。
+       * **每次启动由 ensureRiscvVars 从干净模板重拷一份**，不要沿用上次留下的：edk2 会把
+       * BootOrder/Boot#### 写进来，条目一旦指向当前不存在的设备，它就不再自动引导光盘，
+       * 直接掉进 UEFI Interactive Shell（正确性论证与实测见 ensureRiscvVars 的注释）。
        * 这里**不用 snapshot=on**（qemu 官方测试的写法）：曾归因于「snapshot 要写临时
        * overlay，而 OHOS 应用沙箱没有可写的 /tmp」，但后来发现**不开 snapshot 也同样
-       * 停在占位符画面**，该归因已被证伪，留此备注以免再次照搬。故直接写这份镜像。
-       * 注：它落在共享的 vmDir 下，多台 riscv64 VM 同时运行会争用同一份变量存储；
-       * 真要并行需按 VM 各复制一份，目前先按单台用。 */
-      args.push('-drive', `if=pflash,format=raw,file=${vmDataDir}/edk2-riscv-vars.fd`);
+       * 停在占位符画面**，该归因已被证伪，留此备注以免再次照搬。 */
+      args.push('-drive', `if=pflash,format=raw,file=${riscvVarsPath(p, vmDataDir)}`);
     }
     /* 串口（v4）：virt 板无 ISA UART，经 virtio-serial + virtconsole 接 socket 交互。
      * logfile 是 chardev 的通用选项（qemu_chr_parse_common，见 chardev/char.c）：

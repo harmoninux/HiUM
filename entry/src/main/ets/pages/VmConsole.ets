@@ -8,7 +8,7 @@ import { promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
-import { VmProfile, VmStore, buildArgs, qmpSockPath, serialSockPath, sharedDir, builtinIsoFor, mainDiskPath } from '../lib/vmprofile';
+import { VmProfile, VmStore, buildArgs, qmpSockPath, serialSockPath, sharedDir, builtinIsoFor, mainDiskPath, ensureRiscvVars } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { pathExists, isoReadable, readTail } from '../lib/fsutil';
 import { prepareStart } from '../lib/tempSession';
@@ -370,6 +370,12 @@ struct VmConsole {
         message: skipped.length > 1 ?
           `${nm} 等${skipped.length}张光盘不可读，本次启动已跳过` : `光盘 ${nm} 不可读，本次启动已跳过`,
       });
+    }
+    /* riscv64 的变量存储 pflash 必须每次启动重置、且在 buildArgs 之前铺好：沿用旧内容
+     * （或与别的 VM 共用）会让 edk2 因启动项陈旧而不再自动引导光盘，直接掉进 UEFI Shell
+     * ——详见 ensureRiscvVars 的注释。 */
+    if (this.profile.machine.arch === 'riscv64') {
+      ensureRiscvVars(this.profile, this.vmDataDir);
     }
     const launchArgs = buildArgs(this.profile, this.vmDataDir, share, launchIsos);
     hilog.info(DOMAIN, TAG, 'doStart buildArgs vm=%{public}s argc=%{public}d isoCount=%{public}d',
