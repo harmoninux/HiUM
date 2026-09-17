@@ -537,15 +537,35 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
        * 停在占位符画面**，该归因已被证伪，留此备注以免再次照搬。 */
       args.push('-drive', `if=pflash,format=raw,file=${riscvVarsPath(p, vmDataDir)}`);
     }
-    /* 串口（v4）：virt 板无 ISA UART，经 virtio-serial + virtconsole 接 socket 交互。
+    /* 串口（v4）：接**板载真实 UART**（aarch64/arm = PL011，riscv/loongarch = 16550），
+     * qemu 的 `-serial` 默认就接它。早先这里挂的是 virtio-serial + virtconsole，那才是
+     * 错的：virtio-console 要 guest 侧驱动、在 guest 里表现为 /dev/hvc0，而 edk2 与 Linux
+     * 内核的 console（ttyAMA0/ttyS0）只认真实 UART —— 后果是串口视图看不到 guest 的
+     * 控制台，交互无从谈起。
+     * 换 UART 是**四个 virt 架构逐个实测过**的（不再是推理；曾经据一个已被别的原因解释掉
+     * 的现象改过这里，教训写在下面）：
+     *   aarch64    virtconsole 3756 B（仅引导器文本）→ UART 9030 B（引导器文本 + 起至 login）
+     *   arm        virtconsole 3756 B                → UART 7211 B（引导器文本 + 启动中）
+     *   loongarch64 virtconsole 0 B                  → UART 94 KB（edk2 全程）
+     *   riscv64    virtconsole 0 B                   → UART 拿到 guest 控制台（ttyS0）
+     * 即 UART 对四个架构都是**超集**：aarch64/arm 原本能从 virtconsole 看到的 GNU GRUB /
+     * Booting 文本，在 UART 上同样有，换过来不丢东西。
+     * ⚠️ 教训：2026-09-17 曾据「riscv64 排查时串口一条输出都没有」改这里，但那个观察的真因
+     * 是固件链没跑起来（-bios 把 edk2 塞进 RAM，见上面 pflash 注释），与串口接线无关——
+     * 当时**前提是假的**，所以改完又撤了。这次是逐架构取证之后才动。改共用段之前先问
+     * 「这现象有没有别的解释」，别拿已被别的原因解释掉的观察当证据。
+     * ⚠️ UART 与 virtconsole **无法并存**：一个 chardev 只能被一个前端占用，写成
+     * `-serial chardev:chr0` + `-device virtconsole,chardev=chr0` 会让 qemu 在参数解析
+     * 阶段就拒绝并**循环刷屏**（`Property 'virtconsole.chardev' can't take value 'chr0':
+     * chardev 'chr0' is already in use`，实测每 ~5ms 一条、CPU 烧满）。真想两者都要得
+     * 开两个 chardev，或给 chardev 加 mux=on（后者会改变输入方向的前端选择语义，未验）。
      * logfile 是 chardev 的通用选项（qemu_chr_parse_common，见 chardev/char.c）：
      * 交互之外把数据同时落盘，恢复 v4 之前 `-serial file:` 的可事后诊断能力——
      * 没有它，没人连 Console 串口视图时 guest 往串口写的东西会直接丢弃。
      * 与历史行为一致，该文件无轮转上限（guest 行为决定，非本应用可控）。 */
     if (p.machine.serialInteractive) {
       args.push('-chardev', `socket,path=${vmDataDir}/serial-${p.id}.sock,server=on,wait=off,id=chr0,logfile=${vmDataDir}/serial-${p.id}.log`);
-      args.push('-device', 'virtio-serial-pci');
-      args.push('-device', 'virtconsole,chardev=chr0');
+      args.push('-serial', 'chardev:chr0');
     }
   } else {
     args.push('-machine', board);
