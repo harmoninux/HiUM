@@ -462,7 +462,47 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     } else if (p.machine.arch === 'arm') {
       args.push('-bios', vmDataDir + '/edk2-arm-code.fd');
     } else if (p.machine.arch === 'riscv64') {
-      args.push('-bios', vmDataDir + '/edk2-riscv-code.fd');
+      /* RISC-V 的 edk2 固件必须走 pflash 加载，**不能用 -bios** —— 这是它与
+       * aarch64/arm 的关键差异，实测踩过：画面永远停在 qemu 的占位符
+       * "Display output is not active."、串口一条输出都没有、CPU 持续空转
+       * （guest 一条指令都没执行过）。
+       * 注意「串口没有输出」在这里只是**症状之一**：成因是 guest 压根没执行，
+       * UART 与 virtconsole 都一样空，别把它当成串口接线的证据（这条误判过一轮）。
+       * 源码依据（两条加载路径不同）：
+       *  - arm: hw/arm/virt.c virt_firmware_init() 里，-bios 经 load_image_mr()
+       *    灌进 sysbus_mmio_get_region(flash[0])，落点是 flash 的 MMIO 区，
+       *    地址正确，所以 aarch64/arm 用 -bios 没问题；
+       *  - riscv: hw/riscv/boot.c riscv_load_firmware() 走的是
+       *    load_image_targphys_as(fw, *firmware_load_addr, ram_size)，而该地址
+       *    初值是 memmap[VIRT_DRAM].base = 0x80000000(RAM)。edk2 的
+       *    RISCV_VIRT_CODE.fd(32MB) 是按 flash 首块地址 0x20000000 链接的，
+       *    挪到 RAM 后整段跑飞。
+       * -drive if=pflash 才是正路：riscv virt 的 VIRT_FLASH 在 0x20000000、
+       * 总 0x4000000 分两块，pflash0 的大小 32MB 恰好等于该 fd；qemu 官方
+       * tests/qtest/bios-tables-test.c 的 riscv64 用例也是这么挂的（它还挂了
+       * 第二块 pflash 放 edk2-riscv-vars.fd，见下）。
+       * **改走 pflash 后固件链变成两级**：machine->firmware 为空时，qemu 会先加载
+       * opensbi-riscv64-generic-fw_dynamic.bin 到 RAM 跑 M-mode，再由 OpenSBI 经
+       * ROM reset vector 里的 kernel_entry(= flash base) 跳进本 pflash 中的 edk2。
+       * 因此这份 OpenSBI 必须与 edk2-*.fd 一起解到 vmDataDir（qemu 靠 -L vmDataDir
+       * 找固件）；缺了它按源码会打印 Unable to find the RISC-V BIOS
+       * "opensbi-riscv64-generic-fw_dynamic.bin" 然后按空 firmware 继续跳空 RAM
+       * （源码推得、未实测）。三处固件清单见 deps/libqemu/Makefile 的 FIRMWARE 注释。
+       * ⚠️ 本修复只解决「固件压根没执行」：改完之后 edk2 确实会跑（能接管 scanout、
+       * 也会写 vars pflash），但**仍会停下来且机制未查明**——最后打印的是 DxeCore 的
+       * SetUefiImageMemoryAttributes 与 TimerDriverSetTimerPeriod（都属 DXE 阶段），
+       * 之后画面静止、vCPU 单核 100% 自旋，同参数下运行间结果还不一致。别把本修复
+       * 当成「riscv64 已可用」。 */
+      args.push('-drive', `if=pflash,format=raw,readonly=on,file=${vmDataDir}/edk2-riscv-code.fd`);
+      /* 第二块 pflash 作为变量存储（32MB）：edk2 的 RiscVVirt 把代码区与变量区分开，
+       * 缺它时变量读写会失败（qemu 官方 riscv64 用例就是双 pflash）。**但它不是
+       * 起不来的解药**——实测挂上它之后 edk2 照样会停，别把两者混为一谈。
+       * 这里**不用 snapshot=on**（qemu 官方测试的写法）：曾归因于「snapshot 要写临时
+       * overlay，而 OHOS 应用沙箱没有可写的 /tmp」，但后来发现**不开 snapshot 也同样
+       * 停在占位符画面**，该归因已被证伪，留此备注以免再次照搬。故直接写这份镜像。
+       * 注：它落在共享的 vmDir 下，多台 riscv64 VM 同时运行会争用同一份变量存储；
+       * 真要并行需按 VM 各复制一份，目前先按单台用。 */
+      args.push('-drive', `if=pflash,format=raw,file=${vmDataDir}/edk2-riscv-vars.fd`);
     }
     /* 串口（v4）：virt 板无 ISA UART，经 virtio-serial + virtconsole 接 socket 交互。
      * logfile 是 chardev 的通用选项（qemu_chr_parse_common，见 chardev/char.c）：

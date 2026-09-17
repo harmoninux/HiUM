@@ -51,7 +51,9 @@ output/.stamp: $(STAMP) Makefile
 	for fw in bios-256k.bin bios.bin kvmvapic.bin linuxboot.bin linuxboot_dma.bin \
 		vgabios-stdvga.bin vgabios-virtio.bin vgabios-ramfb.bin \
 		vgabios-cirrus.bin vgabios-vmware.bin \
-		efi-virtio.rom edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd; do cp output/$$fw ../entry/src/main/resources/rawfile/vm/firmware/ 2>/dev/null || true; done
+		efi-virtio.rom opensbi-riscv64-generic-fw_dynamic.bin \
+		edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd \
+		edk2-riscv-vars.fd; do cp output/$$fw ../entry/src/main/resources/rawfile/vm/firmware/ 2>/dev/null || true; done
 	touch output/.stamp
 
 %/.stamp: %/Makefile

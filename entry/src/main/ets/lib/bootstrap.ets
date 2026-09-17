@@ -30,7 +30,17 @@ const FIRMWARE_FILES: string[] = [
   'edk2-aarch64-code.fd', /* aarch64 客户机 UEFI 固件（virt 机器经 -bios 加载） */
   'edk2-arm-code.fd', /* arm(32位) 客户机 UEFI 固件（virt 机器经 -bios 加载） */
   'edk2-loongarch64-code.fd', /* loongarch64 客户机 UEFI 固件（virt 机器经 -bios 加载） */
-  'edk2-riscv-code.fd', /* riscv64 客户机 UEFI 固件（virt 机器经 -bios 加载） */
+  'edk2-riscv-code.fd', /* riscv64 客户机 UEFI 固件：走 -drive if=pflash 装进 pflash0，
+                         * **不能**用 -bios（riscv 的 -bios 会把它加载到 RAM 0x80000000，
+                         * 而该 fd 按 flash 首块 0x20000000 链接，整段跑飞） */
+  'opensbi-riscv64-generic-fw_dynamic.bin', /* riscv64 的第一级固件：qemu 载入 RAM 跑
+                                             * M-mode，再跳进 pflash 里的 edk2。riscv 走
+                                             * pflash 时 machine->firmware 为空，qemu 按
+                                             * 默认名找它；缺了会循环报错 + 跳空 RAM 跑飞 */
+  'edk2-riscv-vars.fd', /* riscv64 的第二块 pflash（变量存储，32MB）：edk2 的 RiscVVirt
+                         * 把代码与变量区分开，缺它时变量服务没有 flash 后备、变量读写
+                         * 会失败。**它不解决 riscv64 起不来的问题**——挂上后 edk2 仍会
+                         * 停（见 vmprofile.ets 的 riscv64 分支注释） */
 ];
 
 function writeRaw(resMgr: resourceManager.ResourceManager, rawPath: string, dst: string): void {

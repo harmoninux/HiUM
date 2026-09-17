@@ -24,9 +24,30 @@ QEMU_LIBS := libqemu-system-x86_64.so libqemu-system-i386.so libqemu-system-aarc
 FIRMWARE := bios-256k.bin bios.bin kvmvapic.bin linuxboot.bin linuxboot_dma.bin \
 	vgabios-stdvga.bin vgabios-virtio.bin vgabios-ramfb.bin \
 	vgabios-cirrus.bin vgabios-vmware.bin \
-	efi-virtio.rom keymaps/en-us
+	efi-virtio.rom opensbi-riscv64-generic-fw_dynamic.bin keymaps/en-us
+#
+# ↑ opensbi-riscv64-generic-fw_dynamic.bin：riscv64 的固件链是**两级**的——qemu 先把
+# OpenSBI 载入 RAM(M-mode)，OpenSBI 再经 ROM reset vector 里的 kernel_entry(= flash
+# base 0x20000000) 跳进 pflash 中的 edk2(S-mode)。riscv 的 edk2 只能走 -drive if=pflash
+# （-bios 会把按 flash 地址链接的固件塞进 RAM 0x80000000，整段跑飞），而这时
+# machine->firmware 为空，hw/riscv/boot.c riscv_find_firmware() 就按默认名去找这份
+# OpenSBI（源码注释原话："we are going to load the OpenSBI binary included in the
+# QEMU source"）。缺失的后果**由源码推得、未实测**：按 hw/riscv/boot.c 的
+# riscv_find_firmware()，找不到时打印
+#   Unable to find the RISC-V BIOS "opensbi-riscv64-generic-fw_dynamic.bin"
+# 然后按空 firmware 继续，跳到空 RAM。故必须与 edk2-*.fd 一同发货。
+# 改 riscv 固件链时同步这三处（本文件 + deps/Makefile 的 rawfile 拷贝 + bootstrap.ets）。
 # optional blobs (present only when the corresponding firmware is shipped)
-FIRMWARE_OPT := edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd
+FIRMWARE_OPT := edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd \
+	edk2-riscv-vars.fd
+#
+# ↑ edk2-riscv-vars.fd：riscv64 的**第二块 pflash**（变量存储），32MB。edk2 的
+# RiscVVirt 把代码与变量区分开，qemu 官方 tests/qtest/bios-tables-test.c 的 riscv64
+# 用例就是双 pflash（code 只读 + vars snapshot=on）。缺它时变量服务没有 flash 后备，
+# edk2 的变量读写会失败。该文件在 pc-bios 里只有 .bz2（故列在 FIRMWARE_OPT，走下面的
+# bzip2 解压分支），解压后 32MB，恰好等于 riscv virt 的 pflash1 大小。
+# ⚠️ 别把它当成「riscv64 起不来的解药」：实测挂上它之后 edk2 仍然会停（症状见
+# vmprofile.ets 的 riscv64 分支注释）。它解决的是**变量服务**，不是那个卡点。
 
 all: download/qemu
 	rm -rf temp build
