@@ -886,6 +886,21 @@ struct VmConsole {
             this.areaH = newArea.height as number;
           })
           .onTouch((event: TouchEvent) => this.handleTouch(event))
+          /* 鼠标**未按下**的移动不产生 TouchEvent（touch 需要接触），只走 onMouse 的
+           * MouseAction.Move；不挂它的话 guest 光标只有点击时才瞬移过去、移动完全不
+           * 跟随。MouseEvent.x/y 与 TouchObject.x/y 同为「响应组件的组件坐标系」vp，
+           * 故直接复用 sendPtrMedia；按键态仍由 onTouch 的 touchButtons 维护，这里
+           * 只补坐标（按住拖动时 touchButtons 已置位，一并带过去）。 */
+          .onMouse((event: MouseEvent) => {
+            if (event.action !== MouseAction.Move) {
+              return;
+            }
+            /* 鼠标移动事件比触摸密集得多（悬停时每秒可达上百次），坐标没变就不发，
+             * 省掉无谓的 napi 往返与 qemu 注入 */
+            if (event.x !== this.lastX || event.y !== this.lastY) {
+              this.sendPtrMedia(event.x, event.y, this.touchButtons);
+            }
+          })
         /* 虚拟键盘 overlay：盖在 VM 画面上。面板空白处透传给画面，
          * 键帽/把手消费触摸（见 VirtualKeyboard 组件 hitTest 说明） */
         if (isPadOrPhone() && this.showKbd) {
