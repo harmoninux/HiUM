@@ -16,6 +16,16 @@ export type VgaType = 'std' | 'virtio' | 'cirrus' | 'vmware';
 export type VmBoard = 'pc' | 'q35' | 'virt' | 'raspi2' | 'raspi3';
 export type VmFirmware = 'seabios' | 'ovmf';
 
+/* 存档里的 arch 取值校验：读盘（migrateV1 / normalizeV2）只认这几个值，其余回落
+ * x86_64。**必须与 VmArch 同步增长**——两处 normalize 各写一份枚举的话，新增架构
+ * 时漏改一处就会出现「内存里对、存盘再读回来变回 x86_64」的隐蔽故障：参数预览
+ * 正常（用的是内存对象），列表与启动却不对。集中成一处就是为了加架构只改一个地方。 */
+const VM_ARCHS: string[] = ['x86_64', 'i386', 'aarch64', 'arm', 'loongarch64', 'riscv64'];
+
+export function isVmArch(s: string): boolean {
+  return VM_ARCHS.indexOf(s) >= 0;
+}
+
 /* 机器层：架构/显卡 + 板卡/固件/CPU 模型。机器工坊按此生成 -machine/-cpu 参数 */
 export interface VmMachine {
   arch: VmArch;
@@ -234,7 +244,7 @@ function migrateV1(o: Record<string, Object>): VmProfile {
   p.id = jStr(o, 'id') || newProfileId();
   p.name = jStr(o, 'name') || '未命名';
   const arch = jStr(o, 'arch');
-  if (arch === 'i386' || arch === 'aarch64') {
+  if (isVmArch(arch)) {
     p.machine.arch = arch as VmArch;
   }
   p.machine.vga = jStr(o, 'vga') === 'virtio' ? 'virtio' : 'std';
@@ -274,7 +284,7 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
 
   if (m) {
     const arch = jStr(m, 'arch');
-    if (arch === 'i386' || arch === 'aarch64' || arch === 'arm' || arch === 'loongarch64') {
+    if (isVmArch(arch)) {
       p.machine.arch = arch as VmArch;
     }
     p.machine.machine = fitBoard(p.machine.arch, jStr(m, 'machine'));
