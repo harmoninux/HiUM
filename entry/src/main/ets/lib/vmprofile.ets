@@ -483,10 +483,18 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
      * 本地 A/B 各两次复核：不带 acpi=off 两次都起不来，带则两次都到 login。 */
     args.push('-machine', p.machine.arch === 'riscv64' ? 'virt,acpi=off' : board);
     args.push('-device', 'virtio-gpu-pci');
-    /* virt 机器无 i8042 PS/2 控制器且默认不带 USB 控制器（pc/q35 才有 PS/2）。
-     * 裸挂 usb-kbd 会因找不到 USB 总线而 qemu abort；须显式挂 USB EHCI 主机
-     * 控制器再挂 USB 键盘，否则 aarch64/arm/loongarch64/riscv64 收不到按键。 */
-    args.push('-device', 'usb-ehci,id=usb');
+    /* virt 机器无 i8042 PS/2 控制器且默认不带 USB 控制器（pc/q35 才有 PS/2），
+     * 所以键盘只能走 USB：须显式挂主机控制器再挂 -device usb-kbd，否则裸挂
+     * usb-kbd 会因找不到 usb-bus 而 qemu abort。
+     * 控制器要挑**客户机内核认得的那种**，因此 riscv64 用 qemu-xhci、只给它：
+     * Alpine 的 riscv64 内核只编了 XHCI、没有 EHCI（alpine-standard 3.23 的
+     * /boot/config-lts 里 `# CONFIG_USB_EHCI_HCD is not set`、XHCI 为 `=y`），
+     * 挂 usb-ehci 时 PCI 上控制器枚举正常却没有驱动可绑，底下的 usb-kbd 永不现身，
+     * 症状是图形窗口里键盘毫无反应。其余四架构的 ISO 里 EHCI 与 XHCI 都是 `=m`
+     * （aarch64/arm/x86_64/loongarch64 的客户机正常），故不动它们。
+     * 注：这是发行版构建配置的选择，与上游 RISC-V defconfig 无关（那边 EHCI/OHCI/
+     * XHCI 都是 =y），别据此以为 RISC-V 平台天生缺 EHCI。 */
+    args.push('-device', p.machine.arch === 'riscv64' ? 'qemu-xhci,id=usb' : 'usb-ehci,id=usb');
     args.push('-device', 'usb-kbd,bus=usb.0');
     /* aarch64 的 virt 机器必须提供 UEFI 固件才能引导客户机：edk2-aarch64-code.fd
      * 由 make deps 产出、bootstrap 解到 vmDir，qemu 经 -bios(绝对路径) 载入 flash0。
