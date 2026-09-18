@@ -371,9 +371,8 @@ struct VmConsole {
           `${nm} 等${skipped.length}张光盘不可读，本次启动已跳过` : `光盘 ${nm} 不可读，本次启动已跳过`,
       });
     }
-    /* riscv64 的变量存储 pflash 必须每次启动重置、且在 buildArgs 之前铺好：沿用旧内容
-     * （或与别的 VM 共用）会让 edk2 因启动项陈旧而不再自动引导光盘，直接掉进 UEFI Shell
-     * ——详见 ensureRiscvVars 的注释。 */
+    /* riscv64 的变量存储 pflash 要每 VM 一份、且在 buildArgs 之前铺好：共用或沿用旧内容
+     * 会让 edk2 因陈旧启动项不再自动引导光盘（详见 ensureRiscvVars 注释）。 */
     if (this.profile.machine.arch === 'riscv64') {
       ensureRiscvVars(this.profile, this.vmDataDir);
     }

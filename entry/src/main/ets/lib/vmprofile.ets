@@ -419,14 +419,12 @@ export function riscvVarsPath(p: VmProfile, vmDataDir: string): string {
 
 /* 启动前重置 riscv64 的变量存储：**每次启动都从干净模板重拷一份**。返回路径给 buildArgs。
  *
- * 为什么必须每次重置，而不是「留一份、以后沿用」——这一点实测吃过亏：edk2 会把
- * BootOrder/Boot#### 之类的启动项写进这块 pflash，而**这些条目一旦指向当前不存在的设备，
- * edk2 就不再自动引导光盘**，直接掉进 UEFI Interactive Shell（画面停在 `Shell>`）。
- * 触发条件比想象的宽：不只是「以前开着 ACPI 跑过」，**任何设备组合变化**（比如串口接线从
- * virtconsole 换成板载 UART）都会让旧条目失效。两台 VM 共用一份更是互相踩。
- *  实测：同一台 VM、同一套参数，只把 vars 换成干净模板 → 正常起到 login；沿用旧的 → shell。
- * 代价是 guest 自己写的 EFI 变量不会跨启动保留；对这个应用（启动盘/设备全由命令行决定）
- * 可以接受，换来的是「配置怎么改都能开机」。
+ * 不能「留一份、以后沿用」：edk2 会把 BootOrder/Boot#### 之类的启动项写进这块 pflash，
+ * 而这些条目一旦指向当前不存在的设备，edk2 就不再自动引导光盘，直接掉进 UEFI
+ * Interactive Shell（画面停在 `Shell>`）。触发条件很宽——**任何设备组合变化**都会让旧条目
+ * 失效，不只是机器类型改了；两台 VM 共用一份更是互相踩。
+ * 代价是 guest 自己写的 EFI 变量不跨启动保留。本应用的启动盘与设备全由命令行决定，
+ * 这个代价可以接受，换来的是「配置怎么改都能开机」。
  * 拷贝失败只记日志不抛：让启动继续，真缺文件 qemu 会自己报错，比静默失败好查。 */
 export function ensureRiscvVars(p: VmProfile, vmDataDir: string): string {
   const dst = riscvVarsPath(p, vmDataDir);
@@ -509,12 +507,11 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
      * edk2 的 RiscVVirt 默认经 ACPI 向 guest 描述平台，而 Alpine 的 riscv64 内核在
      * ACPI 存在时走不通 SMP 初始化，直接在内核里 BUG：
      *   kernel BUG at arch/riscv/kernel/smpboot.c:151!  (setup_smp ← setup_arch ← start_kernel)
-     * 触发点极早（t=0.000000），而且**全程没有任何可见输出**——因为 guest 的 console
-     * 还没建立，所以外部看到的现象只是「引导卡住 / vCPU 空转」，与真正的病因完全不搭。
-     * 关掉 ACPI 后内核改从设备树取 CPU 节点，引导正常。
+     * 触发点在 start_kernel 极早期，此时 guest console 还没建立，**全程没有任何可见
+     * 输出**，外部只看到「引导卡住 / vCPU 空转」这种与病因毫不相干的表象——排查时要
+     * 留意别被它带偏。关掉 ACPI 后内核改从设备树取 CPU 节点，引导正常。
      * 这也是 edk2 官方 OvmfPkg/RiscVVirt/README.md 推荐的做法（原文 "-M virt,…,acpi=off"，
-     * 理由写的是 Linux ACPI guest 支持仍在推进）。
-     * 本地 A/B 各两次复核：不带 acpi=off 两次都起不来，带则两次都到 login。 */
+     * 理由写的是 Linux ACPI guest 支持仍在推进）。 */
     args.push('-machine', p.machine.arch === 'riscv64' ? 'virt,acpi=off' : board);
     args.push('-device', 'virtio-gpu-pci');
     /* virt 机器无 i8042 PS/2 控制器，键盘只能走 USB：控制器已在上面的公共段挂好
@@ -531,12 +528,10 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
       args.push('-bios', vmDataDir + '/edk2-arm-code.fd');
     } else if (p.machine.arch === 'riscv64') {
       /* RISC-V 的 edk2 固件必须走 pflash 加载，**不能用 -bios** —— 这是它与
-       * aarch64/arm 的关键差异，实测踩过：画面永远停在 qemu 的占位符
-       * "Display output is not active."、串口一条输出都没有、CPU 持续空转
-       * （guest 一条指令都没执行过）。
-       * 注意「串口没有输出」在这里只是**症状之一**：成因是 guest 压根没执行，
-       * UART 与 virtconsole 都一样空，别把它当成串口接线的证据（这条误判过一轮）。
-       * 源码依据（两条加载路径不同）：
+       * aarch64/arm 的关键差异。两条加载路径不同，源码依据：
+       * （症状是 guest 一条指令都没执行：画面停在 qemu 的占位符 "Display output is
+       * not active."、串口一条输出都没有、CPU 空转。注意「串口没有输出」只是这个
+       * 成因的症状之一，UART 与 virtconsole 都一样空，别拿它当串口接线的证据。）
        *  - arm: hw/arm/virt.c virt_firmware_init() 里，-bios 经 load_image_mr()
        *    灌进 sysbus_mmio_get_region(flash[0])，落点是 flash 的 MMIO 区，
        *    地址正确，所以 aarch64/arm 用 -bios 没问题；
@@ -554,19 +549,18 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
        * ROM reset vector 里的 kernel_entry(= flash base) 跳进本 pflash 中的 edk2。
        * 因此这份 OpenSBI 必须与 edk2-*.fd 一起解到 vmDataDir（qemu 靠 -L vmDataDir
        * 找固件）；缺了它按源码会打印 Unable to find the RISC-V BIOS
-       * "opensbi-riscv64-generic-fw_dynamic.bin" 然后按空 firmware 继续跳空 RAM
-       * （源码推得、未实测）。三处固件清单见 deps/libqemu/Makefile 的 FIRMWARE 注释。
-       * 注：走 pflash 只是让固件**跑起来**（此前 guest 一条指令都没执行）；要真引导到
-       * 客户机系统还需要 -machine 的 acpi=off，两条缺一不可，见上面 -machine 那段。 */
+       * "opensbi-riscv64-generic-fw_dynamic.bin" 然后按空 firmware 继续跳空 RAM。
+       * 三处固件清单见 deps/libqemu/Makefile 的 FIRMWARE 注释。
+       * 注：走 pflash 只让固件**跑起来**；要真引导到客户机系统还需要 -machine 的
+       * acpi=off，两条缺一不可，见上面 -machine 那段。 */
       args.push('-drive', `if=pflash,format=raw,readonly=on,file=${vmDataDir}/edk2-riscv-code.fd`);
       /* 第二块 pflash 作为变量存储（32MB）：edk2 的 RiscVVirt 把代码区与变量区分开，
        * 缺它时变量读写会失败（qemu 官方 riscv64 用例就是双 pflash）。
        * **每次启动由 ensureRiscvVars 从干净模板重拷一份**，不要沿用上次留下的：edk2 会把
        * BootOrder/Boot#### 写进来，条目一旦指向当前不存在的设备，它就不再自动引导光盘，
        * 直接掉进 UEFI Interactive Shell（正确性论证与实测见 ensureRiscvVars 的注释）。
-       * 这里**不用 snapshot=on**（qemu 官方测试的写法）：曾归因于「snapshot 要写临时
-       * overlay，而 OHOS 应用沙箱没有可写的 /tmp」，但后来发现**不开 snapshot 也同样
-       * 停在占位符画面**，该归因已被证伪，留此备注以免再次照搬。 */
+       * 这里**不用 snapshot=on**（qemu 官方测试的写法）：它并不影响能否引导，而
+       * snapshot 要写一个可写的临时 overlay，在本应用的沙箱里反而多一层要求。 */
       args.push('-drive', `if=pflash,format=raw,file=${riscvVarsPath(p, vmDataDir)}`);
     }
     /* 串口（v4）：接**板载真实 UART**（aarch64/arm = PL011，riscv/loongarch = 16550），
@@ -574,18 +568,9 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
      * 错的：virtio-console 要 guest 侧驱动、在 guest 里表现为 /dev/hvc0，而 edk2 与 Linux
      * 内核的 console（ttyAMA0/ttyS0）只认真实 UART —— 后果是串口视图看不到 guest 的
      * 控制台，交互无从谈起。
-     * 换 UART 是**四个 virt 架构逐个实测过**的（不再是推理；曾经据一个已被别的原因解释掉
-     * 的现象改过这里，教训写在下面）：
-     *   aarch64    virtconsole 3756 B（仅引导器文本）→ UART 9030 B（引导器文本 + 起至 login）
-     *   arm        virtconsole 3756 B                → UART 7211 B（引导器文本 + 启动中）
-     *   loongarch64 virtconsole 0 B                  → UART 94 KB（edk2 全程）
-     *   riscv64    virtconsole 0 B                   → UART 拿到 guest 控制台（ttyS0）
-     * 即 UART 对四个架构都是**超集**：aarch64/arm 原本能从 virtconsole 看到的 GNU GRUB /
-     * Booting 文本，在 UART 上同样有，换过来不丢东西。
-     * ⚠️ 教训：2026-09-17 曾据「riscv64 排查时串口一条输出都没有」改这里，但那个观察的真因
-     * 是固件链没跑起来（-bios 把 edk2 塞进 RAM，见上面 pflash 注释），与串口接线无关——
-     * 当时**前提是假的**，所以改完又撤了。这次是逐架构取证之后才动。改共用段之前先问
-     * 「这现象有没有别的解释」，别拿已被别的原因解释掉的观察当证据。
+     * 换 UART 对四个 virt 架构都验过，它是**超集**：aarch64/arm 原本能从 virtconsole
+     * 看到的 GNU GRUB / Booting 文本，在 UART 上同样有；loongarch64/riscv64 则只有 UART
+     * 拿得到 guest 控制台。改共用段之前先确认这一点，别只看一个架构。
      * ⚠️ UART 与 virtconsole **无法并存**：一个 chardev 只能被一个前端占用，写成
      * `-serial chardev:chr0` + `-device virtconsole,chardev=chr0` 会让 qemu 在参数解析
      * 阶段就拒绝并**循环刷屏**（`Property 'virtconsole.chardev' can't take value 'chr0':

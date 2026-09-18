@@ -48,9 +48,8 @@ FIRMWARE_OPT := edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd e
 # bzip2 解压分支），解压后 32MB，恰好等于 riscv virt 的 pflash1 大小。
 # ⚠️ 两份 vars 的用途不同，别混：随包的这份是**模板**，bootstrap 解成
 # edk2-riscv-vars-template.fd，各 VM 启动时从它拷一份自己的（vmprofile.ensureRiscvVars）。
-# 不能把同一份直接交给 qemu：edk2 会往里写 BootOrder/Boot####，内容一旦陈旧（例如曾用
-# 带 ACPI 的机器类型跑过），edk2 就不再自动引导光盘、直接掉进 UEFI Interactive Shell
-# （实测：参数完全相同，只换 vars 内容，陈旧 → shell，全新 → 正常起到 login）。
+# 不能把同一份直接交给 qemu：edk2 会往里写 BootOrder/Boot####，内容一旦陈旧（任何设备
+# 组合变化都会），它就不再自动引导光盘、直接掉进 UEFI Interactive Shell。
 # 另外它**不解决**「客户机内核在 ACPI 下 setup_smp BUG」那个问题，那是 -machine
 # virt,acpi=off 的事（见 vmprofile.ets）。
 
