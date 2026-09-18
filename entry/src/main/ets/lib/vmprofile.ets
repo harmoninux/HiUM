@@ -472,10 +472,34 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
    * 仍未接 pflash（需 OVMF_CODE/VARS 固件），缺件回落 seabios。 */
   const board = fitBoard(p.machine.arch, p.machine.machine);
   const isRaspi = board === 'raspi2' || board === 'raspi3';
-  /* 输入设备：统一 virtio-tablet-pci（绝对注入，触摸精确）。四类板卡都挂同一个，
-   * 与重构前 raspi / tablet 两条分支的合并结果逐字等价。
+  /* USB 主机控制器：usb-tablet / usb-kbd 都挂在它上面，必须先于它们出现（qemu 按
+   * 命令行顺序处理 -device）。
+   *  - pc/q35 默认没有 USB 总线：南桥 UHCI 由 machine_usb() 决定（pc_piix.c 把它设成
+   *    piix3 的 has-usb，q35 同理），而该属性默认 off，default_machine_opts 里也不含
+   *    usb=on；裸挂 usb-tablet 会直接启动失败：No usb-bus bus found for device
+   *    usb-tablet。
+   *  - virt 无南桥，同样要显式挂。
+   *  - raspi 无 PCI（hw/arm/raspi.c 零处 pci，故 virtio-gpu/net 也都不挂），但 SoC
+   *    自带 DWC2 USB，天然有 usb-bus，不需要额外控制器。
+   * 控制器要挑**客户机内核认得的那种**，因此 riscv64 用 qemu-xhci、只给它：Alpine 的
+   * riscv64 内核只编了 XHCI、没有 EHCI（alpine-standard 3.23 的 /boot/config-lts 里
+   * `# CONFIG_USB_EHCI_HCD is not set`、XHCI 为 `=y`），挂 usb-ehci 时 PCI 上控制器
+   * 枚举正常却没有驱动可绑，底下的 usb-tablet / usb-kbd 永不现身，症状是图形窗口里
+   * 键鼠一起哑掉。其余四架构的 ISO 里 EHCI 与 XHCI 都是 `=m`（aarch64/arm/x86_64/
+   * loongarch64 的客户机正常），故不动它们。这是发行版构建配置的选择，与上游 RISC-V
+   * defconfig 无关（那边 EHCI/OHCI/XHCI 都是 =y），别据此以为 RISC-V 平台天生缺 EHCI。 */
+  if (!isRaspi) {
+    args.push('-device', p.machine.arch === 'riscv64' ? 'qemu-xhci,id=usb' : 'usb-ehci,id=usb');
+  }
+  /* 输入设备：各板卡统一 usb-tablet（绝对坐标）。不用 virtio-tablet-pci——该设备在
+   * 本构建下事件根本到不了客户机（点击与移动都无反应），usb HID 走 URB、没有
+   * virtqueue，绕开了那条路径。
+   * usb-tablet 默认 usb_version=2（desc_tablet2 带 full+high），speed 掩码含 HIGH，
+   * 上面两种控制器都能收：EHCI 只注册 USB_SPEED_MASK_HIGH（hcd-ehci.c），xhci 的
+   * USB2 根端口同时收 full/high（hw/usb/hcd-xhci.c）。
+   * raspi 的 DWC2 是机器上唯一的 usb-bus，不带 bus= 由 qdev 自动选。
    * 注：pc/q35 的 i8042 另外自带 PS/2 鼠标与键盘，无需（也无法）用 -device 添加。 */
-  args.push('-device', 'virtio-tablet-pci');
+  args.push('-device', isRaspi ? 'usb-tablet' : 'usb-tablet,bus=usb.0');
   if (isRaspi) {
     /* 树莓派：qemu 10.2 实际机器名 raspi2b/raspi3b（旧代码 'raspi2' 会报 unsupported machine）。
      * 树莓派 SoC 自带引导、不依赖 edk2/BIOS；无 PCI，故不挂 virtio-gpu/net；磁盘经 SD 卡控制器。 */
@@ -493,18 +517,8 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
      * 本地 A/B 各两次复核：不带 acpi=off 两次都起不来，带则两次都到 login。 */
     args.push('-machine', p.machine.arch === 'riscv64' ? 'virt,acpi=off' : board);
     args.push('-device', 'virtio-gpu-pci');
-    /* virt 机器无 i8042 PS/2 控制器且默认不带 USB 控制器（pc/q35 才有 PS/2），
-     * 所以键盘只能走 USB：须显式挂主机控制器再挂 -device usb-kbd，否则裸挂
-     * usb-kbd 会因找不到 usb-bus 而 qemu abort。
-     * 控制器要挑**客户机内核认得的那种**，因此 riscv64 用 qemu-xhci、只给它：
-     * Alpine 的 riscv64 内核只编了 XHCI、没有 EHCI（alpine-standard 3.23 的
-     * /boot/config-lts 里 `# CONFIG_USB_EHCI_HCD is not set`、XHCI 为 `=y`），
-     * 挂 usb-ehci 时 PCI 上控制器枚举正常却没有驱动可绑，底下的 usb-kbd 永不现身，
-     * 症状是图形窗口里键盘毫无反应。其余四架构的 ISO 里 EHCI 与 XHCI 都是 `=m`
-     * （aarch64/arm/x86_64/loongarch64 的客户机正常），故不动它们。
-     * 注：这是发行版构建配置的选择，与上游 RISC-V defconfig 无关（那边 EHCI/OHCI/
-     * XHCI 都是 =y），别据此以为 RISC-V 平台天生缺 EHCI。 */
-    args.push('-device', p.machine.arch === 'riscv64' ? 'qemu-xhci,id=usb' : 'usb-ehci,id=usb');
+    /* virt 机器无 i8042 PS/2 控制器，键盘只能走 USB：控制器已在上面的公共段挂好
+     * （顺序在前），这里只补键盘设备。 */
     args.push('-device', 'usb-kbd,bus=usb.0');
     /* aarch64 的 virt 机器必须提供 UEFI 固件才能引导客户机：edk2-aarch64-code.fd
      * 由 make deps 产出、bootstrap 解到 vmDir，qemu 经 -bios(绝对路径) 载入 flash0。
@@ -645,7 +659,8 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
   }
   if (!isRaspi) {
     /* 多 ISO：第一张保持 -cdrom（linux 单盘行为不变）；附加盘按板卡挂 CD 设备
-     * （pc/q35 用 ide-cd；virt 挂到已有 usb-ehci 的 usb-storage）。 */
+     * （pc/q35 用 ide-cd；virt 挂到公共段那个 USB 控制器上的 usb-storage，两种
+     * 控制器下这条路径都通）。 */
     if (isos.length > 0) {
       args.push('-cdrom', isos[0]);
       for (let i = 1; i < isos.length; i++) {
