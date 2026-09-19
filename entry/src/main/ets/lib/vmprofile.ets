@@ -357,9 +357,15 @@ function parseForwards(text: string): string[] {
   return out;
 }
 
-/* 组装 user 模式 netdev：自动挂 hostfwd（forward 条目由 parseForwards 产出） */
+/* 组装 user 模式 netdev：自动挂 hostfwd（forward 条目由 parseForwards 产出）。
+ * ipv6=off：slirp 默认发 RA，客户机因此有 v6 默认路由，其 DNS 又原样透传 AAAA，
+ * 双栈程序按 RFC6724 把 v6 排在 v4 前——宿主 v6 出网不通时（移动设备上常见），
+ * 连接全卡在 v6 SYN 直到超时、v4 永远轮不到。此时 ping 仍「通」（ICMP echo 由
+ * slirp 代答），别据此以为网络没问题。
+ * 关掉后无 v6 默认路由，v6 立即不可达并回落 v4；代价是放弃 v6 出网，而 slirp
+ * 的 v6 本就以宿主 v6 出口为前提。 */
 function userNetdev(portForwards: string): string {
-  let netdev = 'user,id=n0';
+  let netdev = 'user,id=n0,ipv6=off';
   for (const fwd of parseForwards(portForwards)) {
     netdev += ',' + fwd;
   }
