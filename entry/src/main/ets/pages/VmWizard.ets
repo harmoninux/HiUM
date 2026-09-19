@@ -7,7 +7,7 @@ import { pathExists, isoReadable, copyFileWithProgress, fileSizeOf, readAsciiAt 
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
 import {
-  VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType, VmDisk,
+  VmProfile, VmStore, VmArch, VmBoard, VmFirmware, VgaType, VmDisk, DiskIface,
   newProfileId, fitBoard, fitVga, buildArgs, sharedDir, SCHEMA_VERSION, builtinIsoFor,
   forwardErrors,
 } from '../lib/vmprofile';
@@ -53,6 +53,7 @@ export struct VmWizard {
   @State tbSizeText: string = '1024';
   @State diskGB: number = 8;
   @State diskAlloc: string = 'dynamic';
+  @State diskIface: DiskIface = 'virtio'; /* 系统盘接口；数据盘由存储弹窗继承它 */
   /* 系统盘来源：new=新建空白盘（大小+分配方式）；import=导入现有镜像，创建时复制进 vms/ */
   @State diskSource: string = 'new';
   @State importDiskSrc: string = '';    /* 已选镜像的真实路径（创建时复制，profile 不存它） */
@@ -94,6 +95,7 @@ export struct VmWizard {
     this.tbSizeText = '1024';
     this.diskGB = 8;
     this.diskAlloc = 'dynamic';
+    this.diskIface = 'virtio';
     this.diskSource = 'new';
     this.importDiskSrc = '';
     this.importDiskMeta = '';
@@ -359,7 +361,7 @@ export struct VmWizard {
   /* 向导只建系统盘（v5）：数据盘不进向导（同 UTM——创建后经「存储管理」弹窗按需添加，
    * 那里才是全部磁盘的管理入口） */
   private assembleDisks(mainPath: string): VmDisk[] {
-    return [{ path: mainPath, readonly: false }];
+    return [{ path: mainPath, readonly: false, iface: this.diskIface }];
   }
 
   private assemble(id: string): VmProfile {
@@ -403,6 +405,7 @@ export struct VmWizard {
         enabled: this.netEnabled,
         portForwards: this.portForwards.trim(),
         sharedFolder: this.sharedFolder,
+        model: 'virtio', /* 向导恒 virtio；rtl8139 走 Windows 模板或编辑页 */
       },
       temporarySession: false,
       extraArgs: '',
@@ -812,6 +815,32 @@ export struct VmWizard {
             .layoutWeight(1).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         Text('创建时复制进虚拟机目录作为系统盘；之后与源文件无关').fontSize(tSub).fontColor(cWeak)
+      }
+
+      /* 磁盘接口（仅 x86 板卡有 IDE 南桥）：virtio 需 guest 驱动，Windows 安装程序
+       * 不认；ide 是 XP/Win7 开箱即认的兼容路径。切到无关架构时该选择不会被装配
+       * （fitDiskIface 收敛为 virtio）。 */
+      if (this.arch === 'x86_64' || this.arch === 'i386') {
+        Row({ space: sp2 }) {
+          Text('磁盘接口').fontSize(tSub).fontColor(cSub)
+          Text('virtio').fontSize(tBody)
+            .fontColor(this.diskIface === 'virtio' ? Color.White : cSub)
+            .backgroundColor(this.diskIface === 'virtio' ? cPrimary : cChip)
+            .borderRadius(rBadge)
+            .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+            .onClick(() => { this.diskIface = 'virtio' })
+          Text('ide（Windows）').fontSize(tBody)
+            .fontColor(this.diskIface === 'ide' ? Color.White : cSub)
+            .backgroundColor(this.diskIface === 'ide' ? cPrimary : cChip)
+            .borderRadius(rBadge)
+            .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+            .onClick(() => { this.diskIface = 'ide' })
+          Text(this.diskIface === 'ide' ? 'XP/Win7 开箱即认' : 'Linux 默认')
+            .fontSize(tSub).fontColor(cWeak).layoutWeight(1)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .width('100%')
+        .margin({ top: sp2 })
       }
 
       /* 直接内核引导：默认折叠的高级组；选了 kernel 即绕过固件引导（-kernel） */

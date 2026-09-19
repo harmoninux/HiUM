@@ -6,7 +6,7 @@ import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import napiModule from 'libentry.so';
-import { VmProfile, VmStore, VmArch, VmDisk, builtinIsoFor } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmArch, VmDisk, DiskIface, builtinIsoFor, ideDataDiskCapacity } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
 import { snapshotCreate } from '../lib/vmsnapshot';
 import { ensureBuiltinIso } from '../lib/isoDl';
@@ -59,6 +59,7 @@ export struct VmStorage {
   @State secondSrcMeta: string = '';
   @State secondNewGBText: string = '';
   @State secondNewReadonly: boolean = false; /* 新增加数据盘即设为只读 */
+  @State secondNewAlloc: string = 'dynamic'; /* 新盘分配方式：dynamic 稀疏 / fixed 预分配(falloc) */
   @State secondExpandIdx: number = -1;       /* 扩容模式的目标盘下标；-1=添加模式 */
 
   aboutToAppear(): void {
@@ -129,7 +130,7 @@ export struct VmStorage {
     }
     const first: VmDisk = p.media.disks.length > 0
       ? p.media.disks[0]
-      : { path: this.diskPath, readonly: false };
+      : { path: this.diskPath, readonly: false, iface: 'virtio' };
     p.media.disks = [first].concat(this.extraDisks);
     new VmStore(this.filesDir).save(p);
     this.vmListVersion++;
@@ -174,14 +175,19 @@ export struct VmStorage {
       promptAction.showToast({ message: 'VM 运行中不能增改数据盘' });
       return;
     }
-    if (this.extraDisks.length >= 8) {
-      promptAction.showToast({ message: '数据盘最多 8 张' });
+    /* 数据盘上限按主盘接口收紧：ide 槽位有限（-cdrom 再占一槽），pc 超出会被
+     * qemu 静默丢弃（不报错、guest 看不见），必须挡在这里；virtio 无此限制。 */
+    const mainIface: DiskIface = p.media.disks.length > 0 ? p.media.disks[0].iface : 'virtio';
+    const cap = mainIface === 'ide' ? ideDataDiskCapacity(p.machine.machine) : 8;
+    if (this.extraDisks.length >= cap) {
+      promptAction.showToast({ message: mainIface === 'ide' ? `IDE 接口槽位有限，数据盘最多 ${cap} 张` : '数据盘最多 8 张' });
       return;
     }
     const store = new VmStore(this.filesDir);
     const finish = (dst: string, msg: string): void => {
       const next = this.extraDisks.slice();
-      next.push({ path: dst, readonly: this.secondNewReadonly });
+      /* 接口继承系统盘：Windows（ide 系统盘）下 virtio 数据盘装完系统也看不到 */
+      next.push({ path: dst, readonly: this.secondNewReadonly, iface: mainIface });
       this.extraDisks = next;
       this.syncExtraDisks();
       this.secondMode = false;
@@ -189,6 +195,7 @@ export struct VmStorage {
       this.secondSrcMeta = '';
       this.secondNewGBText = '';
       this.secondNewReadonly = false;
+      this.secondNewAlloc = 'dynamic';
       this.showSnack(msg);
     };
     if (this.secondSrc.length > 0) {
@@ -208,12 +215,13 @@ export struct VmStorage {
       return;
     }
     const dst = `${store.dir}/${p.id}-d2-${this.extraDisks.length + 1}.qcow2`;
-    const ret = napi.createDisk(dst, gbNum * 1024, 'dynamic');
+    const ret = napi.createDisk(dst, gbNum * 1024, this.secondNewAlloc);
     if (ret !== 0) {
       promptAction.showToast({ message: '创建数据盘失败' });
       return;
     }
-    finish(dst, `数据盘 ${gbNum}GB 已创建`);
+    finish(dst, this.secondNewAlloc === 'fixed'
+      ? `数据盘 ${gbNum}GB 已创建（预分配）` : `数据盘 ${gbNum}GB 已创建`);
   }
 
   /* 某张数据盘的只读开关（同步 extraDisks + profile） */
@@ -222,7 +230,7 @@ export struct VmStorage {
       return;
     }
     const next = this.extraDisks.slice();
-    next[idx] = { path: next[idx].path, readonly: v };
+    next[idx] = { path: next[idx].path, readonly: v, iface: next[idx].iface };
     this.extraDisks = next;
     this.syncExtraDisks();
   }
@@ -369,7 +377,9 @@ export struct VmStorage {
   }
 
   /* 重建系统盘：删除现有镜像并在同路径创建全新的空盘。这是唯一允许的破坏性磁盘操作
-   * （「移除」被禁用），仅离线可操作；重建后旧数据/快照全部丢失，用 AlertDialog 强确认。 */
+   * （「移除」被禁用），仅离线可操作；重建后旧数据/快照全部丢失，用 AlertDialog 强确认。
+   * 分配方式在确认弹窗里一并选择（dynamic=稀疏省空间 / fixed=预分配 falloc，
+   * 写入更快且免中途宿主盘满）。 */
   private confirmRebuild(): void {
     const p = this.profile;
     if (!p) {
@@ -383,51 +393,54 @@ export struct VmStorage {
     const mb = Math.round((this.diskVirtualGB > 0 ? this.diskVirtualGB : 8) * 1024);
     AlertDialog.show({
       title: '重建系统盘',
-      message: `将删除现有系统盘镜像并在同一位置创建全新的空盘（约 ${Math.ceil(mb / 1024)} GB）。\n当前数据与快照将全部丢失，且不可恢复。确认？`,
-      primaryButton: { value: '取消', action: () => {} },
-      secondaryButton: {
-        value: '重建',
-        fontColor: cDanger,
-        action: () => {
-          const cur = this.profile;
-          if (!cur) {
-            return;
-          }
-          const store = new VmStore(this.filesDir);
-          /* 重建统一落到应用管理的标准 qcow2 路径，避免在导入的 raw 路径下建出
-           * qcow2 而扩展名/格式不符；旧的导入镜像属用户资产，不属于本应用 vms 目录则不删 */
-          const path = `${store.dir}/${cur.id}.qcow2`;
-          this.diskPath = path; /* 本页读取/渲染统一走 new 后的路径 */
-          /* 删旧镜像：仅在应用 vms 目录内（同 VmStore.remove 的守卫）；删失败不阻塞 */
-          const oldMain = cur.media.disks.length > 0 ? cur.media.disks[0].path : '';
-          try {
-            if (oldMain.length > 0 && oldMain.startsWith(store.dir) && fs.accessSync(oldMain)) {
-              fs.unlinkSync(oldMain);
-            }
-          } catch {
-            /* 删除失败不阻塞，仍重建 */
-          }
-          const ret = napi.createDisk(path, mb, 'dynamic');
-          if (ret !== 0) {
-            promptAction.showToast({ message: '重建系统盘失败' });
-            return;
-          }
-          /* 引用与其他配置一致（数据盘不动）；bump 版本让详情页/列表重读 */
-          const first: VmDisk = cur.media.disks.length > 0
-            ? cur.media.disks[0]
-            : { path: '', readonly: false };
-          if (first.path !== path) {
-            const newFirst: VmDisk = { path: path, readonly: first.readonly };
-            cur.media.disks = [newFirst].concat(cur.media.disks.slice(1));
-            new VmStore(this.filesDir).save(cur);
-          }
-          this.vmListVersion++;
-          this.diskVirtualGB = mb / GB;
-          this.refreshDisk();
-          this.showSnack('已重建系统盘');
-        },
-      },
+      message: `将删除现有系统盘镜像并在同一位置创建全新的空盘（约 ${Math.ceil(mb / 1024)} GB）。\n当前数据与快照将全部丢失，且不可恢复。\n预分配：创建即占满同额空间，写入更快；动态分配：稀疏按需占用。`,
+      buttons: [
+        { value: '取消', action: () => {} },
+        { value: '动态分配', fontColor: cDanger, action: () => this.doRebuild('dynamic') },
+        { value: '预分配', fontColor: cDanger, action: () => this.doRebuild('fixed') },
+      ],
     });
+  }
+
+  /* 确认后的重建执行：删旧盘 → 按所选分配方式建新盘 → 落档 */
+  private doRebuild(alloc: string): void {
+    const cur = this.profile;
+    if (!cur) {
+      return;
+    }
+    const mb = Math.round((this.diskVirtualGB > 0 ? this.diskVirtualGB : 8) * 1024);
+    const store = new VmStore(this.filesDir);
+    /* 重建统一落到应用管理的标准 qcow2 路径，避免在导入的 raw 路径下建出
+     * qcow2 而扩展名/格式不符；旧的导入镜像属用户资产，不属于本应用 vms 目录则不删 */
+    const path = `${store.dir}/${cur.id}.qcow2`;
+    this.diskPath = path; /* 本页读取/渲染统一走 new 后的路径 */
+    /* 删旧镜像：仅在应用 vms 目录内（同 VmStore.remove 的守卫）；删失败不阻塞 */
+    const oldMain = cur.media.disks.length > 0 ? cur.media.disks[0].path : '';
+    try {
+      if (oldMain.length > 0 && oldMain.startsWith(store.dir) && fs.accessSync(oldMain)) {
+        fs.unlinkSync(oldMain);
+      }
+    } catch {
+      /* 删除失败不阻塞，仍重建 */
+    }
+    const ret = napi.createDisk(path, mb, alloc);
+    if (ret !== 0) {
+      promptAction.showToast({ message: '重建系统盘失败' });
+      return;
+    }
+    /* 引用与其他配置一致（数据盘不动）；bump 版本让详情页/列表重读 */
+    const first: VmDisk = cur.media.disks.length > 0
+      ? cur.media.disks[0]
+      : { path: '', readonly: false, iface: 'virtio' };
+    if (first.path !== path) {
+      const newFirst: VmDisk = { path: path, readonly: first.readonly, iface: first.iface, cache: first.cache };
+      cur.media.disks = [newFirst].concat(cur.media.disks.slice(1));
+      new VmStore(this.filesDir).save(cur);
+    }
+    this.vmListVersion++;
+    this.diskVirtualGB = mb / GB;
+    this.refreshDisk();
+    this.showSnack(alloc === 'fixed' ? '已重建系统盘（预分配）' : '已重建系统盘');
   }
 
   /* 清空全部光盘引用（只改 profile，不删 ISO 文件；不校验路径，配置页没做过校验） */
@@ -698,6 +711,23 @@ export struct VmStorage {
             Text('新盘只读').fontSize(tSub).layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.secondNewReadonly })
               .onChange((v: boolean) => this.secondNewReadonly = v)
+          }.width('100%')
+          Row({ space: sp2 }) {
+            Text('动态分配').fontSize(tBody)
+              .fontColor(this.secondNewAlloc === 'dynamic' ? Color.White : cSub)
+              .backgroundColor(this.secondNewAlloc === 'dynamic' ? cPrimary : cChip)
+              .borderRadius(rBadge)
+              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              .onClick(() => { this.secondNewAlloc = 'dynamic' })
+            Text('预分配').fontSize(tBody)
+              .fontColor(this.secondNewAlloc === 'fixed' ? Color.White : cSub)
+              .backgroundColor(this.secondNewAlloc === 'fixed' ? cPrimary : cChip)
+              .borderRadius(rBadge)
+              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+              .onClick(() => { this.secondNewAlloc = 'fixed' })
+            Text(this.secondNewAlloc === 'fixed' ? '创建即占满，写入更快' : '稀疏，用到多少占多少')
+              .fontSize(tSub).fontColor(cWeak).layoutWeight(1)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }.width('100%')
         }
       }

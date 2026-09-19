@@ -44,7 +44,7 @@ guest 系统，并把 guest 屏幕**直接渲染**到 ArkUI（XComponent，不�
 | guest 自动时间同步 | ⚠️ 弱 | 无宿主导入通道，靠 guest 自 NTP，后置 |
 | 音频 | ✅ | OHOS 音频后端（`-audiodev driver=ohos`，见 libqemu 补丁）；pc/q35=AC97、virt=virtio-sound |
 | virtio-gpu 3D（virgl） | ⚠️ 视 guest | 依赖 guest 侧 virgl 驱动，后置 stretch |
-| Windows 客机完整体验 | ⚠️ 受限 | 9p 需 WinFsp 驱动；先只保证 Linux/Alpine/Android-x86/DOS，后置 |
+| Windows 客机（XP/7）安装 | ✅ 受限 | 模板：ide 磁盘（安装程序无 virtio 驱动）+ rtl8139 网卡（in-box）+ RTC 本地时区；9p/剪贴板等仍需 Win 驱动，后置 |
 
 ### 1.2 后置清单（需要 guest agent / 驱动，暂不做）
 
@@ -144,7 +144,7 @@ B（时光机）与 F（临时会话）共用同一份快照引擎，不造两�
 按 VM 属性（`SessionPolicy = persist | ephemeral`）选择关闭动作。网络
 （hostfwd/9p）两种模式下都可用。
 
-## 6. 数据模型（schema v6）
+## 6. 数据模型（schema v7）
 
 配置分层，UI 只面对领域对象，`buildArgs` 是纯函数归档：
 
@@ -159,12 +159,19 @@ B（时光机）与 F（临时会话）共用同一份快照引擎，不造两�
 media.kernelPath/initrdPath/kernelAppend；v4 新增 machine.vga 扩展（cirrus/
 vmware）、machine.serialInteractive（串口 socket 交互）、runtime.rng/balloon
 （virtio 增强设备）；**v5 磁盘数组化：`media.disks: VmDisk[]`（第 0 张 =
-系统盘，其余为数据盘，每张带 readonly；最多 8 张数据盘，型号/接口按
-板卡固定 virtio（raspi 单 SD 槽））——快照与临时会话只作用于系统盘，
+系统盘，其余为数据盘，每张带 readonly）——快照与临时会话只作用于系统盘，
 数据盘不参与回滚。**v6：machine.cpuFlags（CPU 关联增强）、
 machine.rtcLocal（RTC 本地时区）、runtime.audio（声音，默认开）、
 runtime.gdbPort（GDB 调试后端，0=关，仅编辑页可配；同向导「创建后
-编辑」语义）。app 未发布，新字段统一并入归一化回填，无存量迁移）。
+编辑」语义）。**v7：VmDisk.iface（磁盘接口 virtio/ide——Windows 安装程序
+无 virtio 块驱动，装 Windows 须 ide；ide 槽位有限，`ideDataDiskCapacity`
+按板卡给出数据盘上限，pc 超出槽位的盘会被 qemu 静默丢弃；ide 盘显式分配
+-drive index 且跳过 2，`-cdrom` 固定占 index 2）、VmDisk.cache
+（'unsafe' = 忽略 guest flush，老系统安装期提速，崩溃时 guest 盘有损坏
+风险）、VmNet.model（网卡型号
+virtio/rtl8139——rtl8139 是 XP/Win7 唯一双 in-box 驱动的网卡，须
+`romfile=` 置空启动，缺省 romfile 对应的 efi-rtl8139.rom 不随包会拒启）。
+app 未发布，新字段统一并入归一化回填，无存量迁移）。
 持久化到 `filesDir/vms/<id>.json`。
 
 输入设备不再可配：一律 `-device virtio-tablet-pci`（绝对注入，触摸精确）。

@@ -60,7 +60,7 @@ make app-release  # 发布上架包 build/outputs/release/qemuohos-release-signe
   `pages/VmEdit.ets`（配置表单）、`pages/VmManage.ets`（详情）、
   `pages/VmStorage.ets`（存储/快照弹窗）、`pages/VmConsole.ets`（独立窗口内的
   XComponent 画面 + 工具条；挂窗在 surface 创建后延迟 500ms，见 DESIGN.md 踩坑记录）、
-  `lib/vmprofile.ets`（VmProfile schema v3 模型/VmStore 持久化/buildArgs）、
+  `lib/vmprofile.ets`（VmProfile schema 模型/VmStore 持久化/buildArgs）、
   `lib/isoPick.ets`（picker 文件选择，URI→真实路径）、`lib/fsutil.ets`（路径守卫 +
   复制；writeSync 切勿传 offset:0，详见 DESIGN.md 踩坑记录）、
   `lib/keymap.ets`（HarmonyOS KeyCode → QKeyCode 生成表）。

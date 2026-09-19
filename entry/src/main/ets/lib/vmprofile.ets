@@ -6,7 +6,9 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
-export const SCHEMA_VERSION = 6;
+/* v7：磁盘接口（iface，Windows 安装程序无 virtio 驱动、须走 ide）+ 网卡型号
+ * （model，Windows 模板用 rtl8139——XP/Win7 唯一双 in-box 的网卡）。 */
+export const SCHEMA_VERSION = 7;
 
 const DOMAIN = 0x0210;
 const TAG = 'QemuProf';
@@ -15,6 +17,9 @@ export type VmArch = 'x86_64' | 'i386' | 'aarch64' | 'arm' | 'loongarch64' | 'ri
 export type VgaType = 'std' | 'virtio' | 'cirrus' | 'vmware';
 export type VmBoard = 'pc' | 'q35' | 'virt' | 'raspi2' | 'raspi3';
 export type VmFirmware = 'seabios' | 'ovmf';
+export type DiskIface = 'virtio' | 'ide';
+export type DiskCache = 'default' | 'unsafe';
+export type NetModel = 'virtio' | 'rtl8139';
 
 /* 存档里的 arch 取值校验：读盘（migrateV1 / normalizeV2）只认这几个值，其余回落
  * x86_64。**必须与 VmArch 同步增长**——两处 normalize 各写一份枚举的话，新增架构
@@ -59,6 +64,31 @@ export function fitVga(board: VmBoard, vga: string): VgaType {
   return allowed.indexOf(vga) >= 0 ? vga as VgaType : 'std';
 }
 
+/* 磁盘接口收紧：ide 仅 pc/q35（南桥 IDE/AHCI 承载）。virt 板上 if=ide 会**静默
+ * 不挂**（机器定义无 ide_drive_get，guest 看不到盘且零报错），比 virtio 更糟，
+ * 故一律回落 virtio——这里只为手改 JSON 的场景兜底，UI 建档后板卡不可改。 */
+export function fitDiskIface(board: VmBoard, iface: string): DiskIface {
+  if ((board === 'pc' || board === 'q35') && iface === 'ide') {
+    return 'ide';
+  }
+  return 'virtio';
+}
+
+/* 网卡型号收紧：rtl8139 仅 x86 板卡合法（有 PCI 南桥且 guest 端有意义），其余回落 virtio */
+export function fitNetModel(board: VmBoard, model: string): NetModel {
+  if ((board === 'pc' || board === 'q35') && model === 'rtl8139') {
+    return 'rtl8139';
+  }
+  return 'virtio';
+}
+
+/* IDE 槽位预算：pc(i440fx) 4 槽、q35(ICH9 AHCI) 6 槽，-cdrom 固定占 1 槽（index 2）、
+ * 系统盘占 1 槽，剩余给数据盘。存储管理按此收口——pc 超出 4 槽的盘被 qemu **静默
+ * 丢弃**（不报错、guest 看不见），必须挡在 UI 层。 */
+export function ideDataDiskCapacity(board: VmBoard): number {
+  return board === 'q35' ? 4 : 2;
+}
+
 /* 主盘路径（disks[0]）；无盘返回 ''。快照/临时会话/启动盘只作用于主盘。 */
 export function mainDiskPath(p: VmProfile): string {
   return p.media.disks.length > 0 ? p.media.disks[0].path : '';
@@ -96,10 +126,17 @@ export interface VmRuntime {
   gdbPort: number;  /* v6：GDB 调试后端端口，0=关闭；仅编辑页可配（向导不出现） */
 }
 
-/* 一张磁盘：path 为 vms/ 内资产路径（新建/导入时复制）或外部引用；readonly 挂 -drive readonly=on */
+/* 一张磁盘：path 为 vms/ 内资产路径（新建/导入时复制）或外部引用；readonly 挂 -drive readonly=on。
+ * iface = qemu -drive 的 if=：virtio 性能好但需 guest 驱动（Windows 安装程序不认），
+ * ide 由板卡南桥模拟、XP/Win7 开箱即认；ide 槽位有限，预算见 ideDataDiskCapacity。
+ * cache='unsafe' = -drive cache=unsafe：忽略 guest 的 flush 请求。老系统（XP/2K）的
+ * NTFS flush 密集，每次 flush 都是一轮 VM exit + 宿主 fsync，TCG 下极贵——安装期
+ * 打开收益明显；代价是宿主/应用崩溃时 guest 盘可能损坏，装完建议关。 */
 export interface VmDisk {
   path: string;
   readonly: boolean;
+  iface: DiskIface;
+  cache?: DiskCache; /* undefined = default（写缓存策略跟随 qemu 默认） */
 }
 
 /* 介质层：全部磁盘数组化（v5）；disks[0] = 系统盘（启动/快照/临时会话对象），
@@ -120,6 +157,9 @@ export interface VmNet {
   enabled: boolean;
   portForwards: string; /* "8080:80,2222:22"，空串 = 不转发 */
   sharedFolder: boolean; /* 9p 共享宿主目录 filesDir/shared → guest /shared（默认关） */
+  /* 网卡型号：virtio（默认，性能最好，需 guest 驱动）/ rtl8139（XP/Win7 in-box 驱动）。
+   * rtl8139 仅 x86 板卡合法（fitNetModel 收敛），启动须 romfile= 置空（见 buildArgs）。 */
+  model: NetModel;
 }
 
 export interface VmProfile {
@@ -152,7 +192,7 @@ export function blankProfile(id: string): VmProfile {
       disks: [],
       cdromPaths: [], bootFromCdrom: false, kernelPath: '', initrdPath: '', kernelAppend: '',
     },
-    net: { enabled: true, portForwards: '', sharedFolder: false },
+    net: { enabled: true, portForwards: '', sharedFolder: false, model: 'virtio' },
     temporarySession: false,
     extraArgs: '',
   };
@@ -212,7 +252,14 @@ function jDiskArr(o: Record<string, Object>, k: string): VmDisk[] {
     const o2 = item as Record<string, Object>;
     const path = jStr(o2, 'path');
     if (path.length > 0) {
-      out.push({ path: path, readonly: jBool(o2, 'readonly', false) });
+      /* iface 缺省/非法回填 virtio：v6 及更早存档没有该键 */
+      const iface = jStr(o2, 'iface');
+      const cache = jStr(o2, 'cache');
+      out.push({
+        path: path, readonly: jBool(o2, 'readonly', false),
+        iface: iface === 'ide' ? 'ide' : 'virtio',
+        cache: cache === 'unsafe' ? 'unsafe' : undefined,
+      });
     }
   }
   return out;
@@ -257,7 +304,7 @@ function migrateV1(o: Record<string, Object>): VmProfile {
   p.runtime.tbSize = jNum(o, 'tbSize', 1024);
   const legDisk = jStr(o, 'diskPath');
   if (legDisk.length > 0) {
-    p.media.disks = [{ path: legDisk, readonly: false }];
+    p.media.disks = [{ path: legDisk, readonly: false, iface: 'virtio' }];
   }
   p.media.cdromPaths = jStrArr(o, 'cdromPaths');
   if (p.media.cdromPaths.length === 0) {
@@ -328,6 +375,8 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
     p.net.enabled = jBool(n, 'enabled', p.net.enabled);
     p.net.portForwards = jStr(n, 'portForwards');
     p.net.sharedFolder = jBool(n, 'sharedFolder', p.net.sharedFolder);
+    /* v7：网卡型号，旧存档缺省回填 virtio */
+    p.net.model = fitNetModel(p.machine.machine, jStr(n, 'model'));
   }
   p.temporarySession = jBool(o, 'temporarySession', false);
   /* 未知键（如旧存档残留的 guestOS/security）一律忽略：jStr/jObj 只取已知字段，
@@ -623,6 +672,7 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
    * raspi 的 SD 卡控制器只挂一张（PC/arm 板卡经 virtio 可挂多张）。
    * 快照与临时会话只作用于系统盘，数据盘不参与回滚。 */
   let diskIdx = 0;
+  let ideIdx = 0;
   for (const d of p.media.disks) {
     if (d.path.length === 0) {
       continue;
@@ -630,9 +680,27 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     if (isRaspi && diskIdx > 0) {
       continue;
     }
-    let ds = `file=${d.path},if=${isRaspi ? 'sd' : 'virtio'},format=${driveFmt(d.path)}`;
+    /* ide 盘显式分配 index 且**无条件跳过 2**：-cdrom 固定按 ide index=2 挂
+     * （vl.c 的 drive_add(IF_DEFAULT,2,…)），盘又先于 -cdrom 解析，省略 index 时
+     * qemu 自动回卷分配，第 3 块盘就会占住 2，与 -cdrom 冲突直接拒启。显式跳过
+     * 后 -cdrom 永远独占 2，编辑页后续补挂/移除 ISO 都不动盘的布局。
+     * fitDiskIface 已把非 x86 板卡收敛为 virtio，此处 ide 必然落在 pc/q35 上。 */
+    const iface = fitDiskIface(board, d.iface);
+    let ds: string;
+    if (iface === 'ide') {
+      if (ideIdx === 2) {
+        ideIdx = 3;
+      }
+      ds = `file=${d.path},if=ide,index=${ideIdx},format=${driveFmt(d.path)}`;
+      ideIdx++;
+    } else {
+      ds = `file=${d.path},if=${isRaspi ? 'sd' : 'virtio'},format=${driveFmt(d.path)}`;
+    }
     if (d.readonly) {
       ds += ',readonly=on';
+    }
+    if (d.cache === 'unsafe') {
+      ds += ',cache=unsafe';
     }
     args.push('-drive', ds);
     diskIdx++;
@@ -670,7 +738,12 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     /* 树莓派无 PCI，virtio-net 不可用；网络在 qemu 树莓派模拟下受限（实验性） */
     args.push('-nic', 'none');
   } else if (p.net.enabled) {
-    args.push('-netdev', userNetdev(p.net.portForwards), '-device', 'virtio-net-pci,netdev=n0');
+    args.push('-netdev', userNetdev(p.net.portForwards));
+    /* rtl8139：XP/Win7 都有 in-box 驱动的网卡（virtio 无）。其默认 romfile
+     * (efi-rtl8139.rom) 不在本构建的随包固件清单里，qemu 找不到即 realize 失败
+     * 拒启——romfile= 显式置空只放弃 PXE 网络引导，guest 驱动不受影响。 */
+    args.push('-device',
+      p.net.model === 'rtl8139' ? 'rtl8139,netdev=n0,romfile=' : 'virtio-net-pci,netdev=n0');
   } else {
     args.push('-nic', 'none');
   }

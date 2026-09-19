@@ -3,11 +3,11 @@
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
-import { VmProfile, VmStore, VmArch, VgaType, VmDisk, SCHEMA_VERSION, fitBoard, fitVga, builtinIsoFor, forwardErrors, mainDiskPath } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmArch, VgaType, VmDisk, DiskIface, NetModel, SCHEMA_VERSION, fitBoard, fitVga, builtinIsoFor, forwardErrors, mainDiskPath } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { isoReadable } from '../lib/fsutil';
 import { pickIsoPath } from '../lib/isoPick';
-import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, cText, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp5, sp8, spCard } from '../lib/uiTokens';
+import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, cText, cChip, tPage, tLabel, tBody, tSub, tMono, rBtn, rBadge, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp5, sp8, spCard } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -47,6 +47,9 @@ export struct VmEdit {
   @State rng: boolean = false;
   @State balloon: boolean = false;
   @State diskReadonly: boolean = false;
+  @State diskIface: DiskIface = 'virtio'; /* 系统盘接口；数据盘继承它（存储弹窗创建时已定） */
+  @State diskUnsafeCache: boolean = false; /* 系统盘 cache=unsafe（安装期提速，见 VmDisk 注释） */
+  @State netModel: NetModel = 'virtio';
   @State serialInteractive: boolean = true;
   @State extraDisks: VmDisk[] = []; /* 数据盘（disks[1..]，第 0 张为系统盘走 diskPath） */
   /* v6：声音 / GDB 调试后端 / CPU 关联增强（flags+RTC 本地时区） */
@@ -86,6 +89,9 @@ export struct VmEdit {
     this.rng = p.runtime.rng;
     this.balloon = p.runtime.balloon;
     this.diskReadonly = p.media.disks.length > 0 ? p.media.disks[0].readonly : false;
+    this.diskIface = p.media.disks.length > 0 ? p.media.disks[0].iface : 'virtio';
+    this.diskUnsafeCache = p.media.disks.length > 0 && p.media.disks[0].cache === 'unsafe';
+    this.netModel = p.net.model;
     this.serialInteractive = p.machine.serialInteractive;
     this.extraDisks = p.media.disks.slice(1);
     /* v6 */
@@ -236,15 +242,19 @@ export struct VmEdit {
     return '';
   }
 
-  /* 保存时的磁盘组装（v5）：第 0 张=系统盘（diskPath），数据盘=extraDisks */
+  /* 保存时的磁盘组装（v5）：第 0 张=系统盘（diskPath），数据盘=extraDisks。
+   * 数据盘接口/缓存策略透传原值（继承自创建时的系统盘，本页不改） */
   private assembleDisks(): VmDisk[] {
     const out: VmDisk[] = [];
     if (this.diskPath.length > 0) {
-      out.push({ path: this.diskPath, readonly: this.diskReadonly });
+      out.push({
+        path: this.diskPath, readonly: this.diskReadonly, iface: this.diskIface,
+        cache: this.diskUnsafeCache ? 'unsafe' : undefined,
+      });
     }
     for (const d of this.extraDisks) {
       if (d.path.length > 0) {
-        out.push({ path: d.path, readonly: d.readonly });
+        out.push({ path: d.path, readonly: d.readonly, iface: d.iface, cache: d.cache });
       }
     }
     return out;
@@ -299,6 +309,7 @@ export struct VmEdit {
         enabled: this.netEnabled,
         portForwards: this.portForwards.trim(),
         sharedFolder: this.sharedFolder,
+        model: this.netModel,
       },
       temporarySession: this.profile.temporarySession,
       extraArgs: this.extraArgs.trim(),
@@ -456,6 +467,41 @@ export struct VmEdit {
           }.padding({ top: sp1, bottom: sp1 })
           Text('开启后防系统盘误写；扩容、快照等管理操作不受影响').fontSize(tSub).fontColor(cWeak).width('100%')
 
+          /* 磁盘接口（仅 x86 板卡有 IDE 南桥）：切换只影响 -drive if= 的挂载方式，
+           * 盘内容不动——Windows VM 若误建为 virtio，切到 ide 即可被安装程序识别。 */
+          if (this.isX86Board()) {
+            Row({ space: sp2 }) {
+              Text('磁盘接口').fontSize(tLabel).layoutWeight(1)
+              Text('virtio').fontSize(tBody)
+                .fontColor(this.diskIface === 'virtio' ? Color.White : cSub)
+                .backgroundColor(this.diskIface === 'virtio' ? cPrimary : cChip)
+                .borderRadius(rBadge)
+                .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+                .onClick(() => { this.diskIface = 'virtio' })
+              Text('ide（Windows）').fontSize(tBody)
+                .fontColor(this.diskIface === 'ide' ? Color.White : cSub)
+                .backgroundColor(this.diskIface === 'ide' ? cPrimary : cChip)
+                .borderRadius(rBadge)
+                .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+                .onClick(() => { this.diskIface = 'ide' })
+            }.width('100%').padding({ top: sp1, bottom: sp1 })
+            Text(this.diskIface === 'ide'
+              ? 'XP/Win7 开箱即认；ide 槽位有限（数据盘上限随之收紧）'
+              : 'Linux 默认；性能最好但需 guest 驱动（Windows 安装程序不认）')
+              .fontSize(tSub).fontColor(cWeak).width('100%')
+
+            /* cache=unsafe：老系统安装期提速开关（机理见 VmDisk.cache 注释） */
+            Row() {
+              Text('放松写入缓存 (unsafe)').fontSize(tLabel).layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.diskUnsafeCache })
+                .onChange((v: boolean) => this.diskUnsafeCache = v)
+            }.width('100%').padding({ top: sp1, bottom: sp1 })
+            Text(this.diskUnsafeCache
+              ? '忽略客户机刷盘请求，安装系统期间明显提速；宿主/App 崩溃时磁盘可能损坏，装完建议关闭'
+              : '默认：客户机刷盘即刻落盘（最安全）')
+              .fontSize(tSub).fontColor(cWeak).width('100%')
+          }
+
           Column({ space: sp1 }) {
             Row() {
               Text('数据盘').fontSize(tLabel).width(72)
@@ -477,11 +523,12 @@ export struct VmEdit {
                 Text(this.baseName(d.path))
                   .fontSize(tSub).fontColor(cSub).layoutWeight(1).maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(d.iface === 'ide' ? 'IDE' : 'virtio').fontSize(tSub).fontColor(cWeak)
                 Text('只读').fontSize(tSub).fontColor(cSub)
                 Toggle({ type: ToggleType.Switch, isOn: d.readonly })
                   .onChange((v: boolean) => {
                     const next = this.extraDisks.slice();
-                    next[idx] = { path: d.path, readonly: v };
+                    next[idx] = { path: d.path, readonly: v, iface: d.iface };
                     this.extraDisks = next;
                   })
               }.width('100%').padding({ top: sp1, bottom: sp1 })
@@ -569,6 +616,31 @@ export struct VmEdit {
               }.padding({ left: 0, right: 0 })
               Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
+            /* 网卡型号（仅 x86 板卡可切）：rtl8139 是 XP/Win7 唯一双 in-box 驱动的
+             * 网卡，性能弱于 virtio；Linux 用 virtio。 */
+            if (this.isX86Board()) {
+              Column({ space: 4 }) {
+                Row({ space: sp2 }) {
+                  Text('网卡型号').fontSize(tLabel).layoutWeight(1)
+                  Text('virtio').fontSize(tBody)
+                    .fontColor(this.netModel === 'virtio' ? Color.White : cSub)
+                    .backgroundColor(this.netModel === 'virtio' ? cPrimary : cChip)
+                    .borderRadius(rBadge)
+                    .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+                    .onClick(() => { this.netModel = 'virtio' })
+                  Text('rtl8139').fontSize(tBody)
+                    .fontColor(this.netModel === 'rtl8139' ? Color.White : cSub)
+                    .backgroundColor(this.netModel === 'rtl8139' ? cPrimary : cChip)
+                    .borderRadius(rBadge)
+                    .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+                    .onClick(() => { this.netModel = 'rtl8139' })
+                }.width('100%')
+                Text(this.netModel === 'rtl8139'
+                  ? 'Windows 开箱即认（XP/Win7 内置驱动）'
+                  : 'Linux 默认；Windows 需装 virtio-win 驱动')
+                  .fontSize(tSub).fontColor(cWeak).width('100%')
+              }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
+            }
           }
 
           /* —— 高级（折叠组头） —— */
