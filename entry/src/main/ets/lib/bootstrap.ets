@@ -30,6 +30,9 @@ const FIRMWARE_FILES: string[] = [
   'edk2-aarch64-code.fd', /* aarch64 客户机 UEFI 固件（virt 机器经 -bios 加载） */
   'edk2-arm-code.fd', /* arm(32位) 客户机 UEFI 固件（virt 机器经 -bios 加载） */
   'edk2-loongarch64-code.fd', /* loongarch64 客户机 UEFI 固件（virt 机器经 -bios 加载） */
+  'edk2-x86_64-code.fd', /* x86_64 客户机 UEFI 固件：pc/q35 firmware=ovmf 时走双 pflash
+                          * 之 code（只读）。i386 机器不用它——X64 构建在 32 位 CPU 跑不动，
+                          * 32 位 edk2-i386-code.fd 未随包。 */
   'edk2-riscv-code.fd', /* riscv64 客户机 UEFI 固件：走 -drive if=pflash 装进 pflash0，
                          * **不能**用 -bios（riscv 的 -bios 会把它加载到 RAM 0x80000000，
                          * 而该 fd 按 flash 首块 0x20000000 链接，整段跑飞） */
@@ -94,6 +97,9 @@ function unpackFirmware(ctx: common.UIAbilityContext): boolean {
    * 那样 edk2 会往里写 BootOrder/Boot####，内容一旦陈旧就不再自动引导光盘、直接掉进
    * UEFI Interactive Shell。模板与 qemu 隔离后，它永远是随包下发的干净镜像。 */
   ok = tryWriteRaw(resMgr, 'vm/firmware/edk2-riscv-vars.fd', vmDir + '/edk2-riscv-vars-template.fd') && ok;
+  /* x86 的 vars 模板：同 riscv 的隔离理由（edk2 会把启动项写进去，模板必须保持干净）。
+   * 名字是 edk2-i386-vars.fd——qemu 上游 pc-bios 里 x86_64 的 vars 模板就叫它。 */
+  ok = tryWriteRaw(resMgr, 'vm/firmware/edk2-i386-vars.fd', vmDir + '/edk2-i386-vars-template.fd') && ok;
   ok = tryWriteRaw(resMgr, 'vm/keymaps/en-us', vmDir + '/keymaps/en-us') && ok;
   hilog.info(DOMAIN, TAG, 'firmware unpacked to %{public}s, ok=%{public}s', vmDir, String(ok));
   return ok;

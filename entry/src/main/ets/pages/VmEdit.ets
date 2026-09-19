@@ -3,10 +3,11 @@
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
-import { VmProfile, VmStore, VmArch, VgaType, VmDisk, DiskIface, NetModel, SCHEMA_VERSION, fitBoard, fitVga, builtinIsoFor, forwardErrors, mainDiskPath } from '../lib/vmprofile';
+import { fileIo as fs } from '@kit.CoreFileKit';
+import { VmProfile, VmStore, VmArch, VgaType, VmFirmware, VmDisk, DiskIface, NetModel, SCHEMA_VERSION, fitBoard, fitVga, builtinIsoFor, forwardErrors, mainDiskPath } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { isoReadable } from '../lib/fsutil';
-import { pickIsoPath } from '../lib/isoPick';
+import { pickIsoPath, pickFilePath } from '../lib/isoPick';
 import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, cText, cChip, tPage, tLabel, tBody, tSub, tMono, rBtn, rBadge, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp5, sp8, spCard } from '../lib/uiTokens';
 
 interface DiskNapi {
@@ -50,6 +51,8 @@ export struct VmEdit {
   @State diskIface: DiskIface = 'virtio'; /* 系统盘接口；数据盘继承它（存储弹窗创建时已定） */
   @State diskUnsafeCache: boolean = false; /* 系统盘 cache=unsafe（安装期提速，见 VmDisk 注释） */
   @State netModel: NetModel = 'virtio';
+  @State firmware: VmFirmware = 'seabios';
+  @State customFirmware: string = ''; /* 用户导入的 OVMF 原件路径（.src.fd）；''=用内置 */
   @State serialInteractive: boolean = true;
   @State extraDisks: VmDisk[] = []; /* 数据盘（disks[1..]，第 0 张为系统盘走 diskPath） */
   /* v6：声音 / GDB 调试后端 / CPU 关联增强（flags+RTC 本地时区） */
@@ -86,6 +89,8 @@ export struct VmEdit {
     this.extraArgs = p.extraArgs;
     this.kernelAppend = p.media.kernelAppend;
     this.vga = p.machine.vga;
+    this.firmware = p.machine.firmware;
+    this.customFirmware = p.machine.customFirmware;
     this.rng = p.runtime.rng;
     this.balloon = p.runtime.balloon;
     this.diskReadonly = p.media.disks.length > 0 ? p.media.disks[0].readonly : false;
@@ -101,6 +106,40 @@ export struct VmEdit {
     this.cpuFlags = p.machine.cpuFlags;
     this.rtcLocal = p.machine.rtcLocal;
     this.readDiskMeta();
+  }
+
+  /* 固件切换统一入口：切到 UEFI 时把 BIOS 时代选的 cirrus/vmware 收敛成 std——
+   * 它们的 vgabios 没有 GOP，UEFI 下黑屏（buildArgs 有同样兜底，UI 同步改避免显示矛盾）。 */
+  private setFirmware(f: VmFirmware): void {
+    this.firmware = f;
+    if (f === 'ovmf' && this.vga !== 'std' && this.vga !== 'virtio') {
+      this.vga = 'std';
+    }
+  }
+
+  /* 自定义 OVMF：picker 选合并单文件（如 OVMF.fd），复制成每 VM 一份的原件副本。
+   * 原件只当模板，qemu 挂的是启动时从它重拷的工作副本（见 ensureCustomFirmware），
+   * 所以导入后用户改/删原文件都不影响已导入的这份。 */
+  private pickCustomFirmware(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    pickFilePath(ctx, ['.fd']).then((src: string) => {
+      if (src.length === 0) {
+        promptAction.showToast({ message: '未选择文件 / 路径不可读' });
+        return;
+      }
+      if (!this.profile) {
+        return;
+      }
+      const dst = this.vmDataDir + `/ovmf-custom-${this.profile.id}.src.fd`;
+      try {
+        fs.copyFileSync(src, dst);
+      } catch {
+        promptAction.showToast({ message: '固件复制失败，请重试' });
+        return;
+      }
+      this.customFirmware = dst;
+      this.setFirmware('ovmf');
+    });
   }
 
   /* 「内置 Alpine」按钮：按当前架构确保内置 iso 就绪（缺失则按需下载），完成后挂到光驱 */
@@ -242,24 +281,6 @@ export struct VmEdit {
     return '';
   }
 
-  /* 保存时的磁盘组装（v5）：第 0 张=系统盘（diskPath），数据盘=extraDisks。
-   * 数据盘接口/缓存策略透传原值（继承自创建时的系统盘，本页不改） */
-  private assembleDisks(): VmDisk[] {
-    const out: VmDisk[] = [];
-    if (this.diskPath.length > 0) {
-      out.push({
-        path: this.diskPath, readonly: this.diskReadonly, iface: this.diskIface,
-        cache: this.diskUnsafeCache ? 'unsafe' : undefined,
-      });
-    }
-    for (const d of this.extraDisks) {
-      if (d.path.length > 0) {
-        out.push({ path: d.path, readonly: d.readonly, iface: d.iface, cache: d.cache });
-      }
-    }
-    return out;
-  }
-
   private save(): void {
     if (!this.profile) {
       return;
@@ -270,18 +291,23 @@ export struct VmEdit {
       promptAction.showToast({ message: verr });
       return;
     }
-    /* 系统盘必配（由向导/编辑流程保证）：配置直接使用既有盘路径，不在保存侧再建盘 */
+    /* 保存基线从磁盘重读：本页与存储页/控制台各持内存副本（@Prop 深拷贝），谁后保存
+     * 谁整份覆盖——若从页面副本整份落盘，存储页刚导入/重建的系统盘会被本页的旧路径
+     * 回滚（vmmu8hhjps9k 事故）。磁盘段的盘路径/增删不归本页管，以磁盘最新档为准，
+     * 本页只合并系统盘三个属性与数据盘只读开关（见 mergeDisks）。load 失败才回退副本。 */
+    const base = new VmStore(this.filesDir).load(this.profile.id) ?? this.profile;
     const tbSize = Number(this.tbSizeText);
     const p: VmProfile = {
       schemaVersion: SCHEMA_VERSION,
-      id: this.profile.id,
+      id: base.id,
       name: this.name.trim().length > 0 ? this.name.trim() : '未命名',
       machine: {
         arch: this.arch,
-        vga: fitVga(fitBoard(this.arch, this.profile.machine.machine), this.vga),
-        machine: fitBoard(this.arch, this.profile.machine.machine),
-        firmware: this.profile.machine.firmware,
-        cpuModel: this.profile.machine.cpuModel,
+        vga: fitVga(fitBoard(this.arch, base.machine.machine), this.vga),
+        machine: fitBoard(this.arch, base.machine.machine),
+        firmware: this.firmware,
+        customFirmware: this.customFirmware,
+        cpuModel: base.machine.cpuModel,
         serialInteractive: this.serialInteractive,
         cpuFlags: this.cpuFlags.trim(),
         rtcLocal: this.rtcLocal,
@@ -297,12 +323,12 @@ export struct VmEdit {
         gdbPort: this.gdbOn ? Number(this.gdbPortText) : 0,
       },
       media: {
-        disks: this.assembleDisks(),
+        disks: this.mergeDisks(base),
         cdromPaths: this.cdromPaths,
         bootFromCdrom: this.bootFromCdrom,
         /* kernel/initrd 本页无更换入口，原样透传；kernelAppend 由上方输入框编辑 */
-        kernelPath: this.profile.media.kernelPath,
-        initrdPath: this.profile.media.initrdPath,
+        kernelPath: base.media.kernelPath,
+        initrdPath: base.media.initrdPath,
         kernelAppend: this.kernelAppend.trim(),
       },
       net: {
@@ -311,13 +337,36 @@ export struct VmEdit {
         sharedFolder: this.sharedFolder,
         model: this.netModel,
       },
-      temporarySession: this.profile.temporarySession,
+      temporarySession: base.temporarySession,
       extraArgs: this.extraArgs.trim(),
     };
     new VmStore(this.filesDir).save(p);
     this.vmListVersion++;
     promptAction.showToast({ message: '已保存' });
     this.navStack.pop();
+  }
+
+  /* 磁盘段合并：路径与数据盘增删归存储页（以 base 最新档为准），本页只写
+   * 系统盘的 只读/接口/缓存 三属性 + 数据盘的只读开关（按位对齐，存储页增删
+   * 过的盘以 base 为准，表单里多出的陈旧项丢弃）。 */
+  private mergeDisks(base: VmProfile): VmDisk[] {
+    const first: VmDisk = base.media.disks.length > 0
+      ? {
+        path: base.media.disks[0].path,
+        readonly: this.diskReadonly,
+        iface: this.diskIface,
+        cache: this.diskUnsafeCache ? 'unsafe' : undefined,
+      }
+      : { path: '', readonly: this.diskReadonly, iface: this.diskIface };
+    const rest = base.media.disks.slice(1).map((d: VmDisk, i: number): VmDisk => {
+      return {
+        path: d.path,
+        readonly: i < this.extraDisks.length ? this.extraDisks[i].readonly : d.readonly,
+        iface: d.iface,
+        cache: d.cache,
+      };
+    });
+    return [first].concat(rest);
   }
 
   /* 分组标题 + 分割线（与 VmWizard groupHeader / VmManage secHead 同款：灰字在左，细线延伸至右） */
@@ -427,6 +476,37 @@ export struct VmEdit {
                 .fontSize(tSub).fontColor(cSub).layoutWeight(1)
             }
           }.width('100%').padding({ top: sp1, bottom: sp1 })
+
+          /* 引导固件（x86_64 + pc/q35 可选）：BIOS=SeaBIOS；UEFI 走 OVMF pflash——
+           * 内置为随包 edk2，「导入」接用户自备合并单文件（特定系统常配特定版本固件）。
+           * i386 不显示（内置 code 是 X64 构建，32 位 OVMF 未随包）；virt/raspi 固定。 */
+          if (this.arch === 'x86_64' && this.isX86Board()) {
+            Row({ space: sp2 }) {
+              Text('引导固件').fontSize(tLabel).width(72)
+              Text('BIOS').fontSize(tSub)
+                .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+                .fontColor(this.firmware === 'seabios' ? Color.White : cText)
+                .backgroundColor(this.firmware === 'seabios' ? cPrimary : cBg)
+                .borderRadius(rBtn)
+                .onClick(() => { this.setFirmware('seabios'); })
+              Text('UEFI·内置').fontSize(tSub)
+                .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+                .fontColor(this.firmware === 'ovmf' && this.customFirmware.length === 0 ? Color.White : cText)
+                .backgroundColor(this.firmware === 'ovmf' && this.customFirmware.length === 0 ? cPrimary : cBg)
+                .borderRadius(rBtn)
+                .onClick(() => { this.setFirmware('ovmf'); this.customFirmware = ''; })
+              Text('UEFI·导入').fontSize(tSub)
+                .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+                .fontColor(this.customFirmware.length > 0 ? Color.White : cText)
+                .backgroundColor(this.customFirmware.length > 0 ? cPrimary : cBg)
+                .borderRadius(rBtn)
+                .onClick(() => { this.pickCustomFirmware(); })
+            }.width('100%').padding({ top: sp1, bottom: sp1 })
+            if (this.customFirmware.length > 0) {
+              Text(`固件：${this.baseName(this.customFirmware)} · 每次启动自动重置`)
+                .fontSize(tSub).fontColor(cWeak).width('100%')
+            }
+          }
 
           /* —— 存储 —— */
           this.groupHead('存储')

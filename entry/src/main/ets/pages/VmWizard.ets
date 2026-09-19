@@ -238,11 +238,11 @@ export struct VmWizard {
     return a === 'loongarch64' ? 'loongarch' : a;
   }
 
-  /* 引导固件由板卡自动选择（向导不暴露）：x86 用 SeaBIOS（OVMF 固件产出后
-   * q35 再自动切 UEFI）；virt 按架构固定 EDK2；树莓派 SoC 自带、无外部固件 */
+  /* 引导固件由板卡自动选择（向导不暴露）：x86 用 SeaBIOS，要 UEFI 到编辑页切
+   * （OVMF 已随包、也支持自备导入）；virt 按架构固定 EDK2；树莓派 SoC 自带 */
   private firmwareHint(): string {
     const b = fitBoard(this.arch, this.board);
-    if (b === 'pc' || b === 'q35') { return '引导固件：SeaBIOS（自动）'; }
+    if (b === 'pc' || b === 'q35') { return '引导固件：SeaBIOS（编辑页可切 UEFI）'; }
     if (b === 'virt') { return '引导固件：EDK2 UEFI（按架构固定）'; }
     return '引导固件：树莓派 SoC 自带';
   }
@@ -378,6 +378,7 @@ export struct VmWizard {
         vga: fitVga(fitBoard(this.arch, this.board), this.vga),
         machine: fitBoard(this.arch, this.board),
         firmware: this.autoFirmware(),
+        customFirmware: '', /* 向导恒内置固件（SeaBIOS/EDK2 自动）；自备导入在编辑页 */
         cpuModel: this.cpuModel.trim(),
         serialInteractive: true, /* 向导默认交互串口；改回落盘日志在编辑页 */
         cpuFlags: '',   /* v6：CPU flags 仅编辑页可配 */

@@ -7,8 +7,9 @@ import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /* v7：磁盘接口（iface，Windows 安装程序无 virtio 驱动、须走 ide）+ 网卡型号
- * （model，Windows 模板用 rtl8139——XP/Win7 唯一双 in-box 的网卡）。 */
-export const SCHEMA_VERSION = 7;
+ * （model，Windows 模板用 rtl8139——XP/Win7 唯一双 in-box 的网卡）。
+ * v8：customFirmware（''=内置固件；非空=用户导入的 OVMF 单文件路径，每 VM 一份）。 */
+export const SCHEMA_VERSION = 8;
 
 const DOMAIN = 0x0210;
 const TAG = 'QemuProf';
@@ -36,7 +37,8 @@ export interface VmMachine {
   arch: VmArch;
   vga: VgaType;
   machine: VmBoard;    /* 板卡：x86 pc/q35，arm64/arm virt/raspi2/raspi3，loongarch64/riscv64 virt */
-  firmware: VmFirmware; /* 固件：seabios(BIOS) / ovmf(UEFI，暂需 OVMF 文件) */
+  firmware: VmFirmware; /* 固件：seabios(BIOS) / ovmf(UEFI，内置随包或 customFirmware 自备) */
+  customFirmware: string; /* v8：用户导入的 OVMF 单文件（合并版）路径；''=用内置 edk2 */
   cpuModel: string;     /* '' = 自动（arm64/arm/loongarch64 给 max） */
   serialInteractive: boolean;   /* 串口走 socket 交互（默认 true）；false=落盘 file 日志 */
   cpuFlags: string;             /* v6：-cpu <模型>,<flags> 的 flags 部分，如 "+sse4a,-avx2"；''=无 */
@@ -185,7 +187,7 @@ export function blankProfile(id: string): VmProfile {
     name: '新虚拟机',
     machine: {
       arch: 'x86_64', vga: 'std', machine: 'pc', firmware: 'seabios', cpuModel: '',
-      serialInteractive: true, cpuFlags: '', rtcLocal: false,
+      serialInteractive: true, cpuFlags: '', rtcLocal: false, customFirmware: '',
     },
     runtime: { memoryMB: 1024, cpus: 2, mttcg: true, tbSize: 1024, rng: false, balloon: false, audio: true, gdbPort: 0 },
     media: {
@@ -209,10 +211,16 @@ export function migrateProfile(raw: Object): VmProfile {
   switch (v) {
     case 1:
       return migrateV1(o);
-    case 2: /* v2+：kernel 三字段、v4/v5/v6 新字段统一由 normalizeV2 回填 */
+    /* v2 起：kernel 三字段、v4/v5/v6/v7/v8 新字段统一由 normalizeV2 回填。
+     * **升 SCHEMA_VERSION 的固定纪律：必须把上一个版本号补进本 case 链**（每个
+     * 曾发布的版本号都要留一个 case）——漏掉的话该版本存档会掉进 default，被
+     * 误判为「更高版本」兜底成空白档，用户视角就是虚拟机全部消失。 */
+    case 2:
     case 3:
     case 4:
     case 5:
+    case 6:
+    case 7:
     case SCHEMA_VERSION:
       return normalizeV2(o);
     default:
@@ -336,7 +344,13 @@ function normalizeV2(o: Record<string, Object>): VmProfile {
     }
     p.machine.machine = fitBoard(p.machine.arch, jStr(m, 'machine'));
     p.machine.vga = fitVga(p.machine.machine, jStr(m, 'vga'));
-    p.machine.firmware = jStr(m, 'firmware') === 'ovmf' ? 'ovmf' : 'seabios';
+    /* ovmf 仅 x86_64+pc/q35 放行（内置 code 是 X64 构建，i386 机器跑不动；i386 要
+     * 32 位 edk2-i386-code.fd，未随包）。手改 JSON 塞 ovmf 的其他组合静默回落 seabios。 */
+    p.machine.firmware = jStr(m, 'firmware') === 'ovmf' && p.machine.arch === 'x86_64' &&
+      (p.machine.machine === 'pc' || p.machine.machine === 'q35') ? 'ovmf' : 'seabios';
+    /* v8：自定义 OVMF 单文件。路径存在性不在这里校验（存储随时可能被清理），
+     * buildArgs 只在 firmware=ovmf 时消费它。 */
+    p.machine.customFirmware = jStr(m, 'customFirmware');
     p.machine.cpuModel = jStr(m, 'cpuModel');
     /* v4：串口模式，旧存档回填默认。
      * 旧存档残留的 mouse 键不再读取（输入模式已整体移除），按未知键静默忽略。 */
@@ -491,6 +505,44 @@ export function ensureRiscvVars(p: VmProfile, vmDataDir: string): string {
   return dst;
 }
 
+/* x86（pc/q35）OVMF 变量存储 pflash 的每 VM 路径（buildArgs 用同一个式样，两边别写岔） */
+export function x86VarsPath(p: VmProfile, vmDataDir: string): string {
+  return `${vmDataDir}/edk2-x86-vars-${p.id}.fd`;
+}
+
+/* 启动前重置 x86 的变量存储，机制与 ensureRiscvVars 完全同构（论证见彼处）：
+ * edk2 同样会把 BootOrder/Boot#### 写进 vars，设备组合一变旧条目就失效，
+ * 掉进 UEFI Interactive Shell。模板名是 edk2-i386-vars——qemu 上游 pc-bios
+ * 里 x86_64 的 vars 模板就叫这个名字（变量存储格式与 CPU 位宽无关）。 */
+export function ensureX86Vars(p: VmProfile, vmDataDir: string): string {
+  const dst = x86VarsPath(p, vmDataDir);
+  try {
+    fs.copyFileSync(`${vmDataDir}/edk2-i386-vars-template.fd`, dst);
+  } catch (err) {
+    hilog.error(DOMAIN, TAG, 'reset x86 vars failed: %{public}s', JSON.stringify(err));
+  }
+  return dst;
+}
+
+/* 自定义 OVMF 的工作副本路径（qemu 实际挂这块）；导入原件固定存 *.src.fd，由
+ * 存储导入流程写入，两边别写岔。 */
+export function customFirmwarePath(p: VmProfile, vmDataDir: string): string {
+  return `${vmDataDir}/ovmf-custom-${p.id}.fd`;
+}
+
+/* 启动前重置自定义 OVMF 的工作副本：从导入原件重拷。合并单文件的 vars 区就在
+ * 这块 flash 里，防写脏的论证与 ensureX86Vars 相同。失败只记日志不抛，让启动
+ * 继续——原件缺失时 qemu 报错比这里静默跳过好查。 */
+export function ensureCustomFirmware(p: VmProfile, vmDataDir: string): string {
+  const dst = customFirmwarePath(p, vmDataDir);
+  try {
+    fs.copyFileSync(`${vmDataDir}/ovmf-custom-${p.id}.src.fd`, dst);
+  } catch (err) {
+    hilog.error(DOMAIN, TAG, 'reset custom firmware failed: %{public}s', JSON.stringify(err));
+  }
+  return dst;
+}
+
 /* 9p 共享宿主目录：启动时经 picker 取到的 Download 目录（唯一可共享目录），guest 挂载为 /shared。
  * 读到 AppStorage（EntryAbility prepareSharedFolder 写入）；未取到则回退 app 数据目录下 shared/。 */
 export function sharedDir(filesDir: string): string {
@@ -521,8 +573,8 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
   }
   /* 板卡/固件/CPU：默认 pc(x86)/virt(arm64) 与旧行为一致（qemu 默认即 pc）；
    * 新板卡 q35/raspi2 走对应 -machine。aarch64 默认给 -cpu max，virt 挂 virtio-gpu。
-   * aarch64 virt 现已接入 edk2-aarch64-code.fd（-bios）；x86 的 firmware=ovmf
-   * 仍未接 pflash（需 OVMF_CODE/VARS 固件），缺件回落 seabios。 */
+   * 固件接线：aarch64/arm/loongarch64 走 -bios，riscv64 与 x86(ovmf) 走 pflash，
+   * 见下方各架构分支。 */
   const board = fitBoard(p.machine.arch, p.machine.machine);
   const isRaspi = board === 'raspi2' || board === 'raspi3';
   /* USB 主机控制器：usb-tablet / usb-kbd 都挂在它上面，必须先于它们出现（qemu 按
@@ -641,7 +693,28 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     }
   } else {
     args.push('-machine', board);
-    args.push('-vga', fitVga(board, p.machine.vga));
+    /* x86 UEFI：firmware=ovmf 经 pflash 挂 OVMF（normalize 已收紧到 x86_64+pc/q35，
+     * 此处不必再判板卡）。这段**必须在本 x86 分支内**——曾误插进上面 virt 分支的
+     * 固件链尾部，x86 执行路径走 else，pflash 从不出现、静默回落 SeaBIOS。
+     * 不能用 -bios：x86 pc 的固件不在 -bios 的搜索语义里（SeaBIOS 靠 -L 目录查找），
+     * OVMF 按 flash 布局链接，pflash 是官方路径。两条路：
+     *  - 内置：code(edk2-x86_64-code.fd) 只读 + vars 由 ensureX86Vars 每启动重拷；
+     *  - 自定义：导入的合并单文件（自带 vars 区）单块 pflash 可写，工作副本由
+     *    ensureCustomFirmware 每启动从原件重拷。 */
+    if (p.machine.firmware === 'ovmf') {
+      if (p.machine.customFirmware.length > 0) {
+        args.push('-drive', `if=pflash,format=raw,file=${customFirmwarePath(p, vmDataDir)}`);
+      } else {
+        args.push('-drive', `if=pflash,format=raw,readonly=on,file=${vmDataDir}/edk2-x86_64-code.fd`);
+        args.push('-drive', `if=pflash,format=raw,file=${x86VarsPath(p, vmDataDir)}`);
+      }
+    }
+    /* UEFI 下 cirrus/vmware 的 vgabios 没有 GOP，OVMF 起来即无显示输出——收敛 std
+     * （stdvga 与 virtio-gpu 的 vgabios 都带 GOP，edk2 OvmfPkg 内建两者驱动）。BIOS
+     * 路径维持 fitVga 的全量放行。 */
+    args.push('-vga', p.machine.firmware === 'ovmf' ?
+      (p.machine.vga === 'std' || p.machine.vga === 'virtio' ? p.machine.vga : 'std') :
+      fitVga(board, p.machine.vga));
     /* 串口（v4）：默认 socket 交互（Console 串口视图读）+ logfile 同时落盘（见上）；
      * 关掉则维持纯落盘 file 日志 */
     if (p.machine.serialInteractive) {
@@ -653,8 +726,8 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
   }
   /* -cpu（v6 关联增强）：cpuFlags（如 "+sse4a,-avx2"）与 cpuModel 合并成
    * `-cpu <模型>,<flags>`；模型为空时用 max 承载 flags（x86 TCG 的 max 合法，
-   * 且行为与 virt 板的默认 max 一致）。两者皆空：pc/q35 交 qemu 默认，virt 给
-   * max，raspi 固定 CPU 不支持自定义——三处都不产生 -cpu。 */
+   * 且行为与 virt 板的默认 max 一致）。两者皆空：virt 给 max，i386 给
+   * qemu32,+nx（见下方分支注释），x86_64 交 qemu 默认，raspi 固定 CPU。 */
   if (!isRaspi) {
     const cpuModel = p.machine.cpuModel;
     const cpuFlags = p.machine.cpuFlags.trim();
@@ -666,6 +739,13 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
       args.push('-cpu', cpu);
     } else if (board === 'virt') {
       args.push('-cpu', 'max');
+    } else if (p.machine.arch === 'i386') {
+      /* qemu32（i386 交 qemu 默认时的模型）不报 NX，而 Win8/8.1 连 32 位版都
+       * 强制检查 PAE+NX+SSE2，缺 NX 在引导期即被拒——症状是安装程序起不来
+       * （XP/7 不查 NX，故模板装 XP/7 无此病）。TCG 支持 PAE 页表的 NX 位，
+       * CPUID 补报即真实生效；2006 年后的真实 x86 CPU 均有 NX，对 Linux
+       * guest 亦无害。x86_64 不补：qemu64 自带 NX，且是 XP/7 的实测兼容默认。 */
+      args.push('-cpu', 'qemu32,+nx');
     }
   }
   /* 全部磁盘（v5 数组化）：disks[0]=系统盘（快照/临时会话/启动对象），其余数据盘。

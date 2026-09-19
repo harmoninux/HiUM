@@ -53,7 +53,9 @@ output/.stamp: $(STAMP) Makefile
 		vgabios-cirrus.bin vgabios-vmware.bin \
 		efi-virtio.rom opensbi-riscv64-generic-fw_dynamic.bin \
 		edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd \
-		edk2-riscv-vars.fd; do cp output/$$fw ../entry/src/main/resources/rawfile/vm/firmware/ 2>/dev/null || true; done
+		edk2-riscv-vars.fd \
+		edk2-x86_64-code.fd edk2-i386-vars.fd \
+		edk2-x86_64-secure-code.fd edk2-x86_64-secure-vars.fd; do cp output/$$fw ../entry/src/main/resources/rawfile/vm/firmware/ 2>/dev/null || true; done
 	touch output/.stamp
 
 %/.stamp: %/Makefile

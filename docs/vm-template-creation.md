@@ -110,7 +110,7 @@
 | 项 | Alpine | Windows XP | Windows 7 |
 |---|---|---|---|
 | 架构 | 6 架构全开 | x86_64 / i386 | x86_64 / i386 |
-| 板卡/固件 | 按架构 `fitBoard` | pc / SeaBIOS（**恒 pc**：q35 南桥 ICH9 呈现 AHCI，XP 无 in-box 驱动 → 0x7B 蓝屏） | pc / SeaBIOS |
+| 板卡/固件 | 按架构 `fitBoard` | pc / SeaBIOS 默认（**恒 pc**：q35 南桥 ICH9 呈现 AHCI，XP 无 in-box 驱动 → 0x7B 蓝屏）；UEFI(OVMF) 可在编辑页切 | pc / SeaBIOS 默认，可切 UEFI |
 | 显卡 | std | **cirrus**（驱动 in-box、`vgabios-cirrus.bin` 随包） | std |
 | 默认内存/核数/盘 | 1024MB / 2 / 8G | 512MB / 1 / 8G | 2048MB / 2 / 32G（x64 官方要求 20G，qcow2 稀疏） |
 | 磁盘接口（v7） | virtio | **ide**（安装程序无 virtio 块驱动） | **ide** |
@@ -175,6 +175,10 @@ Windows 模板的 IDE 磁盘影响（schema v7）：ide 盘在 `buildArgs` 里�
   virtio 网卡更快——编辑页切回 virtio + 自备驱动 ISO 即可。
 - **声卡**：默认关。XP 可在编辑页手动开（AC97 in-box）；Win7 开 AC97 无声
   （in-box 的是 Intel HDA，pc 板卡当前固定 AC97，HDA 支持后置）。
+- **CPU**：i386 启动参数自动补 `+nx`（qemu32 默认模型不报 NX，而 Win8/8.1
+  连 32 位都强制检查 NX，缺了安装程序在引导期即被拒；XP/7 不查 NX 不受影响）。
+  x86_64 用 qemu64 默认（自带 NX）。注意 x64 的 Win8.1/10 装不了：官方要求的
+  PrefetchW 本构建 CPU 模型不提供（POPCNT 同缺），未见解决路径。
 - **镜像自备**：Windows ISO 有版权，不随应用分发；XP 已停止支持，
   安装后无安全更新。
 - **性能**：TCG 纯软件模拟，XP/Win7 安装与启动均以分钟计，属预期。

@@ -32,6 +32,16 @@ static void send_buttons(int buttons)
     s_buttons = buttons;
 }
 
+/* qemu 的输入接口要求调用者持 BQL（官方前端都在主循环线程天然持锁）。我们从
+ * 注入线程直调，事件经 usb-tablet 的 usb_wakeup 走中断路径会命中 cpu_interrupt
+ * 的 g_assert(bql_locked())，qemu 直接自杀。qemu 未加载时符号为空，安全跳过。 */
+namespace {
+struct BqlGuard {
+    BqlGuard() { if (qe_bql_lock) { qe_bql_lock(__FILE__, __LINE__); } }
+    ~BqlGuard() { if (qe_bql_unlock) { qe_bql_unlock(); } }
+};
+}
+
 void input_send_pointer(int viewX, int viewY, int buttons)
 {
     if (!g_qemu_con || !qe_input_queue_abs) {
@@ -62,6 +72,7 @@ void input_send_pointer(int viewX, int viewY, int buttons)
     if (x >= fw) x = fw - 1;
     if (y >= fh) y = fh - 1;
 
+    BqlGuard bql;
     qe_input_queue_abs(g_qemu_con, INPUT_AXIS_X, x, 0, fw - 1);
     qe_input_queue_abs(g_qemu_con, INPUT_AXIS_Y, y, 0, fh - 1);
     send_buttons(buttons);
@@ -73,6 +84,7 @@ void input_send_key(int qcode, bool down)
     if (!qe_input_send_key) {
         return;
     }
+    BqlGuard bql;
     qe_input_send_key(nullptr, qcode, down);
 }
 
@@ -83,6 +95,7 @@ void input_send_scroll(int dx, int dy)
     if (!g_qemu_con || !qe_input_queue_btn || !qe_input_event_sync || dy == 0) {
         return;
     }
+    BqlGuard bql;
     int btn = dy < 0 ? INPUT_BUTTON_WHEEL_UP : INPUT_BUTTON_WHEEL_DOWN;
     int steps = dy < 0 ? -dy : dy;
     for (int i = 0; i < steps; i++) {

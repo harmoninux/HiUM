@@ -53,9 +53,12 @@ struct Index {
     }
     .hideTitleBar(true)
     .onShown(() => {
-      /* 只对详情页发信号；edit 页自身不需要（它每次都是新建的） */
+      /* 只对详情页发信号；edit 页自身不需要（它每次都是新建的）。
+       * 顺带 bump vmListVersion：pop 回来时侧栏若已 active，@Watch 立即生效，
+       * 名称等改动不用等列表侧的 2s 轮询兜底。 */
       if (name === 'manage') {
         this.manageShownTick++;
+        this.vmListVersion++;
       }
     })
   }

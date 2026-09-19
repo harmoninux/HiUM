@@ -32,6 +32,8 @@ qemu_input_queue_abs_fn qe_input_queue_abs;
 qemu_input_queue_btn_fn qe_input_queue_btn;
 qemu_input_event_sync_fn qe_input_event_sync;
 qemu_input_is_absolute_fn qe_input_is_absolute;
+bql_lock_impl_fn qe_bql_lock;
+bql_unlock_fn qe_bql_unlock;
 pixman_image_get_width_fn qe_surface_width;
 pixman_image_get_height_fn qe_surface_height;
 pixman_image_get_stride_fn qe_surface_stride;
@@ -400,6 +402,15 @@ int vm_start(const std::string &arch, const std::vector<std::string> &args)
     ok &= resolveSym(so, "qemu_input_queue_btn", &qe_input_queue_btn);
     ok &= resolveSym(so, "qemu_input_event_sync", &qe_input_event_sync);
     ok &= resolveSym(so, "qemu_input_is_absolute", &qe_input_is_absolute);
+    /* 注入线程必须持 BQL：官方前端（VNC/GTK）调 input 队列接口时都在主循环线程
+     * （天然持锁）；我们从注入线程直调，事件经 usb-tablet 的 usb_wakeup 走中断
+     * 路径会命中 cpu_interrupt 的 g_assert(bql_locked())，qemu 直接自杀
+     * （OVMF 使能 USB remote wakeup 后实测必现，xp/seabios 不开 wakeup 所以无感）。
+     * qemu 10.x 的符号本体是 bql_lock_impl/bql_unlock（qemu_mutex_lock_iothread
+     * 只是头文件兼容宏，so 里不存在）。这两个**不进 ok 链**——解析失败只降级为
+     * 无锁注入（BqlGuard 判空跳过），不能像必需符号那样让整个 qemu 起不来。 */
+    resolveSym(so, "bql_lock_impl", &qe_bql_lock);
+    resolveSym(so, "bql_unlock", &qe_bql_unlock);
     /* pixman is statically linked into the qemu .so: reuse its accessors */
     ok &= resolveSym(so, "pixman_image_get_width", &qe_surface_width);
     ok &= resolveSym(so, "pixman_image_get_height", &qe_surface_height);

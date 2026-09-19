@@ -101,6 +101,8 @@ typedef void (*qemu_input_queue_abs_fn)(QemuConsole *src, int axis, int value, i
 typedef void (*qemu_input_queue_btn_fn)(QemuConsole *src, int btn, bool down);
 typedef void (*qemu_input_event_sync_fn)(void);
 typedef bool (*qemu_input_is_absolute_fn)(QemuConsole *con);
+typedef void (*bql_lock_impl_fn)(const char *file, int line);
+typedef void (*bql_unlock_fn)(void);
 
 /* resolved symbols of the currently loaded qemu .so (set by vm.cpp) */
 extern qemu_system_entry_fn qe_system_entry;
@@ -112,6 +114,8 @@ extern qemu_input_queue_abs_fn qe_input_queue_abs;
 extern qemu_input_queue_btn_fn qe_input_queue_btn;
 extern qemu_input_event_sync_fn qe_input_event_sync;
 extern qemu_input_is_absolute_fn qe_input_is_absolute;
+extern bql_lock_impl_fn qe_bql_lock;
+extern bql_unlock_fn qe_bql_unlock;
 extern pixman_image_get_width_fn qe_surface_width;
 extern pixman_image_get_height_fn qe_surface_height;
 extern pixman_image_get_stride_fn qe_surface_stride;

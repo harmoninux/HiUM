@@ -123,8 +123,19 @@ export struct VmStorage {
   }
 
   /* 把 extraDisks 写回 profile（第 0 张系统盘保留原只读值），save + bump */
+  /* 写前重读最新档：@Prop 是深拷贝副本，拿副本整份落盘会把其他页面刚保存的内容
+   * 回滚（vmmu8hhjps9k 事故：存储页导入后，编辑页旧副本保存把 .img 覆盖回 .qcow2）。
+   * 调用方必须已经做过 null 检查。 */
+  private freshProfile(p: VmProfile): VmProfile {
+    return new VmStore(this.filesDir).load(p.id) ?? p;
+  }
+
   private syncExtraDisks(): void {
-    const p = this.profile;
+    const p0 = this.profile;
+    if (!p0) {
+      return;
+    }
+    const p: VmProfile = this.freshProfile(p0);
     if (!p) {
       return;
     }
@@ -167,7 +178,11 @@ export struct VmStorage {
 
   /* 新增一张数据盘：新建空白 qcow2 或导入镜像（复制进 vms/），push 进 extraDisks */
   private doSecondAdd(): void {
-    const p = this.profile;
+    const p0 = this.profile;
+    if (!p0) {
+      return;
+    }
+    const p: VmProfile = this.freshProfile(p0);
     if (!p) {
       return;
     }
@@ -279,7 +294,11 @@ export struct VmStorage {
 
   /* 移除某张数据盘：删引用 + vms 内镜像文件一并删（不可恢复，强确认） */
   private doSecondRemove(idx: number): void {
-    const p = this.profile;
+    const p0 = this.profile;
+    if (!p0) {
+      return;
+    }
+    const p: VmProfile = this.freshProfile(p0);
     if (!p) {
       return;
     }
@@ -376,10 +395,11 @@ export struct VmStorage {
     this.showSnack(`已扩容到 ${gbNum} GB`);
   }
 
-  /* 重建系统盘：删除现有镜像并在同路径创建全新的空盘。这是唯一允许的破坏性磁盘操作
-   * （「移除」被禁用），仅离线可操作；重建后旧数据/快照全部丢失，用 AlertDialog 强确认。
-   * 分配方式在确认弹窗里一并选择（dynamic=稀疏省空间 / fixed=预分配 falloc，
-   * 写入更快且免中途宿主盘满）。 */
+  /* 重建系统盘：删除现有镜像并替换。这是唯一允许的破坏性磁盘操作（「移除」被禁用），
+   * 仅离线可操作；重建后旧数据/快照全部丢失，用 AlertDialog 强确认。
+   * 两条路：导入现有镜像（qcow2/raw，复制进 vms/ 后替换）或新建空盘（分配方式
+   * 在下一层弹窗选：dynamic=稀疏省空间 / fixed=预分配 falloc，写入更快且免中途宿主盘满）。
+   * 弹窗分两层是给 AlertDialog 三按钮上限让路——系统盘行内已无横向空间再排一个入口。 */
   private confirmRebuild(): void {
     const p = this.profile;
     if (!p) {
@@ -389,11 +409,24 @@ export struct VmStorage {
       promptAction.showToast({ message: '运行中不能重建系统盘' });
       return;
     }
+    AlertDialog.show({
+      title: '重建系统盘',
+      message: '将删除现有系统盘镜像（含快照），且不可恢复。\n导入镜像：用现成的 qcow2/raw 文件作为系统盘；\n新建空盘：创建一块空白盘从零开始（装机/装系统）。',
+      buttons: [
+        { value: '取消', action: () => {} },
+        { value: '导入镜像…', fontColor: cDanger, action: () => this.pickMainImport() },
+        { value: '新建空盘', fontColor: cDanger, action: () => this.confirmRebuildAlloc() },
+      ],
+    });
+  }
+
+  /* 新建空盘的分配方式选择（第二层确认弹窗） */
+  private confirmRebuildAlloc(): void {
     /* 重建尺寸沿用当前虚拟大小（未知回退 8G）；事后仍需更大可走「扩容」 */
     const mb = Math.round((this.diskVirtualGB > 0 ? this.diskVirtualGB : 8) * 1024);
     AlertDialog.show({
-      title: '重建系统盘',
-      message: `将删除现有系统盘镜像并在同一位置创建全新的空盘（约 ${Math.ceil(mb / 1024)} GB）。\n当前数据与快照将全部丢失，且不可恢复。\n预分配：创建即占满同额空间，写入更快；动态分配：稀疏按需占用。`,
+      title: '新建空系统盘',
+      message: `将在原位置创建全新的空盘（约 ${Math.ceil(mb / 1024)} GB）。\n预分配：创建即占满同额空间，写入更快；动态分配：稀疏按需占用。`,
       buttons: [
         { value: '取消', action: () => {} },
         { value: '动态分配', fontColor: cDanger, action: () => this.doRebuild('dynamic') },
@@ -402,9 +435,77 @@ export struct VmStorage {
     });
   }
 
+  /* 导入系统盘：picker 选现成镜像（qcow2/raw）→ 复制进 vms/ 标准路径 → 替换 disks[0]。
+   * 典型用途：kaihongos 等第三方系统盘镜像（raw），配 UEFI 固件引导。 */
+  private pickMainImport(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    pickFilePath(ctx, ['.qcow2', '.img', '.raw']).then((src: string) => {
+      if (src.length === 0) {
+        promptAction.showToast({ message: '未选择文件 / 路径不可读' });
+        return;
+      }
+      this.doImportMain(src);
+    });
+  }
+
+  private doImportMain(src: string): void {
+    const cur0 = this.profile;
+    if (!cur0) {
+      return;
+    }
+    /* 导入替换的盘路径必须落在最新档之上，否则本页副本里的陈旧路径会把刚导入的系统盘回滚掉 */
+    const cur: VmProfile = this.freshProfile(cur0);
+    if (!cur) {
+      return;
+    }
+    if (vmIsRunning(cur.id)) {
+      promptAction.showToast({ message: 'VM 运行中不能替换系统盘' });
+      return;
+    }
+    const store = new VmStore(this.filesDir);
+    /* 落到应用管理的标准路径；扩展名保留源格式语义（.qcow2→qcow2，其余按 raw 读），
+     * driveFmt 按扩展名生成 -drive format= */
+    const dst = `${store.dir}/${cur.id}${src.toLowerCase().endsWith('.qcow2') ? '.qcow2' : '.img'}`;
+    this.showSnack('正在复制镜像…');
+    copyFileWithProgress(src, dst, () => {}).then((ok: boolean) => {
+      if (!ok) {
+        promptAction.showToast({ message: '镜像复制失败' });
+        return;
+      }
+      /* 删旧镜像（守卫同 doRebuild：仅应用 vms 目录内的删；导入的旧 raw 同样删——
+       * 它在 store.dir 下属应用管理的路径） */
+      const oldMain = cur.media.disks.length > 0 ? cur.media.disks[0].path : '';
+      try {
+        if (oldMain.length > 0 && oldMain !== dst && oldMain.startsWith(store.dir) && fs.accessSync(oldMain)) {
+          fs.unlinkSync(oldMain);
+        }
+      } catch {
+        /* 删除失败不阻塞替换 */
+      }
+      const first: VmDisk = cur.media.disks.length > 0
+        ? cur.media.disks[0]
+        : { path: '', readonly: false, iface: 'virtio' };
+      /* 导入是「换一块新盘」：只读态不沿用（导入就是为了可写地跑系统） */
+      const newFirst: VmDisk = { path: dst, readonly: false, iface: first.iface, cache: first.cache };
+      cur.media.disks = [newFirst].concat(cur.media.disks.slice(1));
+      new VmStore(this.filesDir).save(cur);
+      /* 同步页面副本与展示路径：refreshDisk 读 this.diskPath，不同步的话本页会
+       * 继续显示被替换掉的旧盘（已删除）→「系统盘缺失」的假象 */
+      this.profile = cur;
+      this.diskPath = dst;
+      this.vmListVersion++;
+      this.refreshDisk();
+      this.showSnack('已导入为系统盘');
+    });
+  }
+
   /* 确认后的重建执行：删旧盘 → 按所选分配方式建新盘 → 落档 */
   private doRebuild(alloc: string): void {
-    const cur = this.profile;
+    const cur0 = this.profile;
+    if (!cur0) {
+      return;
+    }
+    const cur: VmProfile = this.freshProfile(cur0);
     if (!cur) {
       return;
     }
@@ -445,7 +546,11 @@ export struct VmStorage {
 
   /* 清空全部光盘引用（只改 profile，不删 ISO 文件；不校验路径，配置页没做过校验） */
   private clearCdrom(): void {
-    const p = this.profile;
+    const p0 = this.profile;
+    if (!p0) {
+      return;
+    }
+    const p: VmProfile = this.freshProfile(p0);
     if (!p) {
       return;
     }
@@ -458,7 +563,11 @@ export struct VmStorage {
 
   /* 移除第 idx 张 ISO（持久化） */
   private removeIso(idx: number): void {
-    const p = this.profile;
+    const p0 = this.profile;
+    if (!p0) {
+      return;
+    }
+    const p: VmProfile = this.freshProfile(p0);
     if (!p) {
       return;
     }

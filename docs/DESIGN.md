@@ -144,7 +144,7 @@ B（时光机）与 F（临时会话）共用同一份快照引擎，不造两�
 按 VM 属性（`SessionPolicy = persist | ephemeral`）选择关闭动作。网络
 （hostfwd/9p）两种模式下都可用。
 
-## 6. 数据模型（schema v7）
+## 6. 数据模型（schema v8）
 
 配置分层，UI 只面对领域对象，`buildArgs` 是纯函数归档：
 
@@ -171,6 +171,13 @@ runtime.gdbPort（GDB 调试后端，0=关，仅编辑页可配；同向导「�
 风险）、VmNet.model（网卡型号
 virtio/rtl8139——rtl8139 是 XP/Win7 唯一双 in-box 驱动的网卡，须
 `romfile=` 置空启动，缺省 romfile 对应的 efi-rtl8139.rom 不随包会拒启）。
+**v8：machine.customFirmware（''=内置固件；非空=用户导入的 OVMF 合并
+单文件，存储页「重建系统盘→导入镜像」同链路的编辑页导入）。x86 UEFI
+由此接入：pc/q35 + firmware=ovmf 时双 pflash 挂内置 edk2（code 只读 +
+vars 每启动重拷，防启动项陈旧掉 UEFI Shell，同 riscv 机制），或单 pflash
+可写挂自定义合并文件（工作副本同样每启动重拷）。UEFI 下 cirrus/vmware
+无 GOP，自动收敛 std。i386 不放行 UEFI（内置 code 为 X64 构建，32 位
+OVMF 未随包）。
 app 未发布，新字段统一并入归一化回填，无存量迁移）。
 持久化到 `filesDir/vms/<id>.json`。
 

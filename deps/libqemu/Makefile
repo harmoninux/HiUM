@@ -39,7 +39,17 @@ FIRMWARE := bios-256k.bin bios.bin kvmvapic.bin linuxboot.bin linuxboot_dma.bin 
 # 改 riscv 固件链时同步这三处（本文件 + deps/Makefile 的 rawfile 拷贝 + bootstrap.ets）。
 # optional blobs (present only when the corresponding firmware is shipped)
 FIRMWARE_OPT := edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd edk2-riscv-code.fd \
-	edk2-riscv-vars.fd
+	edk2-riscv-vars.fd \
+	edk2-x86_64-code.fd edk2-i386-vars.fd \
+	edk2-x86_64-secure-code.fd edk2-x86_64-secure-vars.fd
+#
+# ↑ x86 四件：pc/q35 firmware=ovmf 的随包 UEFI 固件。code(edk2-x86_64-code.fd) 是
+# X64 构建——i386 机器跑不动，32 位 edk2-i386-code.fd 未发货（normalize 已把 ovmf
+# 收紧到 x86_64）；vars 模板用 edk2-i386-vars.fd（qemu 上游 pc-bios 里 x86_64 就配
+# 这个名字，变量存储格式与 CPU 位宽无关），bootstrap 解成 edk2-i386-vars-template.fd，
+# 各 VM 启动时从它拷一份自己的（vmprofile.ensureX86Vars，防写脏逻辑同 riscv）。
+# secure 一对当前 buildArgs 未消费，随包备用（未来 secure boot 接入）。
+# ⚠️ 改 x86 固件链时同步三处：本清单 + deps/Makefile 的 rawfile 拷贝 + bootstrap.ets。
 #
 # ↑ edk2-riscv-vars.fd：riscv64 的**第二块 pflash**（变量存储），32MB。edk2 的
 # RiscVVirt 把代码与变量区分开，qemu 官方 tests/qtest/bios-tables-test.c 的 riscv64
