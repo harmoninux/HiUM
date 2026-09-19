@@ -323,15 +323,32 @@ struct VmConsole {
   }
 
   private doStart(): void {
-    if (!this.profile) {
+    const cur = this.profile;
+    if (!cur) {
       return;
     }
-    const pBack = this.profile;
+    /* 启动基线从磁盘重读：编辑页/存储页/本页各持内存副本（@Prop 深拷贝），若拿旧
+     * 副本启动，存储页刚改过的配置会被本页的旧值顶掉。load 失败才回退页面副本。 */
+    const pBack: VmProfile = new VmStore(this.filesDir).load(this.vmId) ?? cur;
+    /* 启动防线：磁盘文件缺失直接拦下（光盘已有 isoReadable 过滤；磁盘缺失 qemu
+     * 不干净报错而是循环灌日志——实测秒级数 MB，直到宿主盘满）。 */
+    for (const d of pBack.media.disks) {
+      if (d.path.length === 0) {
+        continue;
+      }
+      try {
+        fs.accessSync(d.path);
+      } catch {
+        this.status = '磁盘文件缺失';
+        promptAction.showToast({ message: `${d.path.split('/').pop()} 不存在，请到存储页重建或导入` });
+        return;
+      }
+    }
     hilog.info(DOMAIN, TAG, 'doStart vmId=%{public}s arch=%{public}s isoCount=%{public}d bootFromCdrom=%{public}s tempSession=%{public}s',
       this.vmId, pBack.machine.arch, pBack.media.cdromPaths.length, String(pBack.media.bootFromCdrom),
       String(pBack.temporarySession));
     let share = '';
-    if (this.profile.net.sharedFolder) {
+    if (pBack.net.sharedFolder) {
       share = sharedDir(this.filesDir);
       try {
         if (!fs.accessSync(share)) {
@@ -344,13 +361,13 @@ struct VmConsole {
     }
     /* 启动前的快照结算 + 临时会话打点：仅主盘（disks[0]）参与；qcow2 才支持
      *（raw 无内部快照）。失败则拒启，避免"用户以为会回滚却没回滚"。 */
-    const disk = mainDiskPath(this.profile);
-    if (this.profile.temporarySession &&
+    const disk = mainDiskPath(pBack);
+    if (pBack.temporarySession &&
       (disk.length === 0 || !disk.toLowerCase().endsWith('.qcow2'))) {
       this.status = '临时会话需 qcow2 系统盘';
       return;
     }
-    const tr = prepareStart(this.profile.id, disk, this.profile.temporarySession);
+    const tr = prepareStart(pBack.id, disk, pBack.temporarySession);
     if (tr !== 0) {
       this.status = '临时会话打点失败: ' + tr;
       return;
@@ -359,7 +376,7 @@ struct VmConsole {
      * 不可读的辅助盘在下方按 isoReadable 过滤剔出本次启动列表（不动 this.profile），
      * 避免污染后续配置页/下次结算。 */
     /* 多 ISO：把不可读盘从本次启动列表剔除（不动 profile）+ toast 告知，其余原样传给 buildArgs。 */
-    const allIsos = this.profile.media.cdromPaths;
+    const allIsos = pBack.media.cdromPaths;
     const launchIsos = allIsos.filter((p: string): boolean => isoReadable(p));
     if (launchIsos.length !== allIsos.length) {
       const skipped = allIsos.filter((p: string): boolean => launchIsos.indexOf(p) < 0);
@@ -373,23 +390,23 @@ struct VmConsole {
     }
     /* riscv64 的变量存储 pflash 要每 VM 一份、且在 buildArgs 之前铺好：共用或沿用旧内容
      * 会让 edk2 因陈旧启动项不再自动引导光盘（详见 ensureRiscvVars 注释）。 */
-    if (this.profile.machine.arch === 'riscv64') {
-      ensureRiscvVars(this.profile, this.vmDataDir);
+    if (pBack.machine.arch === 'riscv64') {
+      ensureRiscvVars(pBack, this.vmDataDir);
     }
-    const launchArgs = buildArgs(this.profile, this.vmDataDir, share, launchIsos);
+    const launchArgs = buildArgs(pBack, this.vmDataDir, share, launchIsos);
     hilog.info(DOMAIN, TAG, 'doStart buildArgs vm=%{public}s argc=%{public}d isoCount=%{public}d',
       this.vmId, launchArgs.length, launchIsos.length);
-    const ret = napi.startVm(this.vmId, this.profile.machine.arch,
+    const ret = napi.startVm(this.vmId, pBack.machine.arch,
       launchArgs, this.xcController.surfaceId);
     hilog.info(DOMAIN, TAG, 'doStart startVm vm=%{public}s arch=%{public}s ret=%{public}d',
-      this.vmId, this.profile.machine.arch, ret);
+      this.vmId, pBack.machine.arch, ret);
     if (ret !== 0) {
       this.failStart('启动失败');
       return;
     }
     this.status = '启动中...';
     this.stuck = false;
-    const qmpRet = napi.qmpConnect(this.vmId, qmpSockPath(this.profile, this.vmDataDir));
+    const qmpRet = napi.qmpConnect(this.vmId, qmpSockPath(pBack, this.vmDataDir));
     hilog.info(DOMAIN, TAG, 'doStart qmpConnect vm=%{public}s ret=%{public}d', this.vmId, qmpRet);
     this.beginReadyWatch();
   }

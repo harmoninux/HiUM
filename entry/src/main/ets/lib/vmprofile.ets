@@ -653,8 +653,8 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
   }
   /* -cpu（v6 关联增强）：cpuFlags（如 "+sse4a,-avx2"）与 cpuModel 合并成
    * `-cpu <模型>,<flags>`；模型为空时用 max 承载 flags（x86 TCG 的 max 合法，
-   * 且行为与 virt 板的默认 max 一致）。两者皆空：pc/q35 交 qemu 默认，virt 给
-   * max，raspi 固定 CPU 不支持自定义——三处都不产生 -cpu。 */
+   * 且行为与 virt 板的默认 max 一致）。两者皆空：virt 给 max，i386 给
+   * qemu32,+nx（见下方分支注释），x86_64 交 qemu 默认，raspi 固定 CPU。 */
   if (!isRaspi) {
     const cpuModel = p.machine.cpuModel;
     const cpuFlags = p.machine.cpuFlags.trim();
@@ -666,6 +666,13 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
       args.push('-cpu', cpu);
     } else if (board === 'virt') {
       args.push('-cpu', 'max');
+    } else if (p.machine.arch === 'i386') {
+      /* qemu32（i386 交 qemu 默认时的模型）不报 NX，而 Win8/8.1 连 32 位版都
+       * 强制检查 PAE+NX+SSE2，缺 NX 在引导期即被拒——症状是安装程序起不来
+       * （XP/7 不查 NX，故模板装 XP/7 无此病）。TCG 支持 PAE 页表的 NX 位，
+       * CPUID 补报即真实生效；2006 年后的真实 x86 CPU 均有 NX，对 Linux
+       * guest 亦无害。x86_64 不补：qemu64 自带 NX，且是 XP/7 的实测兼容默认。 */
+      args.push('-cpu', 'qemu32,+nx');
     }
   }
   /* 全部磁盘（v5 数组化）：disks[0]=系统盘（快照/临时会话/启动对象），其余数据盘。

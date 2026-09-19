@@ -73,6 +73,18 @@ export struct VmList {
   }
 
   private pollTick(): void {
+    /* 侧栏不是 NavDestination，拿不到 onShown；编辑页压栈期间发出的 vmListVersion++
+     * 也打不进非栈顶组件（官方限制，见 Index 注释）——改名等改动 pop 回来不会自刷新。
+     * 轮询本就每 2s 跑，这里顺手重读落档比对快照，有变化才做全量 reload，把
+     * qemu-img info 的重活挡在真变化之后。 */
+    const fresh = this.store().list();
+    const sig = (p: VmProfile): string => JSON.stringify(p);
+    const changed = fresh.length !== this.profiles.length ||
+      fresh.some((p: VmProfile, i: number): boolean => sig(p) !== sig(this.profiles[i]));
+    if (changed) {
+      this.reload();
+      return;
+    }
     const ids: string[] = [];
     for (const p of this.profiles) {
       ids.push(p.id);

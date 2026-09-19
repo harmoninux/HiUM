@@ -242,24 +242,6 @@ export struct VmEdit {
     return '';
   }
 
-  /* 保存时的磁盘组装（v5）：第 0 张=系统盘（diskPath），数据盘=extraDisks。
-   * 数据盘接口/缓存策略透传原值（继承自创建时的系统盘，本页不改） */
-  private assembleDisks(): VmDisk[] {
-    const out: VmDisk[] = [];
-    if (this.diskPath.length > 0) {
-      out.push({
-        path: this.diskPath, readonly: this.diskReadonly, iface: this.diskIface,
-        cache: this.diskUnsafeCache ? 'unsafe' : undefined,
-      });
-    }
-    for (const d of this.extraDisks) {
-      if (d.path.length > 0) {
-        out.push({ path: d.path, readonly: d.readonly, iface: d.iface, cache: d.cache });
-      }
-    }
-    return out;
-  }
-
   private save(): void {
     if (!this.profile) {
       return;
@@ -270,18 +252,22 @@ export struct VmEdit {
       promptAction.showToast({ message: verr });
       return;
     }
-    /* 系统盘必配（由向导/编辑流程保证）：配置直接使用既有盘路径，不在保存侧再建盘 */
+    /* 保存基线从磁盘重读：本页与存储页各持内存副本（@Prop 深拷贝），谁后保存
+     * 谁整份覆盖——若从页面副本整份落盘，存储页刚做的数据盘增删/光盘挂载会被
+     * 本页的旧值回滚。磁盘段的盘路径/增删不归本页管，以磁盘最新档为准，
+     * 本页只合并系统盘三个属性与数据盘只读开关（见 mergeDisks）。load 失败才回退副本。 */
+    const base = new VmStore(this.filesDir).load(this.profile.id) ?? this.profile;
     const tbSize = Number(this.tbSizeText);
     const p: VmProfile = {
       schemaVersion: SCHEMA_VERSION,
-      id: this.profile.id,
+      id: base.id,
       name: this.name.trim().length > 0 ? this.name.trim() : '未命名',
       machine: {
         arch: this.arch,
-        vga: fitVga(fitBoard(this.arch, this.profile.machine.machine), this.vga),
-        machine: fitBoard(this.arch, this.profile.machine.machine),
-        firmware: this.profile.machine.firmware,
-        cpuModel: this.profile.machine.cpuModel,
+        vga: fitVga(fitBoard(this.arch, base.machine.machine), this.vga),
+        machine: fitBoard(this.arch, base.machine.machine),
+        firmware: base.machine.firmware,
+        cpuModel: base.machine.cpuModel,
         serialInteractive: this.serialInteractive,
         cpuFlags: this.cpuFlags.trim(),
         rtcLocal: this.rtcLocal,
@@ -297,12 +283,12 @@ export struct VmEdit {
         gdbPort: this.gdbOn ? Number(this.gdbPortText) : 0,
       },
       media: {
-        disks: this.assembleDisks(),
+        disks: this.mergeDisks(base),
         cdromPaths: this.cdromPaths,
         bootFromCdrom: this.bootFromCdrom,
         /* kernel/initrd 本页无更换入口，原样透传；kernelAppend 由上方输入框编辑 */
-        kernelPath: this.profile.media.kernelPath,
-        initrdPath: this.profile.media.initrdPath,
+        kernelPath: base.media.kernelPath,
+        initrdPath: base.media.initrdPath,
         kernelAppend: this.kernelAppend.trim(),
       },
       net: {
@@ -311,13 +297,36 @@ export struct VmEdit {
         sharedFolder: this.sharedFolder,
         model: this.netModel,
       },
-      temporarySession: this.profile.temporarySession,
+      temporarySession: base.temporarySession,
       extraArgs: this.extraArgs.trim(),
     };
     new VmStore(this.filesDir).save(p);
     this.vmListVersion++;
     promptAction.showToast({ message: '已保存' });
     this.navStack.pop();
+  }
+
+  /* 磁盘段合并：路径与数据盘增删归存储页（以 base 最新档为准），本页只写
+   * 系统盘的 只读/接口/缓存 三属性 + 数据盘的只读开关（按位对齐，存储页增删
+   * 过的盘以 base 为准，表单里多出的陈旧项丢弃）。 */
+  private mergeDisks(base: VmProfile): VmDisk[] {
+    const first: VmDisk = base.media.disks.length > 0
+      ? {
+        path: base.media.disks[0].path,
+        readonly: this.diskReadonly,
+        iface: this.diskIface,
+        cache: this.diskUnsafeCache ? 'unsafe' : undefined,
+      }
+      : { path: '', readonly: this.diskReadonly, iface: this.diskIface };
+    const rest = base.media.disks.slice(1).map((d: VmDisk, i: number): VmDisk => {
+      return {
+        path: d.path,
+        readonly: i < this.extraDisks.length ? this.extraDisks[i].readonly : d.readonly,
+        iface: d.iface,
+        cache: d.cache,
+      };
+    });
+    return [first].concat(rest);
   }
 
   /* 分组标题 + 分割线（与 VmWizard groupHeader / VmManage secHead 同款：灰字在左，细线延伸至右） */

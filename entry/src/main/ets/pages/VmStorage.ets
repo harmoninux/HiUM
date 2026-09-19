@@ -123,8 +123,19 @@ export struct VmStorage {
   }
 
   /* 把 extraDisks 写回 profile（第 0 张系统盘保留原只读值），save + bump */
+  /* 写前重读最新档：@Prop 是深拷贝副本，拿副本整份落盘会把其他页面刚保存的内容
+   * 回滚（实测：存储页改动数据盘后，编辑页旧副本保存把改动覆盖回去）。入参可为
+   * null（调用点的 null 检查在返回值上做）。 */
+  private freshProfile(p: VmProfile | null): VmProfile | null {
+    return p ? (new VmStore(this.filesDir).load(p.id) ?? p) : null;
+  }
+
   private syncExtraDisks(): void {
-    const p = this.profile;
+    const p0 = this.profile;
+    if (!p0) {
+      return;
+    }
+    const p = this.freshProfile(p0);
     if (!p) {
       return;
     }
@@ -167,7 +178,7 @@ export struct VmStorage {
 
   /* 新增一张数据盘：新建空白 qcow2 或导入镜像（复制进 vms/），push 进 extraDisks */
   private doSecondAdd(): void {
-    const p = this.profile;
+    const p = this.freshProfile(this.profile);
     if (!p) {
       return;
     }
@@ -279,7 +290,7 @@ export struct VmStorage {
 
   /* 移除某张数据盘：删引用 + vms 内镜像文件一并删（不可恢复，强确认） */
   private doSecondRemove(idx: number): void {
-    const p = this.profile;
+    const p = this.freshProfile(this.profile);
     if (!p) {
       return;
     }
@@ -404,7 +415,7 @@ export struct VmStorage {
 
   /* 确认后的重建执行：删旧盘 → 按所选分配方式建新盘 → 落档 */
   private doRebuild(alloc: string): void {
-    const cur = this.profile;
+    const cur = this.freshProfile(this.profile);
     if (!cur) {
       return;
     }
@@ -445,7 +456,7 @@ export struct VmStorage {
 
   /* 清空全部光盘引用（只改 profile，不删 ISO 文件；不校验路径，配置页没做过校验） */
   private clearCdrom(): void {
-    const p = this.profile;
+    const p = this.freshProfile(this.profile);
     if (!p) {
       return;
     }
@@ -458,7 +469,7 @@ export struct VmStorage {
 
   /* 移除第 idx 张 ISO（持久化） */
   private removeIso(idx: number): void {
-    const p = this.profile;
+    const p = this.freshProfile(this.profile);
     if (!p) {
       return;
     }

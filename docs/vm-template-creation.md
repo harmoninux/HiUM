@@ -171,6 +171,10 @@ Windows 模板的 IDE 磁盘影响（schema v7）：ide 盘在 `buildArgs` 里�
 
 ## 7. Windows 模板已知限制
 
+- **CPU**：i386 启动参数自动补 `+nx`（qemu32 默认模型不报 NX，而 Win8/8.1
+  连 32 位都强制检查 NX，缺了安装程序在引导期即被拒；XP/7 不查 NX 不受影响）。
+  x86_64 用 qemu64 默认（自带 NX）。x64 的 Win8.1/10 装不了：官方要求的
+  PrefetchW 本构建 CPU 模型不提供（POPCNT 同缺），未见解决路径。
 - **网络**：rtl8139（100Mbps 档，XP/Win7 in-box 驱动）。virtio-win 驱动装的
   virtio 网卡更快——编辑页切回 virtio + 自备驱动 ISO 即可。
 - **声卡**：默认关。XP 可在编辑页手动开（AC97 in-box）；Win7 开 AC97 无声
