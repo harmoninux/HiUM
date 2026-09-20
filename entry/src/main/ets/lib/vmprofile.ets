@@ -214,9 +214,13 @@ export function migrateProfile(raw: Object): VmProfile {
     case 4:
     case 5:
     case SCHEMA_VERSION:
-      return normalizeV2(o);
     default:
-      return blankProfile(''); /* 更高版本：本版本不认识，兜底新开 */
+      /* 更高版本（装回旧版后读到新版存档）也走 normalizeV2：本仓库升版惯例是
+       * 只加字段不改旧字段语义，按名取键 + 缺失回填 + 未知键忽略，读出即正确。
+       * 绝不能 blankProfile 兜底——曾把「高版本里保存过的存档」整台清空，
+       * 表现为列表凭空少一台。真正改旧字段语义的版本必须加显式 case 迁移，
+       * 不得依赖这里。 */
+      return normalizeV2(o);
   }
 }
 
