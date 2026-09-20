@@ -614,13 +614,14 @@ struct VmConsole {
     this.sendPtrMedia(this.lastX, this.lastY, 0x02);
   }
 
-  /* 双指手势收尾（第一根手指抬起时调用）：期间没发过滚轮、且质心位移在
-   * tap 阈值内 → 合成一次右键点击。down/up 连续入队即可：qemu 输入队列保序，
-   * guest 按自身 USB 轮询节奏看到完整的一次按下/释放，无需人为延时 */
-  private endTwoFinger(): void {
+  /* 双指手势收尾：期间没发过滚轮、且质心位移在 tap 阈值内 → 合成一次右键
+   * 点击。down/up 连续入队即可：qemu 输入队列保序，guest 按自身 USB 轮询
+   * 节奏看到完整的一次按下/释放，无需人为延时。返回是否判定为 tap */
+  private endTwoFinger(): boolean {
+    const dX = this.scrollCenterX - this.twoFingerStartX;
+    const dY = this.scrollCenterY - this.twoFingerStartY;
     const wasTap = !this.twoFingerScrolled &&
-      Math.abs(this.scrollCenterX - this.twoFingerStartX) < TWO_TAP_SLOP &&
-      Math.abs(this.scrollCenterY - this.twoFingerStartY) < TWO_TAP_SLOP;
+      Math.abs(dX) < TWO_TAP_SLOP && Math.abs(dY) < TWO_TAP_SLOP;
     this.twoFinger = false;
     this.twoFingerScrolled = false;
     this.scrollAcc = 0;
@@ -628,24 +629,30 @@ struct VmConsole {
       this.sendPtrMedia(this.twoFingerStartX, this.twoFingerStartY, 0x02);
       this.sendPtrMedia(this.twoFingerStartX, this.twoFingerStartY, 0);
     }
+    return wasTap;
   }
 
   private handleTouch(event: TouchEvent): void {
-    /* 抬起：多点触控的约定是每根手指抬起各触发一次 Up，且 touches 含刚抬起的
-     * 那根（最后一根抬起时 length===1）——数组在这里只用来数屏上还剩几根 */
+    const n = event.touches.length;
+    /* 双指手势的收尾（n<2 且 twoFinger）：实机抬走一根手指上报的是
+     * Move(touches=1) 而非 Up（官方文档的 Up 语义只在单指场景验证过，
+     * 参照 wineohos DesktopLayer 的实测），最后一根才报 Up——两处都必须能
+     * 结算 tap。Move 收尾时把剩指登记为已消费，防它被单指分支当成新点击
+     * 注入左键；提前复位 twoFinger 的话最后一根 Up 走单指路径，右键永远
+     * 合成不出来（实测踩过） */
+    if (this.twoFinger && n < 2) {
+      const t0 = event.touches.length > 0 ? event.touches[0] : null;
+      const wasTap = this.endTwoFinger();
+      if (event.type !== TouchType.Up && t0) {
+        this.singleDown = true;
+        this.touchButtons = 0;
+        this.singleStartX = t0.x;
+        this.singleStartY = t0.y;
+      }
+      return;
+    }
     if (event.type === TouchType.Up) {
       this.cancelLongPress();
-      if (this.twoFinger) {
-        /* 双指手势中的一根抬起：先按双指规则收尾（可能是 tap→合成右键），
-         * 再登记残指，防残指 Move 被单指分支当成新点击 */
-        const remaining = event.touches.length - 1;
-        this.endTwoFinger();
-        if (remaining > 0) {
-          this.singleDown = true;
-          this.touchButtons = 0;
-        }
-        return;
-      }
       const releaseBtns = this.touchButtons;
       this.touchButtons = 0;
       this.singleDown = false;
@@ -657,10 +664,9 @@ struct VmConsole {
       }
       return;
     }
-    const n = event.touches.length;
     if (n >= 2) {
-      /* 双指：垂直滑动 → 滚轮（以两指质心 Y 的累积位移折算步数）；
-       * 几乎没动就抬起 → 右键点击（判定在抬起时做，见 endTwoFinger）。
+      /* 双指：垂直滑动 → 滚轮（两指质心累积位移折算步数）；几乎没动就抬起
+       * → 右键点击（在 n<2 的收尾块结算，见 endTwoFinger）。
        * touches 数组顺序不可依赖（官方约定），质心求平均不受影响 */
       const cX = (event.touches[0].x + event.touches[1].x) / 2;
       const cY = (event.touches[0].y + event.touches[1].y) / 2;
@@ -681,11 +687,14 @@ struct VmConsole {
           this.sendPtrMedia(this.lastX, this.lastY, 0);
         }
       } else {
-        const delta = cY - this.scrollCenterY;
+        /* 自然滚动（对齐 wineohos 虚拟桌面的手感）：手指上滑 → 内容上移，
+         * 即发 WHEEL_DOWN；步长 12vp≈40 物理px，与 wineohos 同档（原 28vp
+         * 要滑三倍远才动一格，手感等于没反应） */
+        const delta = this.scrollCenterY - cY;
         this.scrollCenterX = cX;
         this.scrollCenterY = cY;
         this.scrollAcc += delta;
-        const step = 28; /* 触摸视图 px → 1 格滚动 */
+        const step = 12; /* vp → 1 格滚动 */
         while (this.scrollAcc >= step) {
           napi.scroll(this.vmId, 0, 1);
           this.scrollAcc -= step;
@@ -702,16 +711,6 @@ struct VmConsole {
 
     if (n === 1) {
       const t = event.touches[0];
-      if (this.twoFinger) {
-        /* 从双指回到单指却没经过 Up 收尾（个别固件抬指只报 Move）：同样按
-         * 残留手指处理，绝不能掉进下面的「新点击」注入左键 */
-        this.twoFinger = false;
-        this.singleDown = true;
-        this.touchButtons = 0;
-        this.singleStartX = t.x;
-        this.singleStartY = t.y;
-        return;
-      }
       if (!this.singleDown) {
         this.singleDown = true;
         this.singleStartX = t.x;
@@ -956,17 +955,46 @@ struct VmConsole {
           /* 鼠标**未按下**的移动不产生 TouchEvent（touch 需要接触），只走 onMouse 的
            * MouseAction.Move；不挂它的话 guest 光标只有点击时才瞬移过去、移动完全不
            * 跟随。MouseEvent.x/y 与 TouchObject.x/y 同为「响应组件的组件坐标系」vp，
-           * 故直接复用 sendPtrMedia；按键态仍由 onTouch 的 touchButtons 维护，这里
-           * 只补坐标（按住拖动时 touchButtons 已置位，一并带过去）。 */
+           * 故直接复用 sendPtrMedia。 */
           .onMouse((event: MouseEvent) => {
-            if (event.action !== MouseAction.Move) {
+            if (event.action === MouseAction.Move) {
+              /* 触摸状态机活跃时 touch 通道已在发移动，mouse 再发就是双发 */
+              if (this.singleDown || this.twoFinger || this.touchButtons !== 0) {
+                return;
+              }
+              /* 悬停移动事件比触摸密集得多（每秒可达上百次），坐标没变就不发 */
+              if (event.x !== this.lastX || event.y !== this.lastY) {
+                this.sendPtrMedia(event.x, event.y, 0);
+              }
               return;
             }
-            /* 鼠标移动事件比触摸密集得多（悬停时每秒可达上百次），坐标没变就不发，
-             * 省掉无谓的 napi 往返与 qemu 注入 */
-            if (event.x !== this.lastX || event.y !== this.lastY) {
-              this.sendPtrMedia(event.x, event.y, this.touchButtons);
+            /* 触控板双指点击 / 物理鼠标的右键、中键：Press/Release 直通注入
+             * （触控板双指点击被系统转成鼠标右键，不产生 TouchEvent）。
+             * 左键不在这里处理——OHOS 对左键同时派发 mouse 与合成 touch，
+             * onTouch 状态机已管左键，此处再发会双发（wineohos 同款结论） */
+            if (event.action !== MouseAction.Press && event.action !== MouseAction.Release) {
+              return;
             }
+            const btnMask = event.button === MouseButton.Right ? 0x02 :
+              event.button === MouseButton.Middle ? 0x04 : 0;
+            if (btnMask !== 0) {
+              this.sendPtrMedia(event.x, event.y,
+                event.action === MouseAction.Press ? btnMask : 0);
+            }
+          })
+          /* 触控板双指滑动 / 物理滚轮：系统转成轴事件，不产生 TouchEvent。
+           * 只有 vertical 可用——native 滚轮 ABI 无横向按钮。vert 为离散滚动
+           * 增量，限幅防异常大值一次灌几十格 */
+          .onAxisEvent((ev?: AxisEvent) => {
+            if (!ev) {
+              return;
+            }
+            const vert = ev.getVerticalAxisValue();
+            if (vert === 0) {
+              return;
+            }
+            const steps = Math.max(-3, Math.min(3, Math.round(vert)));
+            napi.scroll(this.vmId, 0, steps);
           })
         /* 虚拟键盘 overlay：盖在 VM 画面上。面板空白处透传给画面，
          * 键帽/把手消费触摸（见 VirtualKeyboard 组件 hitTest 说明） */
