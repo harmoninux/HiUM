@@ -61,6 +61,9 @@ const DARK_DANGER = '#ffffa8a8'; /* 危险操作（亮红） 4.8:1 */
 const DARK_WEAK = '#ffaab4c2';   /* 弱化文本（亮灰） 4.5:1 */
 /* 串口输入框的组件 id：发送后要把焦点交还给它（见 sendAndRefocus） */
 const SERIAL_INPUT_ID = 'hium-serial-input';
+/* 双指 tap 判定阈值（vp）：质心自双指落下起的累计位移小于该值、且期间没发过
+ * 滚轮，抬起时合成一次右键点击。取值比单指移动阈值(8)放宽——两指比单指易抖 */
+const TWO_TAP_SLOP = 12;
 
 interface QmpEvent {
   event: string;
@@ -135,7 +138,7 @@ struct VmConsole {
   /* 物理键盘已注入未抬起的 QKeyCode：失焦/页面销毁时全量补 up。onKeyEvent 是
    * down/up 纯镜像，按住 Alt 时切窗/失焦，Up 不会送达，guest 会一直认为 Alt 按着 */
   private pressedKeys: Set<number> = new Set();
-  /* 触摸手势状态机（单指=移动/左键/长按右键；双指=滚轮） */
+  /* 触摸手势状态机（单指=移动/左键/长按右键；双指=滚轮/抬起即右键点击） */
   private touchButtons: number = 0;
   private singleDown: boolean = false;
   private singleStartX: number = 0;
@@ -143,6 +146,10 @@ struct VmConsole {
   private longPressTimer: number = -1;
   private longPressed: boolean = false;
   private twoFinger: boolean = false;
+  private twoFingerStartX: number = 0; /* 双指落下时的质心：tap 判定的基准点 */
+  private twoFingerStartY: number = 0;
+  private twoFingerScrolled: boolean = false; /* 双指期间发过滚轮 → 抬起不再是 tap */
+  private scrollCenterX: number = 0;
   private scrollCenterY: number = 0;
   private scrollAcc: number = 0;
   private lastX: number = 0;
@@ -607,10 +614,38 @@ struct VmConsole {
     this.sendPtrMedia(this.lastX, this.lastY, 0x02);
   }
 
+  /* 双指手势收尾（第一根手指抬起时调用）：期间没发过滚轮、且质心位移在
+   * tap 阈值内 → 合成一次右键点击。down/up 连续入队即可：qemu 输入队列保序，
+   * guest 按自身 USB 轮询节奏看到完整的一次按下/释放，无需人为延时 */
+  private endTwoFinger(): void {
+    const wasTap = !this.twoFingerScrolled &&
+      Math.abs(this.scrollCenterX - this.twoFingerStartX) < TWO_TAP_SLOP &&
+      Math.abs(this.scrollCenterY - this.twoFingerStartY) < TWO_TAP_SLOP;
+    this.twoFinger = false;
+    this.twoFingerScrolled = false;
+    this.scrollAcc = 0;
+    if (wasTap) {
+      this.sendPtrMedia(this.twoFingerStartX, this.twoFingerStartY, 0x02);
+      this.sendPtrMedia(this.twoFingerStartX, this.twoFingerStartY, 0);
+    }
+  }
+
   private handleTouch(event: TouchEvent): void {
-    /* 抬起：无论 touches 是否还带着这支手指，一律释放按住的键回空闲 */
+    /* 抬起：多点触控的约定是每根手指抬起各触发一次 Up，且 touches 含刚抬起的
+     * 那根（最后一根抬起时 length===1）——数组在这里只用来数屏上还剩几根 */
     if (event.type === TouchType.Up) {
       this.cancelLongPress();
+      if (this.twoFinger) {
+        /* 双指手势中的一根抬起：先按双指规则收尾（可能是 tap→合成右键），
+         * 再登记残指，防残指 Move 被单指分支当成新点击 */
+        const remaining = event.touches.length - 1;
+        this.endTwoFinger();
+        if (remaining > 0) {
+          this.singleDown = true;
+          this.touchButtons = 0;
+        }
+        return;
+      }
       const releaseBtns = this.touchButtons;
       this.touchButtons = 0;
       this.singleDown = false;
@@ -624,27 +659,42 @@ struct VmConsole {
     }
     const n = event.touches.length;
     if (n >= 2) {
-      /* 双指：垂直滑动 → 滚轮（以两指质心 Y 的累积位移折算步数） */
+      /* 双指：垂直滑动 → 滚轮（以两指质心 Y 的累积位移折算步数）；
+       * 几乎没动就抬起 → 右键点击（判定在抬起时做，见 endTwoFinger）。
+       * touches 数组顺序不可依赖（官方约定），质心求平均不受影响 */
+      const cX = (event.touches[0].x + event.touches[1].x) / 2;
       const cY = (event.touches[0].y + event.touches[1].y) / 2;
       if (!this.twoFinger) {
         this.twoFinger = true;
+        this.twoFingerStartX = cX;
+        this.twoFingerStartY = cY;
+        this.twoFingerScrolled = false;
+        this.scrollCenterX = cX;
         this.scrollCenterY = cY;
         this.scrollAcc = 0;
         this.cancelLongPress();
-        this.touchButtons = 0;
         this.singleDown = false;
+        /* 单指阶段可能已把左键 down 注入 guest：按钮在 native 侧按位 diff，
+         * 这里只清状态不发释放的话，整个双指手势 guest 都看到左键按住 */
+        if (this.touchButtons !== 0) {
+          this.touchButtons = 0;
+          this.sendPtrMedia(this.lastX, this.lastY, 0);
+        }
       } else {
         const delta = cY - this.scrollCenterY;
+        this.scrollCenterX = cX;
         this.scrollCenterY = cY;
         this.scrollAcc += delta;
         const step = 28; /* 触摸视图 px → 1 格滚动 */
         while (this.scrollAcc >= step) {
           napi.scroll(this.vmId, 0, 1);
           this.scrollAcc -= step;
+          this.twoFingerScrolled = true;
         }
         while (this.scrollAcc <= -step) {
           napi.scroll(this.vmId, 0, -1);
           this.scrollAcc += step;
+          this.twoFingerScrolled = true;
         }
       }
       return;
@@ -653,7 +703,8 @@ struct VmConsole {
     if (n === 1) {
       const t = event.touches[0];
       if (this.twoFinger) {
-        /* 从双指回到单指：这是滚动结束后残留的手指，不是新点击 */
+        /* 从双指回到单指却没经过 Up 收尾（个别固件抬指只报 Move）：同样按
+         * 残留手指处理，绝不能掉进下面的「新点击」注入左键 */
         this.twoFinger = false;
         this.singleDown = true;
         this.touchButtons = 0;
