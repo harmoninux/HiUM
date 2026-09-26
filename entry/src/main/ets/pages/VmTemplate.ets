@@ -1,6 +1,6 @@
 // 模板创建：单页模态（与 VmWizard 自定义向导并列的独立流程，见 docs/vm-template-creation.md）。
 // 模板注册表内联于本文件（唯一消费方，不外提 lib——避免再造孤岛数据文件）：
-// Alpine 走「内置 ISO 自动下载」一键开箱；Windows 10 走「自备镜像」（版权镜像不能
+// Alpine 走「内置 ISO 自动下载」一键开箱；Windows 模板走「自备镜像」（版权镜像不能
 // 内置），参数按 Windows 兼容性选型：x86_64 + -cpu max（Win8.1+ x64 强制检查
 // PREFETCHW/POPCNT，qemu32/i386 与 qemu64 都过不了检查，见模板内注释；32 位镜像
 // 靠 x64 CPU 向下兼容）、IDE 磁盘（安装程序无 virtio 块驱动）、rtl8139 网卡
@@ -68,9 +68,9 @@ const TEMPLATES: TplDef[] = [
     iso: 'builtin',
   },
   {
-    id: 'win10', icon: '🪟', name: 'Windows 10',
-    /* desc 点明「Win7/8/10 都能装」：没有 Win7 模板后，想装老系统的用户单看
-     * 模板名会以为不收，实际 x86_64 + max 本就通吃（见下方注释） */
+    /* 模板名就叫 Windows，不带版本：一条模板通吃 Win7/8/10（也装得下未来的
+     * Win11），具体装什么由用户在名称框里自己起名（见下方注释的兼容矩阵） */
+    id: 'windows', icon: '🪟', name: 'Windows',
     desc: '兼容 Win7/8/10 · 32/64 位镜像通用 · 需自备镜像',
     /* 只开 x86_64 + cpu max（qemu32 无 long mode 引导 x64 镜像即 0xC000035A 蓝屏；
      * qemu64 缺 PREFETCHW/POPCNT，Win8.1+ x64 内核检查不过即 0x5D 蓝屏——max 是
