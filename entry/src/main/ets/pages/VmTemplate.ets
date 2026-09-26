@@ -66,7 +66,9 @@ const TEMPLATES: TplDef[] = [
   },
   {
     id: 'win10', icon: '🪟', name: 'Windows 10',
-    desc: '现代桌面 · 32/64 位安装镜像均可 · 需自备镜像',
+    /* desc 点明「Win7/8/10 都能装」：没有 Win7 模板后，想装老系统的用户单看
+     * 模板名会以为不收，实际 x86_64 + max 本就通吃（见下方注释） */
+    desc: '兼容 Win7/8/10 · 32/64 位镜像通用 · 需自备镜像',
     /* 只开 x86_64 + cpu max（qemu32 无 long mode 引导 x64 镜像即 0xC000035A 蓝屏；
      * qemu64 缺 PREFETCHW/POPCNT，Win8.1+ x64 内核检查不过即 0x5D 蓝屏——max 是
      * TCG 可模拟指令的全集（见 qemu target/i386/cpu.c TCG_*_FEATURES），Win7/8/10
