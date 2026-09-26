@@ -9,7 +9,9 @@
 // 产物与手工创建完全同构（无模板标记），创建后可改任何参数。
 // 创建时先建空白 qcow2 再落档（与向导 finish 同序）；Alpine 创建后自动下载内置 ISO，
 // Windows 未选镜像不阻塞创建（toast 提示到编辑页补挂）。
-// 名称不询问：自动「<模板名> <架构>」，与现有 VM 重名追加「 2」「 3」… 后缀。
+// 名称可空文本框：留空自动「<模板名> <架构>」（重名追加「 2」「 3」… 后缀）——
+// 自动名只是兜底，模板 ≠ 装同名系统（Win10 模板常用来装 Win7/8），填了就原样用
+// （同向导语义：不查重，VM 以 id 区分）。
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import napiModule from 'libentry.so';
@@ -25,6 +27,7 @@ import {
   cPrimary, cSub, cWeak, cText, cBorder, cBg, cChip, cSel, cSelBg,
   tPage, tCard, tBody, tSub, tLabel,
   sp1, sp2, sp3, sp4, sp8, spCard, bw, rElem, rBtn, rBadge, btnH, btnPadX,
+  inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
 interface DiskNapi {
@@ -93,6 +96,7 @@ export struct VmTemplate {
   @State memoryMB: number = 1024;
   @State diskGB: number = 8;
   @State userIso: string = ''; /* Windows 自备安装镜像路径（原地引用，同向导选 ISO） */
+  @State nameInput: string = ''; /* 自定义名称，可空——空=按模板自动命名 */
   /* 名称预览与镜像就绪态在 aboutToAppear/切模板/切架构时算好缓存——build 里不做磁盘 IO
    *（Slider 拖动会高频重渲染） */
   @State namePreview: string = '';
@@ -124,6 +128,7 @@ export struct VmTemplate {
     this.memoryMB = t.memoryMB;
     this.diskGB = t.diskGB;
     this.userIso = '';
+    this.nameInput = '';
     this.refreshDerived();
   }
 
@@ -157,6 +162,12 @@ export struct VmTemplate {
         return cand;
       }
     }
+  }
+
+  /* 最终名称：填了用输入（trim、原样，同向导不查重）；留空走自动命名 */
+  private finalName(): string {
+    const input = this.nameInput.trim();
+    return input.length > 0 ? input : this.autoName(this.nameBase());
   }
 
   /* 模板产物 = blankProfile 全默认（与手工向导全默认一致）+ 模板覆盖 + 表单值。
@@ -195,7 +206,7 @@ export struct VmTemplate {
     this.dlPct = 0;
     const t = this.tpl();
     const id = newProfileId();
-    const p = this.assemble(id, this.autoName(this.nameBase()));
+    const p = this.assemble(id, this.finalName());
     /* 与手工向导 finish 同序：先建盘，成功后才落档（取消/失败不留孤儿档） */
     const diskPath = p.media.disks[0].path;
     if (!pathExists(diskPath)) {
@@ -365,7 +376,15 @@ export struct VmTemplate {
           }
 
           Divider().strokeWidth(1).color(cBorder)
-          Text(`名称：${this.namePreview}（创建后可改）`).fontSize(tSub).fontColor(cWeak).width('100%')
+          /* 名称可空：placeholder 动态展示自动名兜底（随模板/架构联动）——模板名 ≠
+           * 装的系统（Win10 模板常用来装 Win7/8），想装别的就在这里起名 */
+          this.groupHeader('名称')
+          TextInput({ text: this.nameInput, placeholder: `留空自动命名（${this.namePreview}）` })
+            .fontSize(tBody)
+            .maxLength(60)
+            .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg)
+            .padding({ left: inpPadX, right: inpPadX })
+            .onChange((v: string) => this.nameInput = v)
           Text(this.tpl().iso === 'builtin'
             ? '其余按推荐默认：网络开启 · 声卡开 · TCG 多线程 · 从光盘引导'
             : '已按 Windows 兼容性自动配置：IDE 磁盘 · 兼容网卡 · 本地时钟 · 声卡默认关')
