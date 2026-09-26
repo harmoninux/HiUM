@@ -444,7 +444,7 @@ export struct VmManage {
     return this.profile ? this.profile.machine.firmware : '';
   }
 
-  /* v4：概览 chips 补充项（显卡/增强/串口） */
+  /* v4：概览 chips 补充项（显卡/增强） */
   private vgaLabel(): string {
     return this.profile ? '显卡 ' + this.profile.machine.vga : '';
   }
@@ -456,10 +456,6 @@ export struct VmManage {
     if (p.runtime.rng) { parts.push('RNG'); }
     if (p.runtime.balloon) { parts.push('Balloon'); }
     return parts.length > 0 ? '增强 ' + parts.join('·') : '';
-  }
-
-  private serialLabel(): string {
-    return this.profile ? (this.profile.machine.serialInteractive ? '串口 交互' : '串口 日志') : '';
   }
 
   /* v6：声音 / GDB 后端 / CPU 关联 概览 chips（关闭项不显示） */
@@ -755,10 +751,6 @@ export struct VmManage {
               }
               if (this.enhanceLabel().length > 0) {
                 Text(this.enhanceLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
-                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-              }
-              if (this.serialLabel().length > 0) {
-                Text(this.serialLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
               if (this.audioLabel().length > 0) {

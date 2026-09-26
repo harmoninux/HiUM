@@ -379,7 +379,7 @@ export struct VmWizard {
         machine: fitBoard(this.arch, this.board),
         firmware: this.autoFirmware(),
         cpuModel: this.cpuModel.trim(),
-        serialInteractive: true, /* 向导默认交互串口；改回落盘日志在编辑页 */
+        serialInteractive: true, /* 恒为交互串口（编辑页无切换入口；落盘日志模式仅手改 JSON 的旧档会出现） */
         cpuFlags: '',   /* v6：CPU flags 仅编辑页可配 */
         rtcLocal: false, /* v6：RTC 默认 utc（qemu 出厂行为）；本地时区在编辑页 */
       },
