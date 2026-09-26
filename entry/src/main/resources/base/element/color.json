@@ -3,6 +3,66 @@
     {
       "name": "start_window_background",
       "value": "#FFFFFF"
+    },
+    {
+      "name": "c_text",
+      "value": "#15181C"
+    },
+    {
+      "name": "c_sub",
+      "value": "#4B5563"
+    },
+    {
+      "name": "c_weak",
+      "value": "#6B7280"
+    },
+    {
+      "name": "c_bg",
+      "value": "#FAFAFA"
+    },
+    {
+      "name": "c_card",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "c_border",
+      "value": "#E8E8E8"
+    },
+    {
+      "name": "c_block",
+      "value": "#F1F2F4"
+    },
+    {
+      "name": "c_chip",
+      "value": "#F1F2F4"
+    },
+    {
+      "name": "c_sel",
+      "value": "#DBE9FF"
+    },
+    {
+      "name": "c_sel_bg",
+      "value": "#EEF4FF"
+    },
+    {
+      "name": "c_primary",
+      "value": "#0563FF"
+    },
+    {
+      "name": "c_danger",
+      "value": "#D92D20"
+    },
+    {
+      "name": "c_running",
+      "value": "#1F7A44"
+    },
+    {
+      "name": "c_success",
+      "value": "#34D399"
+    },
+    {
+      "name": "c_warn",
+      "value": "#B25E09"
     }
   ]
 }

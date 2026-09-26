@@ -1,21 +1,23 @@
-/* 统一设计 token：颜色 / 字号 / 间距 / 圆角。所有页面改用这些常量，禁止内联色值。 */
+/* 统一设计 token：颜色 / 字号 / 间距 / 圆角。所有页面改用这些常量，禁止内联色值。
+ * 颜色走资源引用（base/dark 两套 element/color.json），系统深浅色切换时 ArkUI
+ * 自动重解析刷新——改成字面量就会失去深色适配（本项目曾因此整页浅色僵死）。 */
 
-/* ---- 颜色 ---- */
-export const cPrimary  = '#ff0563ff'; /* 主色：主按钮/选中/强调 */
-export const cDanger   = '#ffd92d20'; /* 危险：删除/强制断电 */
-export const cRunning  = '#ff1f7a44'; /* 运行中 */
-export const cSuccess  = '#ff34d399'; /* 成功：snackbar 勾 */
-export const cWarn     = '#ffb25e09'; /* 需自备镜像/缺媒体 */
-export const cText     = '#ff15181c'; /* 主文本 */
-export const cSub      = '#ff4b5563'; /* 次级文本（灰蓝中深，保证弱场景可读） */
-export const cWeak     = '#ff6b7280'; /* 弱文本/占位（比 cSub 浅一档但可读） */
-export const cBg       = '#fffafafa'; /* 页面背景 */
-export const cCard     = '#ffffffff'; /* 卡片 */
-export const cBorder   = '#ffe8e8e8'; /* 卡/元素边框 */
-export const cBlock    = '#fff1f2f4'; /* 灰底块（参数预览/图标底） */
-export const cChip     = '#fff1f2f4'; /* chips 底 */
-export const cSel      = '#ffdbe9ff'; /* 选中描边/浅底 */
-export const cSelBg    = '#ffeef4ff'; /* 选中浅底 */
+/* ---- 颜色（浅色值在 base，深色值在 resources/dark，同名一一对应）---- */
+export const cPrimary  = $r('app.color.c_primary'); /* 主色：主按钮/选中/强调 */
+export const cDanger   = $r('app.color.c_danger'); /* 危险：删除/强制断电 */
+export const cRunning  = $r('app.color.c_running'); /* 运行中 */
+export const cSuccess  = $r('app.color.c_success'); /* 成功：snackbar 勾 */
+export const cWarn     = $r('app.color.c_warn'); /* 需自备镜像/缺媒体 */
+export const cText     = $r('app.color.c_text'); /* 主文本 */
+export const cSub      = $r('app.color.c_sub'); /* 次级文本（灰蓝中深，保证弱场景可读） */
+export const cWeak     = $r('app.color.c_weak'); /* 弱文本/占位（比 cSub 浅一档但可读） */
+export const cBg       = $r('app.color.c_bg'); /* 页面背景 */
+export const cCard     = $r('app.color.c_card'); /* 卡片 */
+export const cBorder   = $r('app.color.c_border'); /* 卡/元素边框 */
+export const cBlock    = $r('app.color.c_block'); /* 灰底块（参数预览/图标底） */
+export const cChip     = $r('app.color.c_chip'); /* chips 底 */
+export const cSel      = $r('app.color.c_sel'); /* 选中描边/浅底 */
+export const cSelBg    = $r('app.color.c_sel_bg'); /* 选中浅底 */
 
 /* ---- 字号 (size / weight) ---- */
 export const tPage  = 18; /* 页面/窗口标题 700 */

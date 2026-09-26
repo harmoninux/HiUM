@@ -14,7 +14,7 @@ import {
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { pickIsoPath, pickFilePath } from '../lib/isoPick';
 import {
-  cPrimary, cSub, cWeak, cText, cBorder, cDanger, cBg, cBlock, cChip,
+  cPrimary, cSub, cWeak, cText, cBorder, cDanger, cBg, cBlock, cChip, cCard,
   tPage, tCard, tBody, tSub, tLabel, tMono,
   sp1, sp2, sp3, sp4, sp8, spCard, bw, rElem, rBtn, rBadge, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
@@ -599,7 +599,7 @@ export struct VmWizard {
           }
           .layoutWeight(1)
           .padding(spCard)
-          .backgroundColor(this.arch === a ? cPrimary : Color.White)
+          .backgroundColor(this.arch === a ? cPrimary : cCard)
           .borderRadius(rElem)
           .onClick(() => {
             this.arch = a;
@@ -627,7 +627,7 @@ export struct VmWizard {
           }
           .layoutWeight(1)
           .padding(spCard)
-          .backgroundColor(this.board === b ? cPrimary : Color.White)
+          .backgroundColor(this.board === b ? cPrimary : cCard)
           .borderRadius(rElem)
           .onClick(() => {
             this.board = b as VmBoard;
