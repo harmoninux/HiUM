@@ -155,7 +155,7 @@ export struct VmList {
     }
     const bytes = this.diskUsage[p.id] ?? 0;
     if (this.mediaIssue(p).indexOf('系统盘') >= 0) {
-      return ' · 磁盘缺失';
+      return ' · 系统盘缺失';
     }
     return ` · 磁盘${(bytes / 1024 / 1024 / 1024).toFixed(1)}G`;
   }
@@ -187,7 +187,7 @@ export struct VmList {
       abilityName: 'VmConsoleAbility',
       parameters: { vmId: p.id, vmName: p.name },
     }).catch((err: BusinessError) => {
-      promptAction.showToast({ message: '打开窗口失败: ' + err.code });
+      promptAction.showToast({ message: '打开窗口失败 (' + err.code + ')，请重试' });
     });
   }
 
@@ -195,6 +195,47 @@ export struct VmList {
   private select(p: VmProfile): void {
     this.selectedId = p.id;
     this.navStack.replacePath({ name: 'manage', param: p });
+  }
+
+  /* 行长按菜单：不进详情直达高频操作（此前 openConsole 只剩定义无入口，在此恢复消费） */
+  @Builder
+  rowMenu(p: VmProfile) {
+    Menu() {
+      MenuItem({ content: '进入控制台' })
+        .onClick(() => this.openConsole(p))
+      MenuItem({ content: '编辑' })
+        .onClick(() => this.navStack.pushPath({ name: 'edit', param: p }))
+      MenuItem({ content: '删除' })
+        .contentFontColor(cDanger)
+        .onClick(() => this.confirmDeleteVm(p))
+    }
+  }
+
+  private confirmDeleteVm(p: VmProfile): void {
+    if (vmIsRunning(p.id)) {
+      promptAction.showToast({ message: '虚拟机运行中，无法删除' });
+      return;
+    }
+    /* remove 会删 vms 目录内全部磁盘（含数据盘），确认文案必须如实列出（同 VmManage） */
+    const n = p.media.disks.length - 1;
+    const diskPart = n > 0 ? `、系统盘、${n} 张数据盘` : '、系统盘';
+    AlertDialog.show({
+      title: '删除虚拟机',
+      message: `将删除「${p.name}」的配置${diskPart}及内核文件副本（仅应用目录内，外部 ISO 不受影响），确认？`,
+      primaryButton: { value: '取消', action: () => {} },
+      secondaryButton: {
+        value: '删除',
+        fontColor: cDanger,
+        action: () => {
+          new VmStore(this.filesDir).remove(p);
+          if (this.selectedId === p.id) {
+            this.selectedId = '';
+            this.navStack.replacePath({ name: 'idle' });
+          }
+          this.vmListVersion++;
+        },
+      },
+    });
   }
 
   private runningCount(): number {
@@ -251,7 +292,7 @@ export struct VmList {
               .padding({ left: sp1, right: sp1 })
           }
           if (this.mediaIssue(p).length > 0) {
-            Text('⚠ 缺媒体')
+            Text('⚠ 文件缺失')
               .fontSize(tSub)
               .fontColor(cWarn)
               .backgroundColor(cChip)
@@ -278,6 +319,7 @@ export struct VmList {
     .border({ width: bw, color: this.selectedId === p.id ? cSel : cBorder })
     .borderRadius(rCard)
     .onClick(() => this.select(p))
+    .bindContextMenu((): void => { this.rowMenu(p); }, ResponseType.LongPress)
   }
 
   build() {
@@ -300,13 +342,15 @@ export struct VmList {
 
       Row({ space: sp2 }) {
         Text(`● ${this.runningCount()} 运行中`).fontSize(tSub).fontColor(cRunning)
-        Text(`${this.profiles.length - this.runningCount()} 已停`).fontSize(tSub).fontColor(cSub)
+        Text(`${this.profiles.length - this.runningCount()} 已停止`).fontSize(tSub).fontColor(cSub)
       }
       .width('100%')
       .padding({ left: sp4, right: sp4, top: sp1, bottom: sp2 })
 
       if (!this.firmwareReady) {
-        Text('固件未就绪（需先 make deps 并重新打包）')
+        /* 构建期产物缺失的自检提示（正常打包必然存在；出现即说明包不完整，
+         * 面向用户的出路只有重装——make deps 是构建命令，不该出现在 UI 上） */
+        Text('应用资源缺失，请重新安装应用')
           .fontSize(tSub)
           .fontColor(cDanger)
           .padding(sp4)

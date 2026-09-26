@@ -9,7 +9,7 @@ import { VmProfile, VmStore, VmDisk, buildArgs, sharedDir, qmpSockPath, mainDisk
 import { vmIsRunning } from '../lib/vmregistry';
 import { cloneVm } from '../lib/vmclone';
 import {
-  VmSnapshotEntry, snapshotApply, snapshotDelete, parseSnapshots,
+  VmSnapshotEntry, snapshotApply, snapshotDelete, snapshotCreate, parseSnapshots,
 } from '../lib/vmsnapshot';
 import { isTempSnapshot } from '../lib/tempSession';
 import {
@@ -58,12 +58,13 @@ export struct VmManage {
   @State diskActualGB: number = 0;
   @State extraDisks: VmDisk[] = []; /* 数据盘（disks[1..]），仅展示 + 只读徽标 */
   @State snapshots: VmSnapshotEntry[] = [];
+  @State snapCreateMode: boolean = false; /* 快照创建表单（详情页内联创建，创建/查看不再分离两处） */
+  @State snapNameText: string = '';
   @State netEnabled: boolean = false;
   @State snack: string = '';
   /* v6 克隆：cloneStage != '' = 克隆进行中（进度条显示 stage+pct） */
   @State cloneStage: string = '';
   @State clonePct: number = 0;
-  @State nowSec: number = 0; /* 进入页面时的时间基准，供「当前」快照节点稳定展示 */
   @State isWide: boolean = false; /* 宽屏(Split)下隐藏返回；getWindowSize 判宽 */
   @Consume('showStorage') showStorage: boolean; /* 存储弹窗开关（Index 全窗口遮罩层） */
   @Consume('storageParam') storageParam: VmProfile | null; /* 当前打开的存储弹窗所属 VM */
@@ -82,7 +83,7 @@ export struct VmManage {
       return;
     }
     if (this.isRunningNow()) {
-      promptAction.showToast({ message: '运行中无法克隆' });
+      promptAction.showToast({ message: '虚拟机运行中，无法克隆' });
       return;
     }
     this.cloneStage = '准备';
@@ -136,7 +137,6 @@ export struct VmManage {
     this.netEnabled = p.net.enabled;
     this.refreshDisk();
     this.refreshSnapshot();
-    this.nowSec = Math.floor(Date.now() / 1000);
   }
 
   /* 编辑页/存储页保存后 vmListVersion +1：重新读取 profile */
@@ -194,7 +194,7 @@ export struct VmManage {
   /* 光盘概览（未引用 → 未引用）；多张时标注第一张 + 计数 */
   private cdromName(): string {
     if (this.cdromPaths.length === 0) {
-      return '未引用';
+      return '未挂载光盘';
     }
     const first = this.baseName(this.cdromPaths[0]);
     return this.cdromPaths.length > 1 ? `${first} 等${this.cdromPaths.length}张` : first;
@@ -242,12 +242,12 @@ export struct VmManage {
       return '未配置系统盘';
     }
     if (this.diskFmt !== 'qcow2') {
-      return '仅 qcow2 支持';
+      return '仅 qcow2 格式系统盘支持';
     }
     if (this.profile !== null && vmIsRunning(this.profile.id)) {
-      return '需关机';
+      return '关机后可创建';
     }
-    return '离线可用';
+    return '可用';
   }
 
   private refreshSnapshot(): void {
@@ -314,6 +314,28 @@ export struct VmManage {
     });
   }
 
+  /* 创建快照（详情页内联入口；仅离线 qcow2，入口按钮已按 canSnapshot 显隐） */
+  private doSnapshotCreate(): void {
+    if (!this.canSnapshot()) {
+      promptAction.showToast({ message: this.snapStatus() });
+      return;
+    }
+    const name = this.snapNameText.trim();
+    if (name.length === 0) {
+      promptAction.showToast({ message: '请输入快照名' });
+      return;
+    }
+    const ret = snapshotCreate(this.diskPath, name);
+    if (ret !== 0) {
+      promptAction.showToast({ message: '创建快照失败' });
+      return;
+    }
+    this.snapCreateMode = false;
+    this.snapNameText = '';
+    this.refreshSnapshot();
+    this.showSnack(`已创建快照「${name}」`);
+  }
+
   private dateStr(sec: number): string {
     if (sec <= 0) {
       return '';
@@ -338,7 +360,7 @@ export struct VmManage {
       abilityName: 'VmConsoleAbility',
       parameters: { vmId: p.id, vmName: p.name },
     }).catch((err: BusinessError) => {
-      promptAction.showToast({ message: '打开窗口失败: ' + err.code });
+      promptAction.showToast({ message: '打开窗口失败 (' + err.code + ')，请重试' });
     });
   }
 
@@ -371,8 +393,8 @@ export struct VmManage {
     }
     const label = force ? '强制关机' : '关机';
     const message = force
-      ? `将立即结束「${p.name}」的虚拟机进程，未保存的数据可能丢失。确认？`
-      : `向「${p.name}」发送 ACPI 关机信号（客机保存后自行退出）。确认？`;
+      ? `将立即切断「${p.name}」的电源，未保存的数据可能丢失。确认？`
+      : `向「${p.name}」发送关机信号，客户机将保存数据后自行退出。确认？`;
     AlertDialog.show({
       title: label,
       message: message,
@@ -398,18 +420,26 @@ export struct VmManage {
     }
   }
 
+  /* remove 会删 vms 目录内全部磁盘，数据盘数量 >0 时必须在确认文案里列明 */
+  private deleteDiskPart(): string {
+    const n = this.profile ? this.profile.media.disks.length - 1 : 0;
+    return n > 0 ? `、系统盘、${n} 张数据盘` : '、系统盘';
+  }
+
   private confirmDeleteVm(): void {
     const p = this.profile;
     if (!p) {
       return;
     }
     if (vmIsRunning(p.id)) {
-      promptAction.showToast({ message: '运行中的虚拟机不能删除' });
+      promptAction.showToast({ message: '虚拟机运行中，无法删除' });
       return;
     }
     AlertDialog.show({
       title: '删除虚拟机',
-      message: `将删除「${p.name}」的配置、系统盘镜像及内核文件副本（仅本应用目录内），确认？`,
+      /* remove 会删 vms 目录内全部磁盘（含数据盘），文案必须如实列出，否则用户
+       * 以为数据盘安全，实际一并消失（数据丢失级别的表述缺陷，不能只提系统盘） */
+      message: `将删除「${p.name}」的配置${this.deleteDiskPart()}及内核文件副本（仅应用目录内，外部 ISO 不受影响），确认？`,
       primaryButton: { value: '取消', action: () => {} },
       secondaryButton: {
         value: '删除',
@@ -453,8 +483,8 @@ export struct VmManage {
     const p = this.profile;
     if (!p) { return ''; }
     const parts: string[] = [];
-    if (p.runtime.rng) { parts.push('RNG'); }
-    if (p.runtime.balloon) { parts.push('Balloon'); }
+    if (p.runtime.rng) { parts.push('随机数'); }
+    if (p.runtime.balloon) { parts.push('内存回收'); }
     return parts.length > 0 ? '增强 ' + parts.join('·') : '';
   }
 
@@ -526,7 +556,7 @@ export struct VmManage {
         /* 数据盘（v5）：一行一张 + 只读徽标 */
         ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
           Row({ space: sp2 }) {
-            Text(`数据盘${idx + 1} ${this.baseName(d.path)}`)
+            Text(`数据盘${idx + 1}`)
               .fontSize(tSubL).fontColor(cSub).maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
             if (d.readonly) {
@@ -548,9 +578,32 @@ export struct VmManage {
     Column() {
       if (!this.canSnapshot()) {
         Text(this.snapStatus()).fontSize(tSubL).fontColor(cWeak).padding({ top: sp1, bottom: sp2 })
+      } else if (!this.snapCreateMode) {
+        Row() {
+          Button('创建快照').focusable(false).fontSize(tBody)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cPrimary)
+            .onClick(() => { this.snapCreateMode = true; this.snapNameText = ''; })
+          Blank()
+        }.width('100%').padding({ top: sp1, bottom: sp2 })
+      }
+      if (this.snapCreateMode && this.canSnapshot()) {
+        Row({ space: sp2 }) {
+          TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tBody)
+            .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+            .onChange((v: string) => this.snapNameText = v)
+          Button('创建').focusable(false).fontSize(tSub)
+            .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
+            .backgroundColor(cPrimary).fontColor(Color.White)
+            .onClick(() => this.doSnapshotCreate())
+          Button('取消').focusable(false).fontSize(tSub)
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .backgroundColor(Color.Transparent).fontColor(cSub)
+            .onClick(() => { this.snapCreateMode = false; this.snapNameText = ''; })
+        }.width('100%').margin({ top: sp2 })
       }
 
-      /* 时间线（历史快照 + 当前） */
+      /* 时间线（历史快照 + 当前状态） */
       Column() {
         ForEach(this.snapshots, (s: VmSnapshotEntry) => {
           Row() {
@@ -572,10 +625,8 @@ export struct VmManage {
         }, (s: VmSnapshotEntry) => s.id + ':' + s.name)
         Row() {
           Column().width(9).height(9).borderRadius(5).backgroundColor(cPrimary).margin({ right: sp2 })
-          Column({ space: 1 }) {
-            Text('当前').fontSize(tLabel)
-            Text(this.dateStr(this.nowSec)).fontSize(tMono).fontColor(cWeak)
-          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          /* 只作时间线终点锚点（不是可操作的快照），不放时间戳避免误读为快照时间 */
+          Text('当前状态').fontSize(tLabel)
         }.width('100%').padding({ top: sp1, bottom: sp1 })
       }.width('100%').padding({ left: sp2 })
     }.alignItems(HorizontalAlign.Start)
@@ -630,7 +681,7 @@ export struct VmManage {
     pasteboard.getSystemPasteboard().setData(data).then(() => {
       promptAction.showToast({ message: '已复制' });
     }).catch((e: BusinessError) => {
-      promptAction.showToast({ message: '复制失败: ' + e.code });
+      promptAction.showToast({ message: '复制失败 (' + e.code + ')，请重试' });
     });
   }
 

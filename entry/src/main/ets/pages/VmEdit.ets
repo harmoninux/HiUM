@@ -65,6 +65,8 @@ export struct VmEdit {
   @State diskFmt: string = '?';
   @State diskVirtualGB: number = 0;
   @State diskActualGB: number = 0;
+  /* 进入页面时的表单指纹：取消时比对，有实质改动才弹放弃确认（改了又改回不弹） */
+  private baseline: string = '';
 
   aboutToAppear(): void {
     const p = this.profile;
@@ -101,6 +103,36 @@ export struct VmEdit {
     this.cpuFlags = p.machine.cpuFlags;
     this.rtcLocal = p.machine.rtcLocal;
     this.readDiskMeta();
+    this.baseline = this.formSig();
+  }
+
+  /* 表单指纹：覆盖全部可编辑字段（派生展示字段除外） */
+  private formSig(): string {
+    return JSON.stringify([
+      this.name, this.memoryMB, this.cpus, this.vga,
+      this.cdromPaths, this.bootFromCdrom, this.kernelAppend,
+      this.netEnabled, this.portForwards, this.sharedFolder, this.netModel,
+      this.mttcg, this.tbSizeText, this.rng, this.balloon, this.audio,
+      this.diskReadonly, this.diskIface, this.diskUnsafeCache,
+      this.serialInteractive, this.gdbOn, this.gdbPortText,
+      this.cpuFlags, this.rtcLocal, this.extraArgs, this.extraDisks,
+    ]);
+  }
+
+  /* 取消：有未保存改动时先确认，防误触丢配置 */
+  private requestCancel(): void {
+    if (this.formSig() !== this.baseline) {
+      AlertDialog.show({
+        title: '放弃修改？',
+        message: '当前修改的内容不会保存。',
+        buttons: [
+          { value: '继续编辑', action: () => {} },
+          { value: '放弃', fontColor: cDanger, action: () => this.navStack.pop() },
+        ],
+      });
+      return;
+    }
+    this.navStack.pop();
   }
 
   /* 「内置 Alpine」按钮：按当前架构确保内置 iso 就绪（缺失则按需下载），完成后挂到光驱 */
@@ -364,7 +396,7 @@ export struct VmEdit {
           .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
           .backgroundColor(Color.Transparent)
           .fontColor(cPrimary)
-          .onClick(() => this.navStack.pop())
+          .onClick(() => this.requestCancel())
         Blank()
         Text('虚拟机配置').fontSize(tPage).fontWeight(FontWeight.Medium)
         Blank()
@@ -496,12 +528,12 @@ export struct VmEdit {
             }.width('100%').padding({ top: sp1, bottom: sp1 })
             Text(this.diskIface === 'ide'
               ? 'XP/Win7 开箱即认；ide 槽位有限（数据盘上限随之收紧）'
-              : 'Linux 默认；性能最好但需 guest 驱动（Windows 安装程序不认）')
+              : 'Linux 默认；性能最好但需客户机驱动（Windows 安装程序不认）')
               .fontSize(tSub).fontColor(cWeak).width('100%')
 
             /* cache=unsafe：老系统安装期提速开关（机理见 VmDisk.cache 注释） */
             Row() {
-              Text('放松写入缓存 (unsafe)').fontSize(tLabel).layoutWeight(1)
+              Text('写入缓存 (unsafe)').fontSize(tLabel).layoutWeight(1)
               Toggle({ type: ToggleType.Switch, isOn: this.diskUnsafeCache })
                 .onChange((v: boolean) => this.diskUnsafeCache = v)
             }.width('100%').padding({ top: sp1, bottom: sp1 })
@@ -529,7 +561,7 @@ export struct VmEdit {
             }
             ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
               Row({ space: sp2 }) {
-                Text(this.baseName(d.path))
+                Text(`数据盘${idx + 1}`)
                   .fontSize(tSub).fontColor(cSub).layoutWeight(1).maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                 Text(d.iface === 'ide' ? 'IDE' : 'virtio').fontSize(tSub).fontColor(cWeak)
@@ -611,7 +643,7 @@ export struct VmEdit {
           if (this.netEnabled) {
             Column({ space: 4 }) {
               Text('端口映射').fontSize(tLabel)
-              Text('宿主端口:客机端口，逗号分隔').fontSize(tSub).fontColor(cWeak)
+              Text('宿主机端口:客户机端口，逗号分隔').fontSize(tSub).fontColor(cWeak)
               TextInput({ placeholder: '如 2222:22,8080:80', text: this.portForwards })
                 .fontSize(tBody)
                 .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
@@ -623,7 +655,7 @@ export struct VmEdit {
                 Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
                   .onChange((v: boolean) => this.sharedFolder = v)
               }.padding({ left: 0, right: 0 })
-              Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
+              Text('把宿主机 Download/ 目录挂载到客户机 /shared').fontSize(tSub).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
             /* 网卡型号（仅 x86 板卡可切）：rtl8139 是 XP/Win7 唯一双 in-box 驱动的
              * 网卡，性能弱于 virtio；Linux 用 virtio。 */
@@ -661,7 +693,7 @@ export struct VmEdit {
                 .onChange((v: boolean) => this.mttcg = v)
             }.padding({ top: sp1, bottom: sp1 })
             Row() {
-              Text('tb-size').fontSize(tLabel).width(96)
+              Text('翻译缓存 (tb-size)').fontSize(tLabel).width(120)
               TextInput({ text: this.tbSizeText })
                 .layoutWeight(1)
                 .fontSize(tBody)
@@ -704,12 +736,12 @@ export struct VmEdit {
                   .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                   .onChange((v: string) => this.gdbPortText = v)
               }.padding({ bottom: sp1 })
-              Text('host 侧执行：gdb 后 target remote :' + this.gdbPortText).fontSize(tSub).fontColor(cWeak)
+              Text('在电脑上执行 gdb，连接 target remote :' + this.gdbPortText).fontSize(tSub).fontColor(cWeak)
                 .padding({ bottom: sp1 })
             }
             /* v6：CPU 关联增强——flags 字符串与 CPU 模型合并（raspi 固定 CPU 禁用） */
             Row() {
-              Text('CPU 关联').fontSize(tLabel).width(96)
+              Text('CPU 特性 (flags)').fontSize(tLabel).width(120)
               TextInput({ text: this.cpuFlags, placeholder: '如 +sse4a,-avx2' })
                 .layoutWeight(1)
                 .fontSize(tBody)

@@ -109,7 +109,11 @@ struct VmConsole {
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmListVersion') vmListVersion: number = 0;
   @State status: string = '';
+  /* QMP 可用（就绪往返过一次）：关机/重启/Ctrl+Alt+Del 的启用依据。
+   * build 里不问 napi.vmRunning（同步 IPC 往返），经本状态由事件驱动翻转 */
+  @State qmpAlive: boolean = false;
   @State showKbd: boolean = false;   /* 虚拟键盘显隐（底部状态栏开关，按 vmId 持久化） */
+  @State showGestureHint: boolean = false; /* 首次进入的手势速查（全局看过一次不再弹） */
   @State immersive: boolean = false; /* 沉浸全屏态（最大化进入），沉浸时隐藏底部状态栏 */
   /* v4 交互式串口：serialView=串口视图盖在画面上；文本/输入/Ctrl 修饰态均在页内 */
   @State serialView: boolean = false;
@@ -179,6 +183,7 @@ struct VmConsole {
     };
     napi.setQmpEventCallback(this.vmId, (evt: string) => this.onQmpEvent(evt));
     this.loadKbd();
+    this.loadGestureHint();
     this.enterVm();
     /* 最大化→沉浸仅对自由窗口设备（PC 2in1 等）有意义；Pad/手机窗口本来就
      * 全屏沉浸（Ability 侧 layoutFullScreen），由系统手势/任务栏管，不监听 */
@@ -251,13 +256,13 @@ struct VmConsole {
     const builtin = this.vmDataDir + '/' + builtinIsoFor(this.profile.machine.arch);
     /* 若引导光盘（第一张）是内置 Alpine ISO 且未下载：先按需下载，成功后继续启动 */
     if (isos.length > 0 && isos[0] === builtin && !pathExists(isos[0])) {
-      this.status = '下载系统盘...';
+      this.status = '下载系统镜像…';
       const ctx = getContext(this) as common.UIAbilityContext;
       ensureBuiltinIso(ctx, this.vmDataDir, this.profile.machine.arch, (pct: number) => {
-        this.status = `下载系统盘 ${pct}%`;
+        this.status = `下载系统镜像 ${pct}%`;
       }).then((ok: boolean) => {
         if (!ok) {
-          this.status = '系统盘下载失败';
+          this.status = '系统镜像下载失败';
           return;
         }
         this.doStart();
@@ -273,7 +278,7 @@ struct VmConsole {
       const nm = isos[0].substring(isos[0].lastIndexOf('/') + 1);
       AlertDialog.show({
         title: '启动光盘不可读',
-        message: `光盘 ${nm} 可能已移动或失去访问权限。可改用系统盘启动，或到 VM 配置页重新选择 ISO。`,
+        message: `光盘 ${nm} 可能已移动或失去访问权限。可改用系统盘启动，或到编辑页重新选择 ISO。`,
         buttons: [
           { value: '取消', action: () => {
           } },
@@ -376,7 +381,7 @@ struct VmConsole {
     }
     const tr = prepareStart(pBack.id, disk, pBack.temporarySession);
     if (tr !== 0) {
-      this.status = '临时会话打点失败: ' + tr;
+      this.status = '临时会话准备失败 (' + tr + ')';
       return;
     }
     /* 每次启动都是一个新的 NCP 子进程；多实例按 vmId 各起各的。
@@ -411,7 +416,7 @@ struct VmConsole {
       this.failStart('启动失败');
       return;
     }
-    this.status = '启动中...';
+    this.status = '启动中…';
     this.stuck = false;
     const qmpRet = napi.qmpConnect(this.vmId, qmpSockPath(pBack, this.vmDataDir));
     hilog.info(DOMAIN, TAG, 'doStart qmpConnect vm=%{public}s ret=%{public}d', this.vmId, qmpRet);
@@ -428,6 +433,7 @@ struct VmConsole {
   private beginReadyWatch(): void {
     this.stopReadyWatch();
     this.readySeen = false;
+    this.qmpAlive = false; /* 重新等待就绪，就绪后翻转（电源按钮随之启用） */
     this.bootFailReason = ''; /* 新一轮启动，旧失败提示作废（再失败会重新落标记） */
     const started = Date.now();
     const WAIT_MS = 45000;
@@ -435,6 +441,7 @@ struct VmConsole {
       if (napi.qmpReady(this.vmId)) {
         this.stopReadyWatch();
         this.readySeen = true;
+        this.qmpAlive = true;
         this.status = '运行中';
         /* 起来了就把熔断标记销掉（用户已修好配置） */
         new VmStore(this.filesDir).clearBootFail(this.vmId);
@@ -443,15 +450,16 @@ struct VmConsole {
       }
       if (!napi.vmRunning(this.vmId)) {
         this.stopReadyWatch();
-        this.noteBootFail('子进程在就绪前退出');
-        this.failStart('启动失败：子进程退出');
+        this.noteBootFail('启动程序异常退出');
+        this.failStart('启动失败：启动程序异常退出');
         return;
       }
       if (Date.now() - started > WAIT_MS) {
         this.stopReadyWatch();
         this.stuck = true;
-        this.status = '疑似卡死（qemu 无响应，可强制断电）';
-        this.noteBootFail('启动后 ' + Math.round((Date.now() - started) / 1000) + 's 未就绪');
+        this.qmpAlive = false; /* 已无响应：点关机/重启只会白等 5s 超时 */
+        this.status = '疑似卡死（虚拟机无响应，可强制关机）';
+        this.noteBootFail('启动超时（' + Math.round((Date.now() - started) / 1000) + ' 秒无响应）');
       }
     }, 500);
   }
@@ -472,6 +480,31 @@ struct VmConsole {
     this.bootFailReason = reason;
   }
 
+  /* console 内的破坏性电源操作与 VmManage 对齐：先确认再执行（重启=立即复位） */
+  private confirmRestart(): void {
+    const nm = this.profile ? this.profile.name : '虚拟机';
+    AlertDialog.show({
+      title: '重启',
+      message: `将立即重启「${nm}」，未保存的数据可能丢失。确认？`,
+      buttons: [
+        { value: '取消', action: () => {} },
+        { value: '重启', fontColor: DARK_DANGER, action: () => this.qmp('system_reset') },
+      ],
+    });
+  }
+
+  private confirmForceOff(): void {
+    const nm = this.profile ? this.profile.name : '虚拟机';
+    AlertDialog.show({
+      title: '强制关机',
+      message: `将立即切断「${nm}」的电源，未保存的数据可能丢失。确认？`,
+      buttons: [
+        { value: '取消', action: () => {} },
+        { value: '强制关机', fontColor: DARK_DANGER, action: () => this.forcePowerOff() },
+      ],
+    });
+  }
+
   /* 强制断电：先礼后兵 —— QMP quit 让 qemu 自己收尾；卡死时 quit 必然超时
    * （qmpCommand 同步阻塞 5s 后返回空），所以已判卡死就跳过它直接走 IPC 强杀。
    * 强杀走 kShutdown → 子进程 MainProc 置位后 _exit(0)，不依赖 qemu 合作。 */
@@ -482,7 +515,7 @@ struct VmConsole {
       this.status = '已关机';
       return;
     }
-    this.status = '正在断电...';
+    this.status = '正在强制关机…';
     if (this.stuck) {
       /* 已判卡死：quit 必然白等 5s，直接强杀，然后只轮询「死没死」 */
       hilog.warn(DOMAIN, TAG, '已判卡死，直接 IPC 强杀 vm=%{public}s', this.vmId);
@@ -504,7 +537,7 @@ struct VmConsole {
     }
     if (tries >= 6) {
       if (forced) {
-        this.status = '强制断电未生效';
+        this.status = '强制关机未生效';
         return;
       }
       hilog.warn(DOMAIN, TAG, 'quit 未生效，改走 IPC 强杀 vm=%{public}s', this.vmId);
@@ -538,6 +571,7 @@ struct VmConsole {
       case 'SHUTDOWN':
       case 'QMP_DISCONNECT':
         this.stopReadyWatch();
+        this.qmpAlive = false;
         this.vmListVersion++;
         this.closeSerial(); /* 串口随 VM 死亡断线，回画面视图 */
         /* 从没就绪过 → 这是一次「启动失败」，不是「运行中的 VM 死了」，不能按
@@ -546,8 +580,8 @@ struct VmConsole {
          * —— 子进程死掉时 socket 立刻断开，这个事件先到，随后 aboutToDisappear
          * 就把轮询停了。实测踩过：不在这里补，熔断标记永远写不出来）。 */
         if (!this.readySeen && !this.userStopped) {
-          this.noteBootFail('子进程在就绪前退出');
-          this.status = '启动失败：子进程退出';
+          this.noteBootFail('启动程序异常退出');
+          this.status = '启动失败：启动程序异常退出';
           break;
         }
         this.status = '已关机';
@@ -765,6 +799,28 @@ struct VmConsole {
     });
   }
 
+  /* 手势速查：触屏单指/双指、触控板双指的映射不直观（触控板手势被系统转成
+   * mouse/axis，用户无从发现），首次进入展示一次；全局键不分 vmId */
+  private loadGestureHint(): void {
+    preferences.getPreferences(this.vmCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
+      if (!(prefs.getSync('gesture_hint', false) as boolean)) {
+        this.showGestureHint = true;
+      }
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN, TAG, 'loadGestureHint: %{public}s', JSON.stringify(e));
+    });
+  }
+
+  private dismissGestureHint(): void {
+    this.showGestureHint = false;
+    preferences.getPreferences(this.vmCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
+      prefs.putSync('gesture_hint', true);
+      prefs.flush();
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN, TAG, 'saveGestureHint: %{public}s', JSON.stringify(e));
+    });
+  }
+
   private toggleKbd(): void {
     this.showKbd = !this.showKbd;
     preferences.getPreferences(this.vmCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
@@ -792,7 +848,7 @@ struct VmConsole {
       return;
     }
     if (!p.machine.serialInteractive) {
-      promptAction.showToast({ message: '该 VM 串口为日志模式（可在配置页开启交互）' });
+      promptAction.showToast({ message: '串口为日志模式，可在编辑页开启交互' });
       return;
     }
     this.serialView = true;
@@ -1056,7 +1112,6 @@ struct VmConsole {
                 .padding({ left: sp1, right: sp1 })
                 .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
                 .onClick(() => { this.serialSendByte(0x0d) })
-              Text(this.ctrlOn ? 'Ctrl 开' : '发送键序').fontSize(STATUS_FS).fontColor(DARK_WEAK)
               Text('清屏').fontSize(STATUS_FS).height(STATUS_BTN_H)
                 .padding({ left: sp1, right: sp1 })
                 .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
@@ -1100,6 +1155,34 @@ struct VmConsole {
           .height('100%')
           .backgroundColor('#e620242b')
         }
+        /* 手势速查（首次进入）：盖在一切之上，点任意处关闭 */
+        if (this.showGestureHint) {
+          Column() {
+            Column({ space: sp2 }) {
+              Text('操作手势').fontSize(16).fontWeight(FontWeight.Medium).fontColor(MENU_TEXT)
+              Text('触摸屏').fontSize(STATUS_FS).fontColor(DARK_ACCENT)
+              Text('单指点按＝左键，拖动＝移动光标；长按＝右键\n双指轻点＝右键；双指上下滑动＝滚轮')
+                .fontSize(STATUS_FS).fontColor(MENU_TEXT).textAlign(TextAlign.Center)
+              Text('触控板').fontSize(STATUS_FS).fontColor(DARK_ACCENT)
+              Text('双指点击＝右键；双指滑动＝滚轮')
+                .fontSize(STATUS_FS).fontColor(MENU_TEXT).textAlign(TextAlign.Center)
+              Button('知道了').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H + 6)
+                .padding({ left: sp2 * 2, right: sp2 * 2 })
+                .fontColor(MENU_TEXT).backgroundColor('#40ffffff')
+                .onClick(() => this.dismissGestureHint())
+            }
+            .padding(sp2 * 3)
+            .backgroundColor('#ee20242b')
+            .borderRadius(12)
+            .alignItems(HorizontalAlign.Center)
+          }
+          .width('100%')
+          .height('100%')
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .backgroundColor('rgba(0,0,0,0.55)')
+          .onClick(() => this.dismissGestureHint())
+        }
       }
       .width('100%')
       .layoutWeight(1)
@@ -1113,6 +1196,7 @@ struct VmConsole {
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           Button('关机').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
+            .enabled(this.qmpAlive)
             .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
             .onClick(() => {
               /* 用户主动停止：别让随后到来的 QMP_DISCONNECT 被当成启动失败写熔断标记 */
@@ -1121,17 +1205,19 @@ struct VmConsole {
             })
           Button('重启').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
+            .enabled(this.qmpAlive)
             .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
-            .onClick(() => { this.qmp('system_reset') })
-          Button('强制断电').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+            .onClick(() => { this.confirmRestart() })
+          Button('强制关机').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
             .fontColor(DARK_DANGER).backgroundColor(Color.Transparent)
-            .onClick(() => { this.forcePowerOff() })
+            .onClick(() => { this.confirmForceOff() })
           Button('Ctrl+Alt+Del').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
+            .enabled(this.qmpAlive)
             .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
             .onClick(() => { this.actReset() })
-          Button(this.serialView ? '画面' : '串口').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+          Button(this.serialView ? '切到画面' : '切到串口').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
             .fontColor(this.serialView ? DARK_ACCENT : MENU_TEXT).backgroundColor(Color.Transparent)
             .onClick(() => { this.toggleSerialView() })

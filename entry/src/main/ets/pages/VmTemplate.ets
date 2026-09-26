@@ -61,7 +61,7 @@ const TEMPLATES: TplDef[] = [
   },
   {
     id: 'winxp', icon: '🪟', name: 'Windows XP',
-    desc: '经典桌面 · 需自备安装镜像 · ide 磁盘',
+    desc: '经典桌面 · 已按 Windows 兼容性优化 · 需自备安装镜像',
     archs: ['x86_64', 'i386'],
     vga: 'cirrus', memoryMB: 512, cpus: 1, diskGB: 8,
     diskIface: 'ide', netModel: 'rtl8139', rtcLocal: true, audio: false,
@@ -69,7 +69,7 @@ const TEMPLATES: TplDef[] = [
   },
   {
     id: 'win7', icon: '🪟', name: 'Windows 7',
-    desc: '经典桌面 · 需自备安装镜像 · ide 磁盘',
+    desc: '经典桌面 · 已按 Windows 兼容性优化 · 需自备安装镜像',
     archs: ['x86_64', 'i386'],
     vga: 'std', memoryMB: 2048, cpus: 2, diskGB: 32,
     diskIface: 'ide', netModel: 'rtl8139', rtcLocal: true, audio: false,
@@ -362,7 +362,7 @@ export struct VmTemplate {
           Text(`名称：${this.namePreview}（创建后可改）`).fontSize(tSub).fontColor(cWeak).width('100%')
           Text(this.tpl().iso === 'builtin'
             ? '其余按推荐默认：网络开启 · 声卡开 · TCG 多线程 · 从光盘引导'
-            : '其余按推荐默认：ide 磁盘 · rtl8139 网卡 · RTC 本地时区 · 声卡关（Win7 无内置 AC97 驱动）')
+            : '已按 Windows 兼容性自动配置：IDE 磁盘 · 兼容网卡 · 本地时钟 · 声卡默认关')
             .fontSize(tSub).fontColor(cWeak).width('100%')
         }
         .alignItems(HorizontalAlign.Start)

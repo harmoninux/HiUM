@@ -58,7 +58,7 @@ export struct VmStorage {
   @State secondSrc: string = '';        /* 导入源（添加时复制进 vms/） */
   @State secondSrcMeta: string = '';
   @State secondNewGBText: string = '';
-  @State secondNewReadonly: boolean = false; /* 新增加数据盘即设为只读 */
+  @State secondNewReadonly: boolean = false; /* 新增数据盘表单的只读开关（默认可写） */
   @State secondNewAlloc: string = 'dynamic'; /* 新盘分配方式：dynamic 稀疏 / fixed 预分配(falloc) */
   @State secondExpandIdx: number = -1;       /* 扩容模式的目标盘下标；-1=添加模式 */
 
@@ -183,7 +183,7 @@ export struct VmStorage {
       return;
     }
     if (!this.canSecondOp()) {
-      promptAction.showToast({ message: 'VM 运行中不能增改数据盘' });
+      promptAction.showToast({ message: '虚拟机运行中，无法增改数据盘' });
       return;
     }
     /* 数据盘上限按主盘接口收紧：ide 槽位有限（-cdrom 再占一槽），pc 超出会被
@@ -256,7 +256,7 @@ export struct VmStorage {
       return;
     }
     if (!this.canSecondOp()) {
-      promptAction.showToast({ message: 'VM 运行中不能扩容' });
+      promptAction.showToast({ message: '虚拟机运行中，无法扩容' });
       return;
     }
     const gbNum = Number(this.secondNewGBText);
@@ -295,7 +295,7 @@ export struct VmStorage {
       return;
     }
     if (!this.canSecondOp()) {
-      promptAction.showToast({ message: 'VM 运行中不能移除数据盘' });
+      promptAction.showToast({ message: '虚拟机运行中，无法删除数据盘' });
       return;
     }
     if (idx < 0 || idx >= this.extraDisks.length) {
@@ -303,11 +303,11 @@ export struct VmStorage {
     }
     const path = this.extraDisks[idx].path;
     AlertDialog.show({
-      title: '移除数据盘',
-      message: '将移除对这块数据盘的引用；镜像文件如在本应用 vms 目录内会一并删除，不可恢复。确认？',
+      title: '删除数据盘',
+      message: '将删除这块数据盘的引用；镜像文件如在本应用 vms 目录内会一并删除，不可恢复。确认？',
       primaryButton: { value: '取消', action: () => {} },
       secondaryButton: {
-        value: '移除',
+        value: '删除',
         fontColor: cDanger,
         action: () => {
           try {
@@ -322,7 +322,7 @@ export struct VmStorage {
           next.splice(idx, 1);
           this.extraDisks = next;
           this.syncExtraDisks();
-          this.showSnack('已移除数据盘');
+          this.showSnack('已删除数据盘');
         },
       },
     });
@@ -336,7 +336,7 @@ export struct VmStorage {
   /* 创建内部快照（qcow2），仅离线可用 */
   private doSnapshotCreate(): void {
     if (!this.canSnapshot()) {
-      promptAction.showToast({ message: this.profile !== null && vmIsRunning(this.profile.id) ? '快照需关机' : '仅 qcow2 支持' });
+      promptAction.showToast({ message: this.profile !== null && vmIsRunning(this.profile.id) ? '关机后才能创建快照' : '仅 qcow2 格式系统盘支持' });
       return;
     }
     const name = this.snapNameText.trim();
@@ -364,7 +364,7 @@ export struct VmStorage {
       return;
     }
     if (this.profile && vmIsRunning(this.profile.id)) {
-      promptAction.showToast({ message: '运行中不能扩容系统盘' });
+      promptAction.showToast({ message: '虚拟机运行中，无法扩容系统盘' });
       return;
     }
     const gbNum = Number(this.newGBText);
@@ -397,14 +397,14 @@ export struct VmStorage {
       return;
     }
     if (vmIsRunning(p.id)) {
-      promptAction.showToast({ message: '运行中不能重建系统盘' });
+      promptAction.showToast({ message: '虚拟机运行中，无法重建系统盘' });
       return;
     }
     /* 重建尺寸沿用当前虚拟大小（未知回退 8G）；事后仍需更大可走「扩容」 */
     const mb = Math.round((this.diskVirtualGB > 0 ? this.diskVirtualGB : 8) * 1024);
     AlertDialog.show({
       title: '重建系统盘',
-      message: `将删除现有系统盘镜像并在同一位置创建全新的空盘（约 ${Math.ceil(mb / 1024)} GB）。\n当前数据与快照将全部丢失，且不可恢复。\n预分配：创建即占满同额空间，写入更快；动态分配：稀疏按需占用。`,
+      message: `将删除现有系统盘镜像并在同一位置创建全新的空盘（约 ${Math.ceil(mb / 1024)} GB）。\n当前数据与快照将全部丢失，且不可恢复。\n预分配：创建即占满同额空间，写入更快；动态分配：按需占用。`,
       buttons: [
         { value: '取消', action: () => {} },
         { value: '动态分配', fontColor: cDanger, action: () => this.doRebuild('dynamic') },
@@ -632,7 +632,8 @@ export struct VmStorage {
       /* 逐行：名字 + 只读 Toggle + 扩容 + 移除 */
       ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
         Row({ space: sp2 }) {
-          Text(this.baseName(d.path))
+          /* 文件名是应用生成的内部 id 命名，对用户无操作意义，显示序号即可 */
+          Text(`数据盘${idx + 1}`)
             .fontSize(tSub).fontColor(cSub).layoutWeight(1).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           Text('只读').fontSize(tSub).fontColor(cSub)
@@ -647,7 +648,7 @@ export struct VmStorage {
               this.secondMode = !this.secondMode;
               this.secondExpandIdx = idx;
             })
-          Button('移除').focusable(false).fontSize(tBody)
+          Button('删除').focusable(false).fontSize(tBody)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
             .enabled(this.canSecondOp())
             .backgroundColor(Color.Transparent).fontColor(cDanger)
@@ -656,15 +657,15 @@ export struct VmStorage {
       }, (d: VmDisk) => d.path)
 
       if (this.extraDisks.length === 0) {
-        Text('未配置数据盘（系统盘之外再加一块）。可经下面表单新建或导入。')
+        Text('还没有数据盘。可在下方新建空白盘或导入现有镜像。')
           .fontSize(tSub).fontColor(cWeak).width('100%')
       }
 
       /* 增盘/扩容表单（secondMode 切换；newGBText 复用两者） */
       if (!this.secondMode) {
         Row({ space: sp2 }) {
-          Text('本弹窗是数据盘的全部管理入口（系统盘在上一区）').fontSize(tSub).fontColor(cWeak).layoutWeight(1)
-          Button(this.canSecondOp() ? '添加数据盘…' : 'VM 运行中').focusable(false).fontSize(tBody)
+          Blank()
+          Button(this.canSecondOp() ? '添加数据盘' : '虚拟机运行中').focusable(false).fontSize(tBody)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
             .enabled(this.canSecondOp())
             .backgroundColor(Color.Transparent).fontColor(cPrimary)
@@ -736,7 +737,7 @@ export struct VmStorage {
               .borderRadius(rBadge)
               .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               .onClick(() => { this.secondNewAlloc = 'fixed' })
-            Text(this.secondNewAlloc === 'fixed' ? '创建即占满，写入更快' : '稀疏，用到多少占多少')
+            Text(this.secondNewAlloc === 'fixed' ? '创建即占满，写入更快' : '按需占用，用到多少占多少')
               .fontSize(tSub).fontColor(cWeak).layoutWeight(1)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }.width('100%')
@@ -785,7 +786,7 @@ export struct VmStorage {
           .onClick(() => this.pickBuiltinIso())
       }.width('100%').padding({ top: sp1, bottom: sp2 })
       if (this.cdromPaths.length > 0) {
-        Text('第一张为启动盘候选（从光盘启动时）')
+        Text('从光盘启动时，使用第一张 ISO 引导')
           .fontSize(tSub).fontColor(cWeak).width('100%').padding({ bottom: sp2 })
       }
     }.alignItems(HorizontalAlign.Start).width('100%')

@@ -65,6 +65,8 @@ export struct VmWizard {
   @State kernelCollapsed: boolean = true;
   @State copying: boolean = false;      /* finish 的镜像/内核复制进行中（禁用完成按钮） */
   @State copyPct: number = 0;
+  /* 打开时的表单指纹：关闭时比对，有实质填写才弹放弃确认（改了又改回不弹） */
+  private baseline: string = '';
   @State cdromPaths: string[] = [];
   @State bootFromCdrom: boolean = false;
   @State netEnabled: boolean = true;
@@ -115,6 +117,36 @@ export struct VmWizard {
     this.rng = false;
     this.balloon = false;
     this.audio = true;
+    this.baseline = this.formSig();
+  }
+
+  /* 表单指纹：覆盖全部可编辑字段（步骤跳转不算改动，不纳入） */
+  private formSig(): string {
+    return JSON.stringify([
+      this.arch, this.board, this.vga, this.cpuModel,
+      this.memoryMB, this.cpus, this.mttcg, this.tbSizeText,
+      this.diskGB, this.diskAlloc, this.diskIface, this.diskSource, this.importDiskSrc,
+      this.kernelSrc, this.initrdSrc, this.kernelAppend,
+      this.cdromPaths, this.bootFromCdrom,
+      this.netEnabled, this.portForwards, this.sharedFolder,
+      this.name, this.rng, this.balloon, this.audio,
+    ]);
+  }
+
+  /* 关闭：有已填写内容时先确认，防误触丢向导 */
+  private requestClose(): void {
+    if (!this.copying && this.formSig() !== this.baseline) {
+      AlertDialog.show({
+        title: '放弃创建？',
+        message: '当前填写的内容不会保存。',
+        buttons: [
+          { value: '继续填写', action: () => {} },
+          { value: '放弃', fontColor: cDanger, action: () => { if (this.onClose) { this.onClose(); } } },
+        ],
+      });
+      return;
+    }
+    if (this.onClose) { this.onClose(); }
   }
 
   /* 「内置 Alpine」按钮：按当前架构确保内置 iso 就绪（缺失则按需下载），完成后挂到光驱 */
@@ -268,7 +300,7 @@ export struct VmWizard {
   private cpuModelError(): string {
     const m = this.cpuModel.trim();
     if (m.length === 0) { return ''; }
-    return /^[A-Za-z0-9._-]+$/.test(m) ? '' : 'CPU 机型只允许字母/数字/点/下划线/连字符（不含空格分隔符）';
+    return /^[A-Za-z0-9._-]+$/.test(m) ? '' : 'CPU 机型名只能用字母、数字、点、下划线、连字符';
   }
 
   /* 第 step 步的内容校验：返回错误描述（'' = 通过） */
@@ -704,7 +736,7 @@ export struct VmWizard {
           .enabled(!this.isRaspiBoard())
           .onChange((v: boolean) => this.rng = v)
       }.padding({ top: sp1, bottom: sp1 })
-      Text('virtio-rng：给 Linux guest 注入熵源（crypto 应用/随机数初始化更快），内核自带驱动')
+      Text('virtio-rng：给客户机注入随机数熵源（加密应用初始化更快），客户机内核自带驱动')
         .fontSize(tSub).fontColor(cWeak).width('100%')
       Row() {
         Text('内存回收 (Balloon)').fontSize(tLabel).layoutWeight(1)
@@ -712,7 +744,7 @@ export struct VmWizard {
           .enabled(!this.isRaspiBoard())
           .onChange((v: boolean) => this.balloon = v)
       }.padding({ top: sp1, bottom: sp1 })
-      Text('virtio-balloon：空闲内存可交还宿主（平板内存宝贵），自动回收')
+      Text('virtio-balloon：空闲内存可交还宿主机，设备内存更宽裕')
         .fontSize(tSub).fontColor(cWeak).width('100%')
       /* v6：声音——默认开；raspi 无 PCI 且 QEMU 未模拟树莓派声卡，禁用 */
       Row() {
@@ -721,7 +753,7 @@ export struct VmWizard {
           .enabled(!this.isRaspiBoard())
           .onChange((v: boolean) => this.audio = v)
       }.padding({ top: sp1, bottom: sp1 })
-      Text('客机声卡按板卡生成（AC97 / virtio-sound），宿主侧走 OHOS 音频')
+      Text('客户机声卡按板卡生成（AC97 / virtio-sound），宿主机侧走系统音频')
         .fontSize(tSub).fontColor(cWeak).width('100%')
 
       /* TCG 模拟组：默认折叠，点组头展开/收起 */
@@ -744,7 +776,7 @@ export struct VmWizard {
             .onChange((v: boolean) => this.mttcg = v)
         }
         Row() {
-          Text('tb-size').fontSize(tLabel).width(90)
+          Text('翻译缓存 (tb-size)').fontSize(tLabel).width(120)
           TextInput({ text: this.tbSizeText })
             .layoutWeight(1)
             .fontSize(tBody)
@@ -926,7 +958,7 @@ export struct VmWizard {
           .enabled(!this.ensureIsoLoading)
           .onClick(() => this.pickBuiltinIso())
       }
-      Text('第一张为启动盘候选（从光盘启动时）')
+      Text('从光盘启动时，使用第一张 ISO 引导')
         .fontSize(tSub).fontColor(cWeak).width('100%')
       Row() {
         Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
@@ -955,14 +987,14 @@ export struct VmWizard {
           .fontSize(tBody)
           .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
           .onChange((v: string) => this.portForwards = v)
-        Text('宿主端口:客机端口，逗号分隔，如 2222:22,8080:80').fontSize(tSub).fontColor(cWeak)
+        Text('宿主机端口:客户机端口，逗号分隔，如 2222:22,8080:80').fontSize(tSub).fontColor(cWeak)
         Row() {
           Text('9p 共享目录').fontSize(tLabel).layoutWeight(1)
           Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
             .onChange((v: boolean) => this.sharedFolder = v)
         }
         if (this.sharedFolder) {
-          Text('挂载宿主 Download/ 到客机 /shared（9p）').fontSize(tSub).fontColor(cWeak)
+          Text('把宿主机 Download/ 目录挂载到客户机 /shared').fontSize(tSub).fontColor(cWeak)
         }
         this.stepErrorMsg()
       }
@@ -1019,7 +1051,7 @@ export struct VmWizard {
               .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
               .backgroundColor(Color.Transparent)
               .fontColor(cSub)
-              .onClick(() => { if (this.onClose) this.onClose(); })
+              .onClick(() => this.requestClose())
           }
           .width('100%')
           .padding({ left: sp4, right: sp4, top: sp2, bottom: sp2 })
@@ -1044,7 +1076,7 @@ export struct VmWizard {
           /* 内容下方：下一步 / 完成（固定不随滚动）；完成可能触发镜像/内核复制，显示进度 */
           Row() {
             Blank()
-            Button(this.copying ? `复制介质 ${this.copyPct}%`
+            Button(this.copying ? `正在复制镜像 ${this.copyPct}%`
               : (this.step === STEPS.length - 1 ? '完成' : '下一步'))
               .focusable(false).fontSize(tBody)
               .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })

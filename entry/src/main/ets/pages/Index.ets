@@ -42,7 +42,7 @@ struct Index {
           Text('🖥').fontSize(56)
           Text('未选择虚拟机')
             .fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cSub)
-          Text('从左侧列表选择一台虚拟机，查看详情 / 启动 / 存储')
+          Text('从列表中选择一台虚拟机，查看详情 / 启动 / 存储')
             .fontSize(tSub).fontColor(cWeak).textAlign(TextAlign.Center)
         }
         .width('100%')
