@@ -1,9 +1,12 @@
 // 模板创建：单页模态（与 VmWizard 自定义向导并列的独立流程，见 docs/vm-template-creation.md）。
 // 模板注册表内联于本文件（唯一消费方，不外提 lib——避免再造孤岛数据文件）：
-// Alpine 走「内置 ISO 自动下载」一键开箱；Windows XP/7 走「自备镜像」（版权镜像不能
-// 内置），参数按 Windows 安装优化：IDE 磁盘（安装程序无 virtio 驱动）、rtl8139 网卡
-// （XP/Win7 唯一双 in-box 驱动）、RTC 本地时区（Windows 把 RTC 当本地时间）、声卡默认关
-// （AC97 Win7 无 in-box 驱动）。产物与手工创建完全同构（无模板标记），创建后可改任何参数。
+// Alpine 走「内置 ISO 自动下载」一键开箱；Windows 10 走「自备镜像」（版权镜像不能
+// 内置），参数按 Windows 兼容性选型：x86_64 + -cpu max（Win8.1+ x64 强制检查
+// PREFETCHW/POPCNT，qemu32/i386 与 qemu64 都过不了检查，见模板内注释；32 位镜像
+// 靠 x64 CPU 向下兼容）、IDE 磁盘（安装程序无 virtio 块驱动）、rtl8139 网卡
+// （Win10 无 in-box 驱动，装完系统需自行补）、RTC 本地时区（Windows 把 RTC 当
+// 本地时间）、声卡默认关（AC97 从 Win8 起无 in-box 驱动）。
+// 产物与手工创建完全同构（无模板标记），创建后可改任何参数。
 // 创建时先建空白 qcow2 再落档（与向导 finish 同序）；Alpine 创建后自动下载内置 ISO，
 // Windows 未选镜像不阻塞创建（toast 提示到编辑页补挂）。
 // 名称不询问：自动「<模板名> <架构>」，与现有 VM 重名追加「 2」「 3」… 后缀。
@@ -47,6 +50,7 @@ interface TplDef {
   netModel: NetModel;
   rtcLocal: boolean;
   audio: boolean;
+  cpuModel: string; /* ''=qemu 默认（XP/7 兼容默认）；Win10 必须 max（见模板内注释） */
   iso: 'builtin' | 'user'; /* builtin=按架构下载内置 Alpine；user=自备（可跳过） */
 }
 
@@ -57,22 +61,20 @@ const TEMPLATES: TplDef[] = [
     archs: ['x86_64', 'i386', 'aarch64', 'arm', 'loongarch64', 'riscv64'],
     vga: 'std', memoryMB: 1024, cpus: 2, diskGB: 8,
     diskIface: 'virtio', netModel: 'virtio', rtcLocal: false, audio: true,
+    cpuModel: '',
     iso: 'builtin',
   },
   {
-    id: 'winxp', icon: '🪟', name: 'Windows XP',
-    desc: '经典桌面 · 已按 Windows 兼容性优化 · 需自备安装镜像',
-    archs: ['x86_64', 'i386'],
-    vga: 'cirrus', memoryMB: 512, cpus: 1, diskGB: 8,
+    id: 'win10', icon: '🪟', name: 'Windows 10',
+    desc: '现代桌面 · 32/64 位安装镜像均可 · 需自备镜像',
+    /* 只开 x86_64 + cpu max（qemu32 无 long mode 引导 x64 镜像即 0xC000035A 蓝屏；
+     * qemu64 缺 PREFETCHW/POPCNT，Win8.1+ x64 内核检查不过即 0x5D 蓝屏——max 是
+     * TCG 可模拟指令的全集（见 qemu target/i386/cpu.c TCG_*_FEATURES），Win7/8/10
+     * 的 x64 与 32 位镜像通吃。x86 镜像靠 x64 CPU 向下兼容，不需要 i386 虚拟机。 */
+    archs: ['x86_64'],
+    vga: 'std', memoryMB: 4096, cpus: 2, diskGB: 64,
     diskIface: 'ide', netModel: 'rtl8139', rtcLocal: true, audio: false,
-    iso: 'user',
-  },
-  {
-    id: 'win7', icon: '🪟', name: 'Windows 7',
-    desc: '经典桌面 · 已按 Windows 兼容性优化 · 需自备安装镜像',
-    archs: ['x86_64', 'i386'],
-    vga: 'std', memoryMB: 2048, cpus: 2, diskGB: 32,
-    diskIface: 'ide', netModel: 'rtl8139', rtcLocal: true, audio: false,
+    cpuModel: 'max',
     iso: 'user',
   },
 ];
@@ -156,13 +158,15 @@ export struct VmTemplate {
   }
 
   /* 模板产物 = blankProfile 全默认（与手工向导全默认一致）+ 模板覆盖 + 表单值。
-   * cpuModel 保持 ''：x86 默认 qemu32/qemu64 即 XP/7 兼容的机型，不要给 max。 */
+   * cpuModel 按模板：Win10 必须 max（Win8.1+ x64 要 PREFETCHW/POPCNT，qemu64 缺 →
+   * 引导 0x5D 蓝屏）；Alpine 留空用 qemu 默认。 */
   private assemble(id: string, name: string): VmProfile {
     const t = this.tpl();
     const p = blankProfile(id);
     p.name = name;
     p.machine.arch = this.arch;
     p.machine.machine = defaultBoard(this.arch);
+    p.machine.cpuModel = t.cpuModel;
     p.machine.vga = fitVga(p.machine.machine, t.vga);
     p.runtime.memoryMB = Math.round(this.memoryMB);
     p.runtime.cpus = Math.round(this.cpus);
