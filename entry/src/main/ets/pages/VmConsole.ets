@@ -867,13 +867,13 @@ struct VmConsole {
         }
       } else {
         /* 自然滚动（对齐 wineohos 虚拟桌面的手感）：手指上滑 → 内容上移，
-         * 即发 WHEEL_DOWN；步长 12vp≈40 物理px，与 wineohos 同档（原 28vp
-         * 要滑三倍远才动一格，手感等于没反应） */
+         * 即发 WHEEL_DOWN。步长 24vp：wineohos 同档的 12vp 实测 guest 侧
+         * 滚动过快（一格滚 3 行文本，轻扫就飞过十来行），放慢一倍 */
         const delta = this.scrollCenterY - cY;
         this.scrollCenterX = cX;
         this.scrollCenterY = cY;
         this.scrollAcc += delta;
-        const step = 12; /* vp → 1 格滚动 */
+        const step = 24; /* vp → 1 格滚动 */
         while (this.scrollAcc >= step) {
           napi.scroll(this.vmId, 0, 1);
           this.scrollAcc -= step;
