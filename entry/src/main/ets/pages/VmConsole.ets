@@ -3,6 +3,7 @@
 // vmId 自载 profile。VM 跑在 NCP 子进程，关窗只是摘窗，重开窗口即重新挂窗。
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
+import { display } from '@kit.ArkUI';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
@@ -22,6 +23,7 @@ import { sp1, sp2 } from '../lib/uiTokens';
 interface QemuNapi {
   startVm: (vmId: string, arch: string, args: string[], surfaceId: bigint) => number;
   vmRunning: (vmId: string) => boolean;
+  vmSnapshot: (vmIds: string[]) => Object;
   createSurface: (vmId: string, surfaceId: bigint) => number;
   resizeSurface: (vmId: string, w: number, h: number) => number;
   destroySurface: (vmId: string) => number;
@@ -72,8 +74,6 @@ interface QmpEvent {
 class VmXComponentController extends XComponentController {
   vmId: string = '';
   surfaceId: bigint = 0n;
-  surfaceWidth: number = 0;
-  surfaceHeight: number = 0;
   onReady: (() => void) | null = null;
 
   onSurfaceCreated(surfaceId: string): void {
@@ -90,10 +90,9 @@ class VmXComponentController extends XComponentController {
     }, 500);
   }
 
-  onSurfaceChanged(surfaceId: string, rect: SurfaceRect): void {
-    this.surfaceWidth = rect.surfaceWidth;
-    this.surfaceHeight = rect.surfaceHeight;
-    napi.resizeSurface(this.vmId, rect.surfaceWidth, rect.surfaceHeight);
+  /* 不透传给渲染器：系统拖拽期会发「铺满窗口内容区」的异形尺寸（比例偏离组件，
+   * 见 syncBufferGeometry 注释），照单全收会把 buffer 做成异形 */
+  onSurfaceChanged(_surfaceId: string, _rect: SurfaceRect): void {
   }
 
   onSurfaceDestroyed(surfaceId: string): void {
@@ -136,6 +135,28 @@ struct VmConsole {
   private immersiveMaximized: boolean = false;  /* 防递归：maximize() 自身也触发窗口状态回调 */
   private areaW: number = 0;
   private areaH: number = 0;
+  /* 布局层 letterbox：guest 帧几何（vmSnapshot 轮询校准）+ 画面组件尺寸。
+   * letterbox 必须由布局做而不是渲染做：resize 时布局同步变、渲染 buffer 跨进程
+   * 滞后百毫秒级，合成器会把 buffer 非等比拉伸铺到组件上——渲染层独担 letterbox
+   * 时「拉伸的旧帧（变形）」与「letterbox 新帧」交替上屏，就是 resize 期间画面
+   * 在撑满/letterbox 间跳变的根源。组件矩形恒比 guest（同步层决策）后拉伸变等比，
+   * 跳变无从发生。渲染层的 letterbox viewport 保留：guest 切显示模式到布局校准
+   * 之间的瞬态兜底（宁可短暂黑边不可变形），也是输入反算的公共契约，不动。 */
+  @State fbW: number = 0;
+  @State fbH: number = 0;
+  @State fitW: number = 0;
+  @State fitH: number = 0;
+  private containerW: number = 0;
+  private containerH: number = 0;
+  private geoTimer: number = -1;
+  /* buffer 几何的权威源：系统在自由窗口拖拽期间会向 surface 发「铺满窗口内容区」
+   * 的 onSurfaceChanged（比例偏离组件），渲染层若照单全收，buffer 就被做成异形、
+   * letterbox 画的黑边被合成器压进画面（实测变形的根源）。因此 buffer 尺寸由本页
+   * 按组件实际尺寸下发，onSurfaceChanged 只更新缓存不透传。比例一致时合成器是
+   * 等比缩放，尺寸不必紧追组件——偏差超阈值才下发一次补清晰度 */
+  private sentW: number = 0;
+  private sentH: number = 0;
+  private density: number = 0;
   private surfaceReady: boolean = false;
   private startPending: boolean = false;
   private closed: boolean = false; /* VM 已死导致本窗口即将销毁，防重复 terminate */
@@ -167,6 +188,81 @@ struct VmConsole {
     return Math.round(vp * surfaceSize / vpSize);
   }
 
+  /* 容器内按 guest 比例取最大内接矩形。fb 未出帧（VM 没跑/刚启动）时 fit=0，
+   * 组件铺满容器——画面全黑无比例可言，铺满还能让首帧立即可见 */
+  private recomputeFit(): void {
+    if (this.containerW <= 0 || this.containerH <= 0) {
+      return;
+    }
+    if (this.fbW <= 0 || this.fbH <= 0) {
+      this.fitW = 0;
+      this.fitH = 0;
+      return;
+    }
+    const scale = Math.min(this.containerW / this.fbW, this.containerH / this.fbH);
+    this.fitW = Math.max(1, Math.floor(this.fbW * scale));
+    this.fitH = Math.max(1, Math.floor(this.fbH * scale));
+  }
+
+  /* 按组件实际尺寸（vp×密度）下发 buffer 几何。比例变了必发（保住「buffer 比例=
+   * 组件比例」这条合成器等比缩放的前提）；只是尺寸变大/变小时合成器本来就是等比
+   * 缩放，偏差不超阈值就懒得追——也顺带把 EGLSurface 重建从「每次窗口变化」降为
+   * 稀发。初始 sentW=0 保证首回路必发。 */
+  private syncBufferGeometry(): void {
+    const w = this.areaW;
+    const h = this.areaH;
+    if (w <= 0 || h <= 0 || this.density <= 0) {
+      return;
+    }
+    if (this.sentW > 0 && this.sentH > 0) {
+      const ratio = w / h;
+      const sentRatio = this.sentW / this.sentH;
+      const ratioSame = Math.abs(ratio - sentRatio) < sentRatio * 0.02;
+      const sizeClose = Math.abs(w - this.sentW) < this.sentW * 0.25 &&
+        Math.abs(h - this.sentH) < this.sentH * 0.25;
+      if (ratioSame && sizeClose) {
+        return;
+      }
+    }
+    this.sentW = w;
+    this.sentH = h;
+    napi.resizeSurface(this.vmId, Math.round(w * this.density), Math.round(h * this.density));
+  }
+
+  /* guest 帧几何轮询：fb 尺寸只在 qemu 出首帧和 guest 切显示模式时变化（低频），
+   * 轮询只为校准布局比例——未出帧时快问（启动出画面的瞬间尽快定比例），校准后
+   * 放慢。vmSnapshot 一次 IPC 往返，量级可忽略 */
+  private beginGeoWatch(): void {
+    const tick = (): void => {
+      if (this.closed) {
+        return;
+      }
+      let w = 0;
+      let h = 0;
+      const snap = napi.vmSnapshot([this.vmId]) as Record<string, Object>;
+      const st = snap[this.vmId];
+      if (typeof st !== 'undefined') {
+        const e = st as Record<string, Object>;
+        w = e['w'] as number;
+        h = e['h'] as number;
+      }
+      if (w > 0 && h > 0 && (w !== this.fbW || h !== this.fbH)) {
+        this.fbW = w;
+        this.fbH = h;
+        this.recomputeFit();
+      }
+      this.geoTimer = setTimeout(tick, this.fbW > 0 ? 1000 : 250);
+    };
+    this.geoTimer = setTimeout(tick, 250);
+  }
+
+  private stopGeoWatch(): void {
+    if (this.geoTimer >= 0) {
+      clearTimeout(this.geoTimer);
+      this.geoTimer = -1;
+    }
+  }
+
   aboutToAppear(): void {
     /* vmId 由 Ability 在 loadContent 前入队（同步建页，出队即得） */
     this.vmId = takePendingVmId();
@@ -182,6 +278,8 @@ struct VmConsole {
       }
     };
     napi.setQmpEventCallback(this.vmId, (evt: string) => this.onQmpEvent(evt));
+    this.density = display.getDefaultDisplaySync().densityPixels;
+    this.beginGeoWatch();
     this.loadKbd();
     this.loadGestureHint();
     this.enterVm();
@@ -196,6 +294,7 @@ struct VmConsole {
   aboutToDisappear(): void {
     this.releaseAllKeys();
     this.stopReadyWatch();
+    this.stopGeoWatch();
     napi.setQmpEventCallback(this.vmId, null);
     this.closeSerial();
   }
@@ -625,9 +724,10 @@ struct VmConsole {
   /* ================= 触摸手势（单指移动/点击/长按右键，双指滚轮） ================= */
 
   private sendPtrMedia(vx: number, vy: number, buttons: number): void {
-    /* 绝对注入：view 坐标按 viewport 比例映射到 guest 表面坐标（virtio-tablet 语义） */
-    const px = this.toSurfacePx(vx, this.areaW, this.xcController.surfaceWidth);
-    const py = this.toSurfacePx(vy, this.areaH, this.xcController.surfaceHeight);
+    /* 绝对注入：view 坐标按 viewport 比例映射到 guest 表面坐标（virtio-tablet 语义），
+     * px 基准= vp×密度，与 syncBufferGeometry 下发的 buffer 尺寸同一换算 */
+    const px = this.toSurfacePx(vx, this.areaW, this.areaW * this.density);
+    const py = this.toSurfacePx(vy, this.areaH, this.areaH * this.density);
     this.lastX = vx;
     this.lastY = vy;
     napi.sendPointer(this.vmId, px, py, buttons);
@@ -1000,12 +1100,13 @@ struct VmConsole {
       /* VM 画面区：XComponent + 虚拟键盘 overlay（键盘盖画面、不压底部状态栏） */
       Stack() {
         XComponent({ type: XComponentType.SURFACE, controller: this.xcController })
-          .width('100%')
-          .height('100%')
+          .width(this.fitW > 0 ? this.fitW : '100%')
+          .height(this.fitH > 0 ? this.fitH : '100%')
           .backgroundColor(Color.Black)
           .onAreaChange((oldArea: Area, newArea: Area) => {
             this.areaW = newArea.width as number;
             this.areaH = newArea.height as number;
+            this.syncBufferGeometry();
           })
           .onTouch((event: TouchEvent) => this.handleTouch(event))
           /* 鼠标**未按下**的移动不产生 TouchEvent（touch 需要接触），只走 onMouse 的
@@ -1186,6 +1287,14 @@ struct VmConsole {
       }
       .width('100%')
       .layoutWeight(1)
+      /* letterbox 黑边由容器出（布局属性，同步）：XComponent 缩到 guest 比例居中，
+       * 边框区域露容器黑底。resize 时布局与黑边同步走，画面比例恒定不跳 */
+      .backgroundColor(Color.Black)
+      .onAreaChange((_o: Area, n: Area) => {
+        this.containerW = n.width as number;
+        this.containerH = n.height as number;
+        this.recomputeFit();
+      })
 
       /* 底部状态栏：运行状态 + 电源/远程控制（常驻，所有设备；
        * 沉浸全屏时整体隐藏，画面铺满整窗） */
