@@ -15,7 +15,7 @@ import { pathExists, isoReadable, readTail } from '../lib/fsutil';
 import { prepareStart } from '../lib/tempSession';
 import { takePendingVmId, isPadOrPhone } from '../lib/vmwindows';
 import { VirtualKeyboard } from '../lib/VirtualKeyboard';
-import { sp1, sp2 } from '../lib/uiTokens';
+import { sp1, sp2, cCard, cText, cPrimary, cDanger } from '../lib/uiTokens';
 
 /* 多 ISO 启动前的可读性过滤在 doStart 内做：把不可读盘从本次启动的 ISO 列表里剔除，
  * 再经 buildArgs 的 isoOverride 传入（不动 profile 对象，避免污染后续配置/结算）。 */
@@ -53,7 +53,7 @@ const STATUS_H = 32;          /* 底部状态栏高 (vp) */
 const STATUS_BTN_H = 26;      /* 底部按钮高 (vp)，收窄让状态条更细 */
 const STATUS_FS = 12;         /* 底部状态栏字号（running 字样基准，按钮同） */
 const FAB_PREF = 'vmconsole_fab'; /* console 偏好文件名（现仅虚拟键盘显隐用） */
-const MENU_TEXT = '#fff5f7fa'; /* 底部栏浅色文字 */
+const MENU_TEXT = '#fff5f7fa'; /* 浅色文字：熔断横幅/串口浮层等黑底深色浮层用 */
 /* console 整个界面都是深色的（画面区纯黑、状态栏与串口面板 #20242b）。uiTokens 的
  * cPrimary(#0563ff) / cDanger(#d92d20) / cWeak(#6b7280) 是给浅色背景设计的深色值，
  * 搬到这里对比度只有 2.1~2.9:1 —— 实测「画面」「强制断电」这类文字看不清。
@@ -723,6 +723,29 @@ struct VmConsole {
 
   /* ================= 触摸手势（单指移动/点击/长按右键，双指滚轮） ================= */
 
+  /* 「电源」菜单：四个电源操作收拢。重启/强制关机自带确认对话框，关机/CAD 直发。
+   * 原生 Menu/MenuItem（同 VmList.newVmMenu 的既有结论：自拼 Button 样式嘈杂） */
+  @Builder
+  powerMenu() {
+    Menu() {
+      MenuItem({ content: '关机' })
+        .enabled(this.qmpAlive)
+        .onClick(() => {
+          this.userStopped = true;
+          this.qmp('system_powerdown');
+        })
+      MenuItem({ content: '重启' })
+        .enabled(this.qmpAlive)
+        .onClick(() => { this.confirmRestart() })
+      MenuItem({ content: '强制关机' })
+        .contentFontColor(cDanger)
+        .onClick(() => { this.confirmForceOff() })
+      MenuItem({ content: 'Ctrl+Alt+Del' })
+        .enabled(this.qmpAlive)
+        .onClick(() => { this.actReset() })
+    }
+  }
+
   private sendPtrMedia(vx: number, vy: number, buttons: number): void {
     /* 绝对注入：view 坐标按 viewport 比例映射到 guest 表面坐标（virtio-tablet 语义），
      * px 基准= vp×密度，与 syncBufferGeometry 下发的 buffer 尺寸同一换算 */
@@ -1297,49 +1320,30 @@ struct VmConsole {
       })
 
       /* 底部状态栏：运行状态 + 电源/远程控制（常驻，所有设备；
-       * 沉浸全屏时整体隐藏，画面铺满整窗） */
+       * 沉浸全屏时整体隐藏，画面铺满整窗）。配色走主题双色板，跟随系统深浅 */
       if (!this.immersive) {
         Row({ space: sp2 }) {
-          Text(this.status).fontSize(STATUS_FS).fontColor(MENU_TEXT)
+          Text(this.status).fontSize(STATUS_FS).fontColor(cText)
             .layoutWeight(1).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Button('关机').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+          Button('电源').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
-            .enabled(this.qmpAlive)
-            .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
-            .onClick(() => {
-              /* 用户主动停止：别让随后到来的 QMP_DISCONNECT 被当成启动失败写熔断标记 */
-              this.userStopped = true;
-              this.qmp('system_powerdown');
-            })
-          Button('重启').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+            .fontColor(cText).backgroundColor(Color.Transparent)
+            .bindMenu(this.powerMenu)
+          Button(this.serialView ? '屏幕' : '串口').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
             .padding({ left: sp1, right: sp1 })
-            .enabled(this.qmpAlive)
-            .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
-            .onClick(() => { this.confirmRestart() })
-          Button('强制关机').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
-            .padding({ left: sp1, right: sp1 })
-            .fontColor(DARK_DANGER).backgroundColor(Color.Transparent)
-            .onClick(() => { this.confirmForceOff() })
-          Button('Ctrl+Alt+Del').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
-            .padding({ left: sp1, right: sp1 })
-            .enabled(this.qmpAlive)
-            .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
-            .onClick(() => { this.actReset() })
-          Button(this.serialView ? '切到画面' : '切到串口').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
-            .padding({ left: sp1, right: sp1 })
-            .fontColor(this.serialView ? DARK_ACCENT : MENU_TEXT).backgroundColor(Color.Transparent)
+            .fontColor(this.serialView ? cPrimary : cText).backgroundColor(Color.Transparent)
             .onClick(() => { this.toggleSerialView() })
           if (isPadOrPhone()) {
             Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
               .padding({ left: sp1, right: sp1 })
-              .fontColor(this.showKbd ? DARK_ACCENT : MENU_TEXT).backgroundColor(Color.Transparent)
+              .fontColor(this.showKbd ? cPrimary : cText).backgroundColor(Color.Transparent)
               .onClick(() => { this.toggleKbd() })
           }
         }
         .width('100%')
         .height(STATUS_H)
-        .backgroundColor('#e620242b')
+        .backgroundColor(cCard)
         .padding({ left: sp2, right: sp2 })
         .alignItems(VerticalAlign.Center)
       }
