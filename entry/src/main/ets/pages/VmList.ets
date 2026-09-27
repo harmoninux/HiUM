@@ -364,7 +364,10 @@ export struct VmList {
             ListItem() {
               this.sideRow(p)
             }
-          }, (p: VmProfile) => p.id)
+          }, (p: VmProfile) => this.vmListVersion + '|' + p.id)
+          /* key 必须带刷新信号：V1 ForEach 对 key 相同的项只复用旧组件不重渲染
+           * （改名后 reload 换了数组，顺序会重排、但每行还是旧名字），版本并入
+           * key 后 vmListVersion 一变即全量重建行，任何字段改动都不会漏显示 */
         }
         .layoutWeight(1)
         .padding({ left: sp3, right: sp3, bottom: sp2 })
