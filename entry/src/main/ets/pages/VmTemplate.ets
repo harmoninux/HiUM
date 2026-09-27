@@ -41,7 +41,6 @@ const DISK_SIZES: number[] = [4, 8, 16, 32, 64];
  * x86 → 恒 pc，天然排除 q35——ICH9 呈现 AHCI，XP 无 in-box 驱动会 0x7B 蓝屏）。 */
 interface TplDef {
   id: string;
-  icon: string;
   name: string;
   desc: string;
   archs: VmArch[];
@@ -59,7 +58,7 @@ interface TplDef {
 
 const TEMPLATES: TplDef[] = [
   {
-    id: 'alpine', icon: '🐧', name: 'Alpine Linux',
+    id: 'alpine', name: 'Alpine Linux',
     desc: '迷你安全发行版 · 文本模式 · 内置镜像',
     archs: ['x86_64', 'i386', 'aarch64', 'arm', 'loongarch64', 'riscv64'],
     vga: 'std', memoryMB: 1024, cpus: 2, diskGB: 8,
@@ -70,7 +69,7 @@ const TEMPLATES: TplDef[] = [
   {
     /* 模板名就叫 Windows，不带版本：一条模板通吃 Win7/8/10（也装得下未来的
      * Win11），具体装什么由用户在名称框里自己起名（见下方注释的兼容矩阵） */
-    id: 'windows', icon: '🪟', name: 'Windows',
+    id: 'windows', name: 'Windows',
     desc: '兼容 Win7/8/10 · 32/64 位镜像通用 · 需自备镜像',
     /* 只开 x86_64 + cpu max（qemu32 无 long mode 引导 x64 镜像即 0xC000035A 蓝屏；
      * qemu64 缺 PREFETCHW/POPCNT，Win8.1+ x64 内核检查不过即 0x5D 蓝屏——max 是
@@ -78,7 +77,7 @@ const TEMPLATES: TplDef[] = [
      * 的 x64 与 32 位镜像通吃。x86 镜像靠 x64 CPU 向下兼容，不需要 i386 虚拟机。 */
     archs: ['x86_64'],
     vga: 'std', memoryMB: 4096, cpus: 2, diskGB: 64,
-    diskIface: 'ide', netModel: 'rtl8139', rtcLocal: true, audio: false,
+    diskIface: 'ide', netModel: 'rtl8139', rtcLocal: true, audio: true,
     cpuModel: 'max',
     iso: 'user',
   },
@@ -283,7 +282,7 @@ export struct VmTemplate {
           ForEach(TEMPLATES, (t: TplDef) => {
             Row({ space: sp2 }) {
               Column({ space: sp1 }) {
-                Text(`${t.icon} ${t.name}`).fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cText)
+                Text(t.name).fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cText)
                 Text(t.desc).fontSize(tSub).fontColor(cWeak)
               }
               .alignItems(HorizontalAlign.Start)
@@ -352,7 +351,7 @@ export struct VmTemplate {
             }, (g: number) => String(g))
           }
           .width('100%')
-          Text('动态分配 qcow2，用到多少占多少').fontSize(tSub).fontColor(cWeak).width('100%')
+          Text('磁盘空间按需占用：设置的是上限，不会立刻占满').fontSize(tSub).fontColor(cWeak).width('100%')
 
           this.groupHeader('安装镜像')
           if (this.tpl().iso === 'builtin') {
@@ -387,7 +386,7 @@ export struct VmTemplate {
             .onChange((v: string) => this.nameInput = v)
           Text(this.tpl().iso === 'builtin'
             ? '其余按推荐默认：网络开启 · 声卡开 · TCG 多线程 · 从光盘引导'
-            : '已按 Windows 兼容性自动配置：IDE 磁盘 · 兼容网卡 · 本地时钟 · 声卡默认关')
+            : '已按 Windows 兼容性自动配置：IDE 磁盘 · 兼容网卡 · 本地时钟 · 声卡开')
             .fontSize(tSub).fontColor(cWeak).width('100%')
         }
         .alignItems(HorizontalAlign.Start)

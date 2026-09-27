@@ -292,7 +292,7 @@ export struct VmList {
               .padding({ left: sp1, right: sp1 })
           }
           if (this.mediaIssue(p).length > 0) {
-            Text('⚠ 文件缺失')
+            Text('文件缺失')
               .fontSize(tSub)
               .fontColor(cWarn)
               .backgroundColor(cChip)

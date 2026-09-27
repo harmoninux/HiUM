@@ -14,7 +14,7 @@ import { pickIsoPath, pickFilePath } from '../lib/isoPick';
 import { copyFileWithProgress } from '../lib/fsutil';
 import { mainDiskPath } from '../lib/vmprofile';
 import {
-  cPrimary, cDanger, cRunning, cSuccess, cText, cSub, cWeak,
+  cPrimary, cDanger, cRunning, cText, cSub, cWeak,
   cCard, cBlock, cChip, cBorder,
   tCard, tLabel, tBody, tSub,
   sp1, sp2, sp3, sp4, sp5, sp8, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
@@ -191,7 +191,7 @@ export struct VmStorage {
     const mainIface: DiskIface = p.media.disks.length > 0 ? p.media.disks[0].iface : 'virtio';
     const cap = mainIface === 'ide' ? ideDataDiskCapacity(p.machine.machine) : 8;
     if (this.extraDisks.length >= cap) {
-      promptAction.showToast({ message: mainIface === 'ide' ? `IDE 接口槽位有限，数据盘最多 ${cap} 张` : '数据盘最多 8 张' });
+      promptAction.showToast({ message: mainIface === 'ide' ? `IDE 模式下数据盘最多 ${cap} 张` : '数据盘最多 8 张' });
       return;
     }
     const store = new VmStore(this.filesDir);
@@ -828,7 +828,6 @@ export struct VmStorage {
 
       if (this.snack.length > 0) {
         Row() {
-          Text('✓ ').fontSize(tBody).fontColor(cSuccess)
           Text(this.snack).fontSize(tBody).fontColor(Color.White)
         }
         .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })

@@ -772,13 +772,18 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     }
   }
   /* 声音（v6）：OHOS 音频后端（driver=ohos，见 libqemu 补丁）——
-   * pc/q35 用 AC97（UTM 同款，guest 走 snd_intel8x0/ac97），virt 用
-   * virtio-sound-pci（guest 走 snd_virtio）。每 VM 独立 qemu 进程，
-   * audiodev id=ohos0 天然无冲突。raspi 无模拟声卡，忽略并 UI 禁用。 */
+   * pc/q35 用 intel-hda + hda-duplex：Vista 起的 Windows in-box 驱动即认，
+   * 不用装驱动就出声；AC97 只有 XP 认（不保）。virt 用 virtio-sound-pci
+   * （guest 走 snd_virtio）。每 VM 独立 qemu 进程，audiodev id=ohos0 天然
+   * 无冲突。raspi 无模拟声卡，忽略并 UI 禁用。 */
   if (!isRaspi) {
     if (p.runtime.audio) {
       args.push('-audiodev', 'driver=ohos,id=ohos0');
-      args.push('-device', board === 'virt' ? 'virtio-sound-pci,audiodev=ohos0' : 'AC97,audiodev=ohos0');
+      if (board === 'virt') {
+        args.push('-device', 'virtio-sound-pci,audiodev=ohos0');
+      } else {
+        args.push('-device', 'intel-hda', '-device', 'hda-duplex,audiodev=ohos0');
+      }
     }
   }
   const extra = p.extraArgs.trim();

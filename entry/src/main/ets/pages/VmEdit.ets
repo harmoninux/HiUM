@@ -469,6 +469,14 @@ export struct VmEdit {
             }
           }.width('100%').padding({ top: sp1, bottom: sp1 })
 
+          /* 声音：常用硬件开关（raspi 无模拟声卡禁用），不放进「高级」折叠区 */
+          Row() {
+            Text('声音').fontSize(tLabel).layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.audio })
+              .enabled(!this.isRaspiBoard())
+              .onChange((v: boolean) => this.audio = v)
+          }.width('100%').padding({ top: sp1, bottom: sp1 })
+
           /* —— 存储 —— */
           this.groupHead('存储')
 
@@ -527,19 +535,19 @@ export struct VmEdit {
                 .onClick(() => { this.diskIface = 'ide' })
             }.width('100%').padding({ top: sp1, bottom: sp1 })
             Text(this.diskIface === 'ide'
-              ? 'XP/Win7 开箱即认；ide 槽位有限（数据盘上限随之收紧）'
-              : 'Linux 默认；性能最好但需客户机驱动（Windows 安装程序不认）')
+              ? 'Windows 免装驱动即可识别'
+              : '性能更好，Linux 首选；Windows 需另装驱动')
               .fontSize(tSub).fontColor(cWeak).width('100%')
 
             /* cache=unsafe：老系统安装期提速开关（机理见 VmDisk.cache 注释） */
             Row() {
-              Text('写入缓存 (unsafe)').fontSize(tLabel).layoutWeight(1)
+              Text('写入缓存').fontSize(tLabel).layoutWeight(1)
               Toggle({ type: ToggleType.Switch, isOn: this.diskUnsafeCache })
                 .onChange((v: boolean) => this.diskUnsafeCache = v)
             }.width('100%').padding({ top: sp1, bottom: sp1 })
             Text(this.diskUnsafeCache
-              ? '忽略客户机刷盘请求，安装系统期间明显提速；宿主/App 崩溃时磁盘可能损坏，装完建议关闭'
-              : '默认：客户机刷盘即刻落盘（最安全）')
+              ? '虚拟机写入不再立即保存，安装系统期间明显提速；App 或设备崩溃时磁盘数据可能损坏，装完系统建议关闭'
+              : '默认：虚拟机的写入立即保存，速度稍慢但更可靠')
               .fontSize(tSub).fontColor(cWeak).width('100%')
           }
 
@@ -643,7 +651,7 @@ export struct VmEdit {
           if (this.netEnabled) {
             Column({ space: 4 }) {
               Text('端口映射').fontSize(tLabel)
-              Text('宿主机端口:客户机端口，逗号分隔').fontSize(tSub).fontColor(cWeak)
+              Text('设备端口:虚拟机端口，多个用逗号分隔').fontSize(tSub).fontColor(cWeak)
               TextInput({ placeholder: '如 2222:22,8080:80', text: this.portForwards })
                 .fontSize(tBody)
                 .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
@@ -655,7 +663,7 @@ export struct VmEdit {
                 Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
                   .onChange((v: boolean) => this.sharedFolder = v)
               }.padding({ left: 0, right: 0 })
-              Text('把宿主机 Download/ 目录挂载到客户机 /shared').fontSize(tSub).fontColor(cWeak)
+              Text('开启后虚拟机可读写设备的 Download 目录（在虚拟机内是 /shared）').fontSize(tSub).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
             /* 网卡型号（仅 x86 板卡可切）：rtl8139 是 XP/Win7 唯一双 in-box 驱动的
              * 网卡，性能弱于 virtio；Linux 用 virtio。 */
@@ -677,7 +685,7 @@ export struct VmEdit {
                     .onClick(() => { this.netModel = 'rtl8139' })
                 }.width('100%')
                 Text(this.netModel === 'rtl8139'
-                  ? 'Windows 开箱即认（XP/Win7 内置驱动）'
+                  ? 'Windows 默认'
                   : 'Linux 默认；Windows 需装 virtio-win 驱动')
                   .fontSize(tSub).fontColor(cWeak).width('100%')
               }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
@@ -713,13 +721,6 @@ export struct VmEdit {
                 .enabled(!this.isRaspiBoard())
                 .onChange((v: boolean) => this.balloon = v)
             }.padding({ top: sp1, bottom: sp1 })
-            /* v6：声音（raspi 无模拟声卡禁用；向导建 VM 默认开，历史开机开关在此） */
-            Row() {
-              Text('声音').fontSize(tLabel).layoutWeight(1)
-              Toggle({ type: ToggleType.Switch, isOn: this.audio })
-                .enabled(!this.isRaspiBoard())
-                .onChange((v: boolean) => this.audio = v)
-            }.padding({ top: sp1, bottom: sp1 })
             /* v6：GDB 调试后端（开机后可连 `gdb target remote :端口`）。仅编辑页提供，
              * 窗口底部引导文案提示用法 */
             Row() {
@@ -749,14 +750,14 @@ export struct VmEdit {
                 .enabled(!this.isRaspiBoard())
                 .onChange((v: string) => this.cpuFlags = v)
             }.padding({ bottom: sp1 })
-            Text('追加到 -cpu 模型之后；留空不生成参数').fontSize(tSub).fontColor(cWeak)
+            Text('为 CPU 追加指令集开关，用于排查兼容性问题；不确定请留空').fontSize(tSub).fontColor(cWeak)
               .padding({ bottom: sp1 })
             Row() {
               Text('RTC 本地时区').fontSize(tLabel).layoutWeight(1)
               Toggle({ type: ToggleType.Switch, isOn: this.rtcLocal })
                 .onChange((v: boolean) => this.rtcLocal = v)
             }.padding({ top: sp1, bottom: sp1 })
-            Text('guest 时钟随宿主时区显示（-rtc base=localtime）').fontSize(tSub).fontColor(cWeak)
+            Text('虚拟机内的时钟跟随设备时区显示，Windows 虚拟机建议开启').fontSize(tSub).fontColor(cWeak)
               .padding({ bottom: sp1 })
             Column({ space: 4 }) {
               Text('自定义 QEMU 参数').fontSize(tLabel)
@@ -769,6 +770,9 @@ export struct VmEdit {
           }
         }
         .width('100%')
+        /* Column 默认水平居中：占满宽度的行看不出来，自适应宽度的说明文字
+         * （追加到 -cpu 之后/gdb 用法/rtc 说明）会悬在中间，表单区一律左对齐 */
+        .alignItems(HorizontalAlign.Start)
         .padding({ left: sp3, right: sp3, bottom: sp5 })
       }
       .layoutWeight(1)

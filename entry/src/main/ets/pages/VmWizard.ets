@@ -657,9 +657,7 @@ export struct VmWizard {
         Text('cirrus/vmware 对老系统（Win9x/旧 DOS）兼容性更好；virtio 性能最好')
           .fontSize(tSub).fontColor(cWeak).width('100%')
       } else {
-        Text(this.isRaspiBoard()
-          ? '当前板卡显示设备固定（树莓派 = SoC 板载）'
-          : 'virt 板卡固定 virtio-gpu（无传统 VGA 总线）')
+        Text('当前机型的显卡型号固定，无法更换')
           .fontSize(tSub).fontColor(cWeak).width('100%')
       }
 
@@ -707,7 +705,7 @@ export struct VmWizard {
           .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
           .onChange((v: string) => this.cpuModel = v)
 
-        Text('留空 = 自动；ARM/ARM64/龙芯/RISC-V 默认 max，x86 用板卡默认').fontSize(tSub).fontColor(cWeak)
+        Text('留空自动选择；不确定保持默认即可').fontSize(tSub).fontColor(cWeak)
       }
 
       this.stepErrorMsg()
@@ -736,7 +734,7 @@ export struct VmWizard {
           .enabled(!this.isRaspiBoard())
           .onChange((v: boolean) => this.rng = v)
       }.padding({ top: sp1, bottom: sp1 })
-      Text('virtio-rng：给客户机注入随机数熵源（加密应用初始化更快），客户机内核自带驱动')
+      Text('为虚拟机提供随机数来源，加密等应用的初始化更快')
         .fontSize(tSub).fontColor(cWeak).width('100%')
       Row() {
         Text('内存回收 (Balloon)').fontSize(tLabel).layoutWeight(1)
@@ -744,7 +742,7 @@ export struct VmWizard {
           .enabled(!this.isRaspiBoard())
           .onChange((v: boolean) => this.balloon = v)
       }.padding({ top: sp1, bottom: sp1 })
-      Text('virtio-balloon：空闲内存可交还宿主机，设备内存更宽裕')
+      Text('虚拟机空闲时把暂用不到的内存还给设备，整机内存更宽裕')
         .fontSize(tSub).fontColor(cWeak).width('100%')
       /* v6：声音——默认开；raspi 无 PCI 且 QEMU 未模拟树莓派声卡，禁用 */
       Row() {
@@ -753,7 +751,7 @@ export struct VmWizard {
           .enabled(!this.isRaspiBoard())
           .onChange((v: boolean) => this.audio = v)
       }.padding({ top: sp1, bottom: sp1 })
-      Text('客户机声卡按板卡生成（AC97 / virtio-sound），宿主机侧走系统音频')
+      Text('开启后虚拟机里的声音通过设备的扬声器/耳机播放')
         .fontSize(tSub).fontColor(cWeak).width('100%')
 
       /* TCG 模拟组：默认折叠，点组头展开/收起 */
@@ -867,7 +865,7 @@ export struct VmWizard {
             .borderRadius(rBadge)
             .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
             .onClick(() => { this.diskIface = 'ide' })
-          Text(this.diskIface === 'ide' ? 'XP/Win7 开箱即认' : 'Linux 默认')
+          Text(this.diskIface === 'ide' ? 'Windows 免装驱动' : '适合 Linux')
             .fontSize(tSub).fontColor(cWeak).layoutWeight(1)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
@@ -987,14 +985,14 @@ export struct VmWizard {
           .fontSize(tBody)
           .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
           .onChange((v: string) => this.portForwards = v)
-        Text('宿主机端口:客户机端口，逗号分隔，如 2222:22,8080:80').fontSize(tSub).fontColor(cWeak)
+        Text('设备端口:虚拟机端口，多个用逗号分隔，如 2222:22,8080:80').fontSize(tSub).fontColor(cWeak)
         Row() {
           Text('9p 共享目录').fontSize(tLabel).layoutWeight(1)
           Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
             .onChange((v: boolean) => this.sharedFolder = v)
         }
         if (this.sharedFolder) {
-          Text('把宿主机 Download/ 目录挂载到客户机 /shared').fontSize(tSub).fontColor(cWeak)
+          Text('开启后虚拟机可读写设备的 Download 目录（在虚拟机内是 /shared）').fontSize(tSub).fontColor(cWeak)
         }
         this.stepErrorMsg()
       }

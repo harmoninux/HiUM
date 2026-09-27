@@ -13,7 +13,7 @@ import {
 } from '../lib/vmsnapshot';
 import { isTempSnapshot } from '../lib/tempSession';
 import {
-  cPrimary, cDanger, cRunning, cSuccess, cWarn, cText, cSub, cWeak,
+  cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
   cCard, cBlock, cChip, cBorder,
   tCard, tLabel, tBody, tSub, tSubL, tMono,
   sp1, sp2, sp3, sp4, sp5, sp8, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
@@ -850,7 +850,6 @@ export struct VmManage {
 
       if (this.snack.length > 0) {
         Row() {
-          Text('✓ ').fontSize(tBody).fontColor(cSuccess)
           Text(this.snack).fontSize(tBody).fontColor(Color.White)
         }
         .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
