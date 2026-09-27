@@ -49,9 +49,18 @@ const TAG = 'QemuUI';
 /* 悬浮按钮（替代顶部工具条）：半透明圆钮，可拖拽移动，点击展开竖向操作面板。
  * 位置持久化到 preferences（键按 vmId 区分，跨窗口/重开记住落位）。
  * 尺寸/阈值参照 wineohos VirtualDesktop 的 EXIT_BTN_SIZE/EXIT_DRAG_THRESHOLD。 */
-const STATUS_H = 32;          /* 底部状态栏高 (vp) */
-const STATUS_BTN_H = 26;      /* 底部按钮高 (vp)，收窄让状态条更细 */
-const STATUS_FS = 12;         /* 底部状态栏字号（running 字样基准，按钮同） */
+/* 底部状态栏（仅状态栏用）：Pad/手机高密度屏，24/11 才有「细条」观感；
+ * PC(2in1) 密度低，24/11 显得局促，保持 28/12 */
+const STATUS_H_PAD = 24;
+const STATUS_BTN_H_PAD = 20;
+const STATUS_FS_PAD = 11;
+const STATUS_H_PC = 28;
+const STATUS_BTN_H_PC = 22;
+const STATUS_FS_PC = 12;
+/* 串口面板与黑底浮层（熔断横幅/手势速查）：不随状态栏收窄，维持原尺寸 */
+const PANEL_H = 32;
+const PANEL_BTN_H = 26;
+const PANEL_FS = 12;
 const FAB_PREF = 'vmconsole_fab'; /* console 偏好文件名（现仅虚拟键盘显隐用） */
 const MENU_TEXT = '#fff5f7fa'; /* 浅色文字：熔断横幅/串口浮层等黑底深色浮层用 */
 /* console 整个界面都是深色的（画面区纯黑、状态栏与串口面板 #20242b）。uiTokens 的
@@ -106,7 +115,8 @@ class VmXComponentController extends XComponentController {
 struct VmConsole {
   @StorageLink('vmDataDir') vmDataDir: string = '';
   @StorageLink('filesDir') filesDir: string = '';
-  @StorageLink('vmListVersion') vmListVersion: number = 0;
+  @StorageLink('vmListVersion') @Watch('refreshVmName') vmListVersion: number = 0;
+  @State vmName: string = ''; /* 底部状态栏标题（改名后经 vmListVersion 跨窗口跟新） */
   @State status: string = '';
   /* QMP 可用（就绪往返过一次）：关机/重启/Ctrl+Alt+Del 的启用依据。
    * build 里不问 napi.vmRunning（同步 IPC 往返），经本状态由事件驱动翻转 */
@@ -132,6 +142,10 @@ struct VmConsole {
    * 不能写熔断标记，否则每次正常关机都会让下次进入不自动启动。 */
   private userStopped: boolean = false;
   private xcController: VmXComponentController = new VmXComponentController();
+  /* 底部状态栏尺寸（Pad/手机 vs PC 两档，见 STATUS_*_PAD/PC 常量注释） */
+  private barH: number = isPadOrPhone() ? STATUS_H_PAD : STATUS_H_PC;
+  private barBtnH: number = isPadOrPhone() ? STATUS_BTN_H_PAD : STATUS_BTN_H_PC;
+  private barFs: number = isPadOrPhone() ? STATUS_FS_PAD : STATUS_FS_PC;
   private immersiveMaximized: boolean = false;  /* 防递归：maximize() 自身也触发窗口状态回调 */
   private areaW: number = 0;
   private areaH: number = 0;
@@ -268,6 +282,7 @@ struct VmConsole {
     this.vmId = takePendingVmId();
     if (this.vmId.length > 0) {
       this.profile = new VmStore(this.filesDir).load(this.vmId);
+      this.refreshVmName();
     }
     this.xcController.vmId = this.vmId;
     this.xcController.onReady = () => {
@@ -297,6 +312,13 @@ struct VmConsole {
     this.stopGeoWatch();
     napi.setQmpEventCallback(this.vmId, null);
     this.closeSerial();
+  }
+
+  /* 状态栏标题：单独 @State，不挂在 profile 上（profile 非响应式，且启动期
+   * 不该被改名重载打乱）；管理页改名会 vmListVersion++，@Watch 在此重读落档 */
+  private refreshVmName(): void {
+    const p = new VmStore(this.filesDir).load(this.vmId);
+    this.vmName = p ? p.name : '';
   }
 
   private enterVm(): void {
@@ -1187,15 +1209,15 @@ struct VmConsole {
          * 不在 build 里问 napi.vmRunning —— 那是同步 IPC 往返，每次重绘都打一次。 */
         if (this.bootFailReason.length > 0) {
           Column({ space: sp2 }) {
-            Text('上次启动失败').fontSize(STATUS_FS).fontColor('#fffecaca')
-            Text(this.bootFailReason).fontSize(STATUS_FS).fontColor(MENU_TEXT).maxLines(2)
+            Text('上次启动失败').fontSize(PANEL_FS).fontColor('#fffecaca')
+            Text(this.bootFailReason).fontSize(PANEL_FS).fontColor(MENU_TEXT).maxLines(2)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
             Row({ space: sp2 }) {
-              Button('仍要启动').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+              Button('仍要启动').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp2, right: sp2 })
                 .fontColor(MENU_TEXT).backgroundColor('#40ffffff')
                 .onClick(() => { this.retryAnyway() })
-              Button('看日志').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+              Button('看日志').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp2, right: sp2 })
                 .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
                 .onClick(() => { this.failStart('上次启动失败'); })
@@ -1212,7 +1234,7 @@ struct VmConsole {
           Column() {
             Scroll(this.serialScroller) {
               Text(this.serialText)
-                .fontSize(STATUS_FS)
+                .fontSize(PANEL_FS)
                 .fontColor('#fff1f2f4')
                 .width('100%')
                 .padding({ left: sp2, right: sp2, top: sp2, bottom: sp2 })
@@ -1223,26 +1245,26 @@ struct VmConsole {
             .width('100%')
 
             Row({ space: sp2 }) {
-              Text('Ctrl').fontSize(STATUS_FS).height(STATUS_BTN_H)
+              Text('Ctrl').fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp1, right: sp1 })
                 .fontColor(this.ctrlOn ? DARK_ACCENT : MENU_TEXT)
                 .backgroundColor(Color.Transparent)
                 .onClick(() => { this.ctrlOn = !this.ctrlOn })
-              Text('Esc').fontSize(STATUS_FS).height(STATUS_BTN_H)
+              Text('Esc').fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp1, right: sp1 })
                 .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
                 .onClick(() => { this.serialSendByte(0x1b) })
-              Text('Enter').fontSize(STATUS_FS).height(STATUS_BTN_H)
+              Text('Enter').fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp1, right: sp1 })
                 .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
                 .onClick(() => { this.serialSendByte(0x0d) })
-              Text('清屏').fontSize(STATUS_FS).height(STATUS_BTN_H)
+              Text('清屏').fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp1, right: sp1 })
                 .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
                 .onClick(() => { this.serialText = '' })
             }
             .width('100%')
-            .height(STATUS_H)
+            .height(PANEL_H)
             .backgroundColor('#e620242b')
             .padding({ left: sp2, right: sp2 })
             .alignItems(VerticalAlign.Center)
@@ -1250,27 +1272,27 @@ struct VmConsole {
             Row({ space: sp2 }) {
               TextInput({ text: this.serialInput, placeholder: '输入并回车发送（Ctrl 开时 ^C 生效）' })
                 .layoutWeight(1)
-                .fontSize(STATUS_FS)
-                .height(STATUS_H)
+                .fontSize(PANEL_FS)
+                .height(PANEL_H)
                 .fontColor(MENU_TEXT)
                 /* placeholder/光标必须显式给色：不设就跟随系统主题，深色主题下是深色，
                  * 落在深色面板（半透明 #20242b + 底下 VM 常是黑屏）上等于隐形（实测踩过）。
                  * 背景也要与所在行分开：原来同为 #e620242b，看不出输入框边界。 */
                 .placeholderColor('#ff9aa4b2')
-                .placeholderFont({ size: STATUS_FS }) /* 不给就用默认字号，比同栏其他文字大一圈 */
+                .placeholderFont({ size: PANEL_FS }) /* 不给就用默认字号，比同栏其他文字大一圈 */
                 .caretColor(DARK_ACCENT)
                 .backgroundColor('#ff2b313b')
                 .padding({ left: sp2, right: sp2 })
                 .id(SERIAL_INPUT_ID)
                 .onChange((v: string) => this.serialInput = v)
                 .onSubmit(() => this.sendAndRefocus())
-              Text('发送').fontSize(STATUS_FS).height(STATUS_BTN_H)
+              Text('发送').fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp1, right: sp1 })
                 .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
                 .onClick(() => this.sendAndRefocus())
             }
             .width('100%')
-            .height(STATUS_H)
+            .height(PANEL_H)
             .backgroundColor('#e620242b')
             .padding({ left: sp2, right: sp2 })
             .alignItems(VerticalAlign.Center)
@@ -1284,13 +1306,13 @@ struct VmConsole {
           Column() {
             Column({ space: sp2 }) {
               Text('操作手势').fontSize(16).fontWeight(FontWeight.Medium).fontColor(MENU_TEXT)
-              Text('触摸屏').fontSize(STATUS_FS).fontColor(DARK_ACCENT)
+              Text('触摸屏').fontSize(PANEL_FS).fontColor(DARK_ACCENT)
               Text('单指点按＝左键，拖动＝移动光标；长按＝右键\n双指轻点＝右键；双指上下滑动＝滚轮')
-                .fontSize(STATUS_FS).fontColor(MENU_TEXT).textAlign(TextAlign.Center)
-              Text('触控板').fontSize(STATUS_FS).fontColor(DARK_ACCENT)
+                .fontSize(PANEL_FS).fontColor(MENU_TEXT).textAlign(TextAlign.Center)
+              Text('触控板').fontSize(PANEL_FS).fontColor(DARK_ACCENT)
               Text('双指点击＝右键；双指滑动＝滚轮')
-                .fontSize(STATUS_FS).fontColor(MENU_TEXT).textAlign(TextAlign.Center)
-              Button('知道了').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H + 6)
+                .fontSize(PANEL_FS).fontColor(MENU_TEXT).textAlign(TextAlign.Center)
+              Button('知道了').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H + 6)
                 .padding({ left: sp2 * 2, right: sp2 * 2 })
                 .fontColor(MENU_TEXT).backgroundColor('#40ffffff')
                 .onClick(() => this.dismissGestureHint())
@@ -1323,26 +1345,32 @@ struct VmConsole {
        * 沉浸全屏时整体隐藏，画面铺满整窗）。配色走主题双色板，跟随系统深浅 */
       if (!this.immersive) {
         Row({ space: sp2 }) {
-          Text(this.status).fontSize(STATUS_FS).fontColor(cText)
+          if (this.vmName.length > 0) {
+            Text(this.vmName).fontSize(this.barFs).fontWeight(FontWeight.Medium).fontColor(cText)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .constraintSize({ maxWidth: '40%' })
+          }
+          Text(this.status).fontSize(this.barFs).fontColor(cText)
             .layoutWeight(1).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Button('电源').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+          Button('电源').focusable(false).fontSize(this.barFs).height(this.barBtnH)
             .padding({ left: sp1, right: sp1 })
             .fontColor(cText).backgroundColor(Color.Transparent)
             .bindMenu(this.powerMenu)
-          Button(this.serialView ? '屏幕' : '串口').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+          Button(this.serialView ? '屏幕' : '串口').focusable(false).fontSize(this.barFs).height(this.barBtnH)
             .padding({ left: sp1, right: sp1 })
             .fontColor(this.serialView ? cPrimary : cText).backgroundColor(Color.Transparent)
             .onClick(() => { this.toggleSerialView() })
           if (isPadOrPhone()) {
-            Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(STATUS_FS).height(STATUS_BTN_H)
+            Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(this.barFs).height(this.barBtnH)
               .padding({ left: sp1, right: sp1 })
               .fontColor(this.showKbd ? cPrimary : cText).backgroundColor(Color.Transparent)
               .onClick(() => { this.toggleKbd() })
           }
         }
         .width('100%')
-        .height(STATUS_H)
+        .height(this.barH)
         .backgroundColor(cCard)
         .padding({ left: sp2, right: sp2 })
         .alignItems(VerticalAlign.Center)
