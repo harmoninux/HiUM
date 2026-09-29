@@ -61,20 +61,24 @@ all: download/qemu
 	# patches/*.patch 形式入库，worktree 创建后立即应用（本地未提交改动
 	# 不进 worktree，构建可复现的保证全在此步）。
 	cd temp/qemu && git apply $(shell pwd)/patches/qemu-0001-audio-ohos-backend.patch
+	cd temp/qemu && git apply $(shell pwd)/patches/qemu-0002-virgl-ohos.patch
+	cd temp/qemu && git apply $(shell pwd)/patches/qemu-0003-egl-headless-ohos.patch
+	# slirp 经 qemu 官方 subprojects/slirp.wrap（git clone，版本随 qemu 仓库
+	# 锁定）获取，要求 git 代理可用（git config --global http.proxy）。
 	cd temp/qemu && \
 	PKG_CONFIG=$(shell which pkg-config) \
 	PKG_CONFIG_PATH= \
 	PKG_CONFIG_LIBDIR=$(shell pwd)/../buildroot/lib/pkgconfig:$(shell pwd)/../buildroot/share/pkgconfig \
 	PKG_CONFIG_buildroot_DIR=$(shell pwd)/../buildroot \
-	CFLAGS="$(LSE_FLAGS) -D_UAPI_LINUX_VIRTIO_VSOCK_H -D_UAPI_LINUX_VIRTIO_TYPES_H -D_UAPI_LINUX_VIRTIO_RING_H -D_UAPI_LINUX_VIRTIO_PMEM_H -D_UAPI_LINUX_VIRTIO_NET_H -D_UAPI_LINUX_VIRTIO_IOMMU_H -D_UAPI_LINUX_VIRTIO_FS_H -D_UAPI_LINUX_VIRTIO_CONSOLE_H -D_UAPI_LINUX_VIRTIO_CONFIG_H -D_LINUX_SYSINFO_H -UHAVE_OPENAT2_H -D__user= -D__force= ${CFLAGS} -Wno-unused-command-line-argument -I$(shell pwd)/../buildroot/include/glib-2.0 -I$(shell pwd)/../buildroot/lib/glib-2.0/include -I$(shell pwd)/../buildroot/include/pixman-1 -L$(shell pwd)/../buildroot/lib" \
+	CFLAGS="$(LSE_FLAGS) -D_UAPI_LINUX_VIRTIO_VSOCK_H -D_UAPI_LINUX_VIRTIO_TYPES_H -D_UAPI_LINUX_VIRTIO_RING_H -D_UAPI_LINUX_VIRTIO_PMEM_H -D_UAPI_LINUX_VIRTIO_NET_H -D_UAPI_LINUX_VIRTIO_IOMMU_H -D_UAPI_LINUX_VIRTIO_FS_H -D_UAPI_LINUX_VIRTIO_CONSOLE_H -D_UAPI_LINUX_VIRTIO_CONFIG_H -D_LINUX_SYSINFO_H -UHAVE_OPENAT2_H -D__user= -D__force= ${CFLAGS} -Wno-unused-command-line-argument -I$(shell pwd)/../buildroot/include/glib-2.0 -I$(shell pwd)/../buildroot/lib/glib-2.0/include -I$(shell pwd)/../buildroot/include/pixman-1 -I$(shell pwd)/../buildroot/include/virgl -L$(shell pwd)/../buildroot/lib" \
 	./configure --target-list=$(TARGET_LIST) --cross-prefix= --host-cc=cc --disable-kvm --disable-xen --disable-rust --disable-docs --disable-werror \
 	 --enable-tcg --enable-lto --enable-strip --with-coroutine=sigaltstack \
 	 --enable-trace-backends=nop --disable-qom-cast-debug \
 	 --disable-stack-protector \
 	 --disable-bsd-user --disable-guest-agent --disable-gcrypt --disable-debug-info --disable-debug-tcg --enable-attr --disable-brlapi --disable-linux-aio \
 	 --disable-bzip2 --disable-cap-ng --disable-curl --disable-glusterfs --disable-gnutls --disable-nettle --disable-gtk --disable-rdma --disable-libiscsi \
-	 --disable-vnc-jpeg --disable-lzo --disable-curses --disable-libnfs --disable-numa --disable-opengl --disable-rbd --disable-vnc-sasl --disable-sdl \
-	 --disable-seccomp --disable-smartcard --disable-snappy --disable-spice --disable-libusb --disable-usb-redir --disable-vde --disable-vhost-net --disable-virglrenderer \
+	 --disable-vnc-jpeg --disable-lzo --disable-curses --disable-libnfs --disable-numa --enable-opengl --disable-rbd --disable-vnc-sasl --disable-sdl \
+	 --disable-seccomp --disable-smartcard --disable-snappy --disable-spice --disable-libusb --disable-usb-redir --disable-vde --disable-vhost-net --disable-dbus-display --enable-virglrenderer \
 	 --disable-vte --disable-xen-pci-passthrough --enable-tools --disable-libudev --disable-passt \
 	 --enable-pixman --enable-vnc --enable-slirp --enable-virtfs
 	cd temp/qemu && make $(QEMU_LIBS) -j $(shell nproc)

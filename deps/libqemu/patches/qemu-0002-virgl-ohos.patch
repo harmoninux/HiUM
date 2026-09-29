@@ -1,0 +1,18 @@
+diff --git a/hw/display/virtio-gpu-virgl.c b/hw/display/virtio-gpu-virgl.c
+index 07f6355..9dad7ae 100644
+--- a/hw/display/virtio-gpu-virgl.c
++++ b/hw/display/virtio-gpu-virgl.c
+@@ -1162,6 +1162,13 @@ int virtio_gpu_virgl_init(VirtIOGPU *g)
+     }
+ #endif
+ 
++    /* OHOS: 经典 winsys 路径需要显式开启。不设 USE_EGL 时 virgl 不会初始化
++     * 任何 winsys（flags=0 且无 get_egl_display 回调），virgl_renderer_init
++     * 直接失败。SURFACELESS 让 virgl_egl_init 走到 eglGetDisplay(DEFAULT)
++     * 的 fallback（OHOS 无 GBM 平台）；GLES 匹配 OHOS 的 GLES 实现。 */
++    flags |= VIRGL_RENDERER_USE_EGL | VIRGL_RENDERER_USE_SURFACELESS |
++             VIRGL_RENDERER_USE_GLES;
++
+     ret = virgl_renderer_init(g, flags, &virtio_gpu_3d_cbs);
+     if (ret != 0) {
+         error_report("virgl could not be initialized: %d", ret);

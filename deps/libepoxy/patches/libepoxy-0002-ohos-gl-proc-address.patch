@@ -1,0 +1,68 @@
+diff --git a/src/dispatch_common.c b/src/dispatch_common.c
+--- a/src/dispatch_common.c
++++ b/src/dispatch_common.c
+@@ -704,6 +704,18 @@
+ void *
+ epoxy_gl_dlsym(const char *name)
+ {
++#if defined(__OHOS__)
++    /* 见 epoxy_gles2_dlsym 的说明：OHOS 上 dlsym 到的 GL 入口与 EGL 上下文
++     * 不同源，优先向 EGL 要入口。无当前上下文时 epoxy_get_proc_address 返回
++     * NULL（本平台无 GLX），自然落到下面的 dlsym 兜底。 */
++    if (!epoxy_current_context_is_glx()) {
++        void *p = epoxy_get_proc_address(name);
++
++        if (p)
++            return p;
++    }
++#endif
++
+     epoxy_load_gl();
+
+     return do_dlsym(&api.gl_handle, name, true);
+@@ -715,6 +727,12 @@
+     if (epoxy_current_context_is_glx()) {
+         return epoxy_get_proc_address(name);
+     } else {
++#if defined(__OHOS__)
++        void *p = epoxy_get_proc_address(name);
++
++        if (p)
++            return p;
++#endif
+         get_dlopen_handle(&api.gles1_handle, GLES1_LIB, true, true);
+         return do_dlsym(&api.gles1_handle, name, true);
+     }
+@@ -726,6 +744,19 @@
+     if (epoxy_current_context_is_glx()) {
+         return epoxy_get_proc_address(name);
+     } else {
++#if defined(__OHOS__)
++        /* OHOS：dlopen("libGLESv2.so") 解析到 /system/lib64/ndk/libGLESv2.so——
++         * 那是与 EGL 上下文不同源的兼容库，它给出的入口对本进程的上下文无效
++         * （实测其 glGetString 恒返回 NULL ⇒ epoxy 版本探测得 0 ⇒ 所有 provider
++         * 判据不成立 ⇒ "No provider of …"，virgl 的 GL 全部不可用）。真正的入口
++         * 由 eglGetProcAddress 给出（实测指向 /system/lib64/libGLESv3.so 并能取到
++         * 正确的 GL_VERSION）。故本平台优先走 EGL、dlsym 仅作兜底，与上游对
++         * Android 的处理同源（那边 core_symbol_support=0，一律经 eglGetProcAddress）。 */
++        void *p = epoxy_get_proc_address(name);
++
++        if (p)
++            return p;
++#endif
+         get_dlopen_handle(&api.gles2_handle, GLES2_LIB, true, true);
+         return do_dlsym(&api.gles2_handle, name, true);
+     }
+@@ -747,6 +778,12 @@
+     if (epoxy_current_context_is_glx()) {
+         return epoxy_get_proc_address(name);
+     } else {
++#if defined(__OHOS__)
++        void *p = epoxy_get_proc_address(name);
++
++        if (p)
++            return p;
++#endif
+         if (get_dlopen_handle(&api.gles2_handle, GLES2_LIB, false, true)) {
+             void *func = do_dlsym(&api.gles2_handle, name, false);
+

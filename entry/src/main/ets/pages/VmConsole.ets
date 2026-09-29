@@ -165,9 +165,12 @@ struct VmConsole {
   private geoTimer: number = -1;
   /* buffer 几何的权威源：系统在自由窗口拖拽期间会向 surface 发「铺满窗口内容区」
    * 的 onSurfaceChanged（比例偏离组件），渲染层若照单全收，buffer 就被做成异形、
-   * letterbox 画的黑边被合成器压进画面（实测变形的根源）。因此 buffer 尺寸由本页
-   * 按组件实际尺寸下发，onSurfaceChanged 只更新缓存不透传。比例一致时合成器是
-   * 等比缩放，尺寸不必紧追组件——偏差超阈值才下发一次补清晰度 */
+   * letterbox 画的黑边被合成器压进画面（实测变形的根源）。因此 onSurfaceChanged
+   * 只更新缓存不透传，buffer 尺寸由本页下发。下发目标 = guest 分辨率：组件比例
+   * 恒等于 guest（布局层 letterbox），等比 buffer 经合成器等比拉伸即可铺满组件，
+   * 拷贝/上传/合成全链路按 guest 像素量计（组件物理尺寸可达 guest 的 3 倍），
+   * 且窗口拖拽不再触发 buffer 重下发与 EGLSurface 重建。guest 未出帧时比例未知，
+   * 兜底下发组件物理尺寸让首帧立即可见 */
   private sentW: number = 0;
   private sentH: number = 0;
   private density: number = 0;
@@ -218,29 +221,28 @@ struct VmConsole {
     this.fitH = Math.max(1, Math.floor(this.fbH * scale));
   }
 
-  /* 按组件实际尺寸（vp×密度）下发 buffer 几何。比例变了必发（保住「buffer 比例=
-   * 组件比例」这条合成器等比缩放的前提）；只是尺寸变大/变小时合成器本来就是等比
-   * 缩放，偏差不超阈值就懒得追——也顺带把 EGLSurface 重建从「每次窗口变化」降为
-   * 稀发。初始 sentW=0 保证首回路必发。 */
+  /* 下发 buffer 几何：guest 分辨率已知 → 按 guest 尺寸发（见 sentW 注释）；
+   * 未知 → 组件物理尺寸兜底。目标尺寸与已发尺寸相等即跳过（EGLSurface 重建
+   * 只发生在 guest 切分辨率或首帧校准时）。初始 sentW=0 保证首回路必发 */
   private syncBufferGeometry(): void {
-    const w = this.areaW;
-    const h = this.areaH;
-    if (w <= 0 || h <= 0 || this.density <= 0) {
+    if (this.areaW <= 0 || this.areaH <= 0 || this.density <= 0) {
       return;
     }
-    if (this.sentW > 0 && this.sentH > 0) {
-      const ratio = w / h;
-      const sentRatio = this.sentW / this.sentH;
-      const ratioSame = Math.abs(ratio - sentRatio) < sentRatio * 0.02;
-      const sizeClose = Math.abs(w - this.sentW) < this.sentW * 0.25 &&
-        Math.abs(h - this.sentH) < this.sentH * 0.25;
-      if (ratioSame && sizeClose) {
-        return;
-      }
+    let w: number;
+    let h: number;
+    if (this.fbW > 0 && this.fbH > 0) {
+      w = this.fbW;
+      h = this.fbH;
+    } else {
+      w = Math.round(this.areaW * this.density);
+      h = Math.round(this.areaH * this.density);
+    }
+    if (w === this.sentW && h === this.sentH) {
+      return;
     }
     this.sentW = w;
     this.sentH = h;
-    napi.resizeSurface(this.vmId, Math.round(w * this.density), Math.round(h * this.density));
+    napi.resizeSurface(this.vmId, w, h);
   }
 
   /* guest 帧几何轮询：fb 尺寸只在 qemu 出首帧和 guest 切显示模式时变化（低频），
@@ -264,6 +266,7 @@ struct VmConsole {
         this.fbW = w;
         this.fbH = h;
         this.recomputeFit();
+        this.syncBufferGeometry(); /* guest 切分辨率 → buffer 跟着切到新 guest 尺寸 */
       }
       this.geoTimer = setTimeout(tick, this.fbW > 0 ? 1000 : 250);
     };
@@ -549,15 +552,16 @@ struct VmConsole {
    * 都已发生，而 qemu 根本不进主循环（-qmp 的 chardev 建在 device init 之前，
    * unix socket 一进内核 backlog，connect 就会成功）。旧代码的 2s「vmRunning 即
    * 运行中」是假成功：vmRunning 的真实语义只是「子进程收到了 START」。
-   * 窗口 T=45s：edk2 + 大内存 + 多 ISO 首次启动会超过旧代码的 10s，而误判「卡死」
-   * 的代价是让用户以为好 VM 坏了。 */
+   * 窗口 T=10s：启动失败（后端/参数错误）时 qemu 在早期就打印错误，等 45s 才反馈
+   * 太慢（实测反馈）；再短则慢启动（edk2+大内存首启）有误判风险——若仍遇误判，
+   * 改大此值，别在判定逻辑上打补丁。 */
   private beginReadyWatch(): void {
     this.stopReadyWatch();
     this.readySeen = false;
     this.qmpAlive = false; /* 重新等待就绪，就绪后翻转（电源按钮随之启用） */
     this.bootFailReason = ''; /* 新一轮启动，旧失败提示作废（再失败会重新落标记） */
     const started = Date.now();
-    const WAIT_MS = 45000;
+    const WAIT_MS = 5000;
     this.readyTimer = setInterval(() => {
       if (napi.qmpReady(this.vmId)) {
         this.stopReadyWatch();
@@ -770,9 +774,10 @@ struct VmConsole {
 
   private sendPtrMedia(vx: number, vy: number, buttons: number): void {
     /* 绝对注入：view 坐标按 viewport 比例映射到 guest 表面坐标（virtio-tablet 语义），
-     * px 基准= vp×密度，与 syncBufferGeometry 下发的 buffer 尺寸同一换算 */
-    const px = this.toSurfacePx(vx, this.areaW, this.areaW * this.density);
-    const py = this.toSurfacePx(vy, this.areaH, this.areaH * this.density);
+     * px 基准 = syncBufferGeometry 当前下发的 buffer 尺寸（guest 分辨率已知时它
+     * 不等于组件物理尺寸，不能用 vp×密度 换算） */
+    const px = this.toSurfacePx(vx, this.areaW, this.sentW);
+    const py = this.toSurfacePx(vy, this.areaH, this.sentH);
     this.lastX = vx;
     this.lastY = vy;
     napi.sendPointer(this.vmId, px, py, buttons);

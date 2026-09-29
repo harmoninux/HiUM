@@ -1,6 +1,7 @@
 #include "vm.h"
 #include "qemu_abi.h"
 #include "fb.h"
+#include "renderer.h"
 
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -8,12 +9,17 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <dirent.h>
 #include <execinfo.h>
 #include <fstream>
 #include <signal.h>
+#include <string>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <thread>
 #include <time.h>
 #include <vector>
@@ -27,6 +33,7 @@ qemu_system_entry_fn qe_system_entry;
 register_displaychangelistener_fn qe_register_dcl;
 qemu_console_lookup_default_fn qe_console_lookup_default;
 graphic_hw_update_fn qe_graphic_hw_update;
+graphic_hw_invalidate_fn qe_graphic_hw_invalidate;
 qemu_input_event_send_key_qcode_fn qe_input_send_key;
 qemu_input_queue_abs_fn qe_input_queue_abs;
 qemu_input_queue_btn_fn qe_input_queue_btn;
@@ -34,6 +41,12 @@ qemu_input_event_sync_fn qe_input_event_sync;
 qemu_input_is_absolute_fn qe_input_is_absolute;
 bql_lock_impl_fn qe_bql_lock;
 bql_unlock_fn qe_bql_unlock;
+qemu_console_surface_fn qe_console_surface;
+console_set_display_gl_ctx_fn qe_set_display_gl_ctx;
+void **qe_egl_display_p;
+void **qe_egl_config_p;
+void **qe_egl_rn_ctx_p;
+int *qe_display_opengl_p;
 pixman_image_get_width_fn qe_surface_width;
 pixman_image_get_height_fn qe_surface_height;
 pixman_image_get_stride_fn qe_surface_stride;
@@ -80,6 +93,7 @@ bool resolveSym(void *so, const char *name, T *out)
 
 void installCrashHandlers(); /* 定义在文件尾（匿名命名空间内），此处前置声明供 vmMain 用 */
 void relayQemuLogThread(const std::string &logPath, std::atomic<bool> *stop);
+void logFloodWatchdogThread(const std::string &logPath, std::atomic<bool> *stop);
 
 void vmMain(VmState *vm)
 {
@@ -123,8 +137,50 @@ void vmMain(VmState *vm)
     installCrashHandlers();
     std::atomic<bool> stopRelay{false};
     std::thread relay;
+    std::thread floodWd;
     if (!logPath.empty()) {
         relay = std::thread(relayQemuLogThread, logPath, &stopRelay);
+        floodWd = std::thread(logFloodWatchdogThread, logPath, &stopRelay);
+    }
+    /* EGL 注入：qemu 的 GL 全局指向渲染线程已建好的 EGL 对象。qemu 自带的
+     * egl-headless 在 OHOS 上初始化即崩（surfaceless makeCurrent 不被支持：
+     * 实测 EglWrapperHookLayer init Failed / EGLDislay is invalid，随后 vCPU
+     * 线程在该状态上 SIGSEGV pc=0），故命令行不再带 -display egl-headless；
+     * display_opengl 由这里置位让 virtio-gpu-gl 通过「display 支持 GL」检查，
+     * GL 上下文全部由我们的 dgc（renderer_gl_ctx）提供。 */
+    {
+        void *dpySlot = nullptr;
+        void *cfg = nullptr;
+        void *rootCtx = nullptr;
+        bool ok = renderer_egl_export(&dpySlot, &cfg, &rootCtx);
+        for (int i = 0; !ok && i < 50; i++) {
+            usleep(100 * 1000); /* renderer 在 IPC 线程建 EGL，等它就绪（≤5s） */
+            ok = renderer_egl_export(&dpySlot, &cfg, &rootCtx);
+        }
+        if (ok) {
+            if (qe_egl_display_p != nullptr) {
+                *qe_egl_display_p = dpySlot;
+            }
+            if (qe_egl_config_p != nullptr) {
+                *qe_egl_config_p = cfg;
+            }
+            if (qe_egl_rn_ctx_p != nullptr) {
+                *qe_egl_rn_ctx_p = rootCtx;
+            }
+            if (qe_display_opengl_p != nullptr) {
+                *qe_display_opengl_p = 1;
+            }
+            /* 本线程即将跑 qemu_init（virtio-gpu-gl 的 realize 在其中）：
+             * virglrenderer 会在创建 context 前先做 GL 能力探测，此线程必须
+             * 已经持有 current context。 */
+            if (renderer_egl_make_current_root()) {
+                OH_LOG_INFO(LOG_APP, "egl globals injected, root ctx current");
+            } else {
+                OH_LOG_INFO(LOG_APP, "egl globals injected, make_current failed");
+            }
+        } else {
+            OH_LOG_ERROR(LOG_APP, "renderer egl not ready; virtio-gl will fail");
+        }
     }
     int argc = (int)vm->argPtrs.size();
     OH_LOG_INFO(LOG_APP, "qemu_system_entry start, argc=%{public}d", argc);
@@ -134,6 +190,9 @@ void vmMain(VmState *vm)
     stopRelay.store(true);
     if (relay.joinable()) {
         relay.join();
+    }
+    if (floodWd.joinable()) {
+        floodWd.join();
     }
 
     /* 读回 qemu 日志尾部，抬到 hilog：qemu 的 stderr（fatal error/无法打开镜像等）
@@ -176,6 +235,18 @@ void bindDisplay(VmState *vm)
     for (int i = 0; i < 600 && vm->running.load(); i++) { /* up to 60s */
         QemuConsole *con = qe_console_lookup_default();
         if (con) {
+            /* 先挂 GL 上下文工厂：virtio-gpu-gl 的 console 带 GL 标志，注册
+             * DCL 时的 console_compatible_with 要求 con->gl 非空——qemu 的
+             * egl-headless 因时序（display_init 早于设备初始化）挂不上，
+             * 由我们补挂（见 renderer.h / renderer_gl_ctx）。非 GL 设备无害。 */
+            if (qe_set_display_gl_ctx != nullptr) {
+                DisplayGLCtx *dgc = renderer_gl_ctx();
+                qe_set_display_gl_ctx(con, dgc);
+                char loc[128];
+                snprintf(loc, sizeof(loc), "gl ctx bound: con=%p dgc=%p ops=%p",
+                         (void *)con, (void *)dgc, (const void *)dgc->ops);
+                OH_LOG_INFO(LOG_APP, "%{public}s", loc);
+            }
             g_dcl.con = con;
             qe_register_dcl(&g_dcl);
             g_qemu_con = con;
@@ -220,12 +291,125 @@ static void dumpQemuLogTail(int fd)
  * 2) 打印 backtrace（musl 内部帧常挡断 qemu 地址，故从 ucontext 提取“中断瞬间
  *    PC/LR/FO”——那个数是指向 qemu 栈帧的硬证据，本地 addr2line 即解出函数）；
  * 3) 退出。 */
+/* 手写 hex 解析：sscanf/strtoul 在信号上下文有 locale/stdio 锁风险。 */
+static uint64_t hexToU64(const char **pp)
+{
+    uint64_t v = 0;
+    const char *p = *pp;
+    for (;;) {
+        char c = *p;
+        uint64_t d;
+        if (c >= '0' && c <= '9') {
+            d = (uint64_t)(c - '0');
+        } else if (c >= 'a' && c <= 'f') {
+            d = (uint64_t)(c - 'a' + 10);
+        } else if (c >= 'A' && c <= 'F') {
+            d = (uint64_t)(c - 'A' + 10);
+        } else {
+            break;
+        }
+        v = v * 16 + d;
+        p++;
+    }
+    *pp = p;
+    return v;
+}
+
+/* 在 /proc/self/maps 里定位 addr 所属模块，输出 "<路径>+0x<文件偏移>"。
+ * 崩溃时 pc=0（跳空指针）无法定位，而 lr 是「谁调用了我」的唯一硬证据；
+ * backtrace 常被 musl 帧截断。流式逐行扫（不整体缓冲——qemu 的 guest RAM
+ * 映射可达 GB 级，maps 近千行，固定缓冲截断会丢掉高地址段）。未命中时给出
+ * 最近的低地址映射，用于区分「落在模块间空洞」与「读取/解析失败」。 */
+static void mapsResolve(uint64_t addr, char *out, size_t outn)
+{
+    static char chunk[4096];
+    static char line[512];
+    static char bestPath[192];
+    size_t linelen = 0;
+    uint64_t bestE = 0;
+    bestPath[0] = '\0';
+    int fd = open("/proc/self/maps", O_RDONLY);
+    if (fd < 0) {
+        snprintf(out, outn, "maps-open-fail");
+        return;
+    }
+    ssize_t n;
+    while ((n = read(fd, chunk, sizeof(chunk))) > 0) {
+        for (ssize_t i = 0; i < n; i++) {
+            char c = chunk[i];
+            if (c != '\n') {
+                if (linelen < sizeof(line) - 1) {
+                    line[linelen++] = c;
+                }
+                continue;
+            }
+            line[linelen] = '\0';
+            linelen = 0;
+            const char *q = line;
+            uint64_t s = hexToU64(&q);
+            if (*q != '-') {
+                continue;
+            }
+            q++;
+            uint64_t e = hexToU64(&q);
+            while (*q == ' ') q++;          /* perms */
+            while (*q != ' ' && *q) q++;
+            while (*q == ' ') q++;
+            uint64_t fo = hexToU64(&q);     /* 文件内偏移 */
+            const char *path = strchr(line, '/');
+            if (addr >= s && addr < e) {
+                snprintf(out, outn, "%s+0x%llx", path ? path : "(anon)",
+                         (unsigned long long)(addr - s + fo));
+                close(fd);
+                return;
+            }
+            if (e <= addr) {
+                bestE = e;
+                if (path != nullptr) {
+                    snprintf(bestPath, sizeof(bestPath), "%s", path);
+                } else {
+                    bestPath[0] = '\0';
+                }
+            }
+        }
+    }
+    close(fd);
+    snprintf(out, outn, "no-map; nearest-below=%s end=0x%llx gap=0x%llx",
+             bestPath[0] ? bestPath : "(anon)", (unsigned long long)bestE,
+             (unsigned long long)(addr - bestE));
+}
+
 void crashSigHandler(int sig, siginfo_t *info, void *ucontext)
 {
     char buf[160];
     int fd = STDERR_FILENO;
 
     dumpQemuLogTail(fd);
+
+    /* 崩溃线程名：qemu 的内部线程（vCPU/定时器）各有名字，名即身份，
+     * 免去「这个 tid 是谁」的二次猜测。 */
+    {
+        char commPath[64];
+        snprintf(commPath, sizeof(commPath), "/proc/self/task/%d/comm",
+                 (int)syscall(SYS_gettid));
+        int cf = open(commPath, O_RDONLY);
+        if (cf >= 0) {
+            char cbuf[48];
+            ssize_t cn = read(cf, cbuf, sizeof(cbuf) - 1);
+            close(cf);
+            if (cn > 0) {
+                while (cn > 0 && (cbuf[cn - 1] == '\n' || cbuf[cn - 1] == '\0')) {
+                    cn--;
+                }
+                cbuf[cn] = '\0';
+                int clen = snprintf(buf, sizeof(buf), "crash-thread=%s\n", cbuf);
+                if (clen > 0) {
+                    ssize_t w = write(fd, buf, (size_t)clen);
+                    (void)w;
+                }
+            }
+        }
+    }
 
     ucontext_t *uctx = (ucontext_t *)ucontext;
     if (uctx != nullptr) {
@@ -245,10 +429,107 @@ void crashSigHandler(int sig, siginfo_t *info, void *ucontext)
             ssize_t w = write(fd, buf, len);
             (void)w;
         }
+#if defined(__aarch64__)
+        /* lr 归属：pc=0 时它指出「执行到哪条调用指令撞上 NULL」——拿着
+         * 路径+偏移本地 addr2line 即得调用者函数（system so 未导出内部符号，
+         * 只能这么拿）。 */
+        {
+            char lrloc[256];
+            mapsResolve(lr, lrloc, sizeof(lrloc));
+            len = snprintf(buf, sizeof(buf), "lr-at: %s\n", lrloc);
+            if (len > 0) {
+                ssize_t w = write(fd, buf, (size_t)len);
+                (void)w;
+            }
+        }
+        /* 全寄存器：pc=0 时「取函数指针的寄存器」（x2/x8/x9…）必然为 0，
+         * 它旁边的寄存器还指着源表——只靠 pc/lr 反推调用点已两轮落空。 */
+        for (int i = 0; i < 31; i += 3) {
+            const uint64_t *r = uctx->uc_mcontext.regs;
+            int cnt = (i + 3 <= 31) ? 3 : 31 - i;
+            len = snprintf(buf, sizeof(buf), "x%-2d..x%-2d: %llx %llx %llx\n", i,
+                           i + cnt - 1, (unsigned long long)r[i],
+                           (unsigned long long)(cnt > 1 ? r[i + 1] : 0),
+                           (unsigned long long)(cnt > 2 ? r[i + 2] : 0));
+            if (len > 0) {
+                ssize_t w = write(fd, buf, (size_t)len);
+                (void)w;
+            }
+        }
+        len = snprintf(buf, sizeof(buf), "sp=0x%llx pstate=0x%llx\n",
+                       (unsigned long long)uctx->uc_mcontext.sp,
+                       (unsigned long long)uctx->uc_mcontext.pstate);
+        if (len > 0) {
+            ssize_t w = write(fd, buf, (size_t)len);
+            (void)w;
+        }
+        /* lr 附近的运行时指令：LTO 把多个函数合并进同一节，nm 的符号边界
+         * 不可靠（「lr 属于哪个函数」不能只看符号表）。读运行内存里的指令、
+         * 本地反汇编，才能确认「跳 0 之前最后执行的是什么」。 */
+        if (lr > 0x1000) {
+            const uint64_t base = lr & ~0x3ULL;
+            const uint32_t *c0 = (const uint32_t *)(base - 32);
+            len = snprintf(buf, sizeof(buf),
+                           "code@lr-32: %08x %08x %08x %08x %08x %08x %08x %08x\n",
+                           c0[0], c0[1], c0[2], c0[3], c0[4], c0[5], c0[6], c0[7]);
+            if (len > 0) {
+                ssize_t w = write(fd, buf, (size_t)len);
+                (void)w;
+            }
+            const uint32_t *c1 = (const uint32_t *)base;
+            len = snprintf(buf, sizeof(buf), "code@lr+0 : %08x %08x %08x %08x\n",
+                           c1[0], c1[1], c1[2], c1[3]);
+            if (len > 0) {
+                ssize_t w = write(fd, buf, (size_t)len);
+                (void)w;
+            }
+        }
+        /* 栈邻域：SP 实测可读时扫 32 槽，把落在模块内的值解出归属——调用链
+         * 残缺时这是唯一的重建来源。 */
+        {
+            char sloc[256];
+            mapsResolve(uctx->uc_mcontext.sp, sloc, sizeof(sloc));
+            if (sloc[0] != 'n') { /* 未命中以 no-map 开头 */
+                const uint64_t *stk = (const uint64_t *)uctx->uc_mcontext.sp;
+                for (int k = 0; k < 32; k++) {
+                    char loc[256];
+                    mapsResolve(stk[k], loc, sizeof(loc));
+                    if (loc[0] != 'n' && loc[0] != '(') { /* 只打有归属的 */
+                        len = snprintf(buf, sizeof(buf), "sp[%d]@ %s\n", k, loc);
+                        if (len > 0) {
+                            ssize_t w = write(fd, buf, (size_t)len);
+                            (void)w;
+                        }
+                    }
+                }
+            }
+        }
+#endif
     }
 
     void *bt[64];
     int n = backtrace(bt, 64);
+    /* 帧缓冲现场在 backtrace 之前落盘：SEGV 高发于 fb_update_rect 的
+     * memcpy，没有几何快照就无法区分写越界（producer buffer）与读越界
+     * （qemu surface）。脏读（见 fb_crash_dump 注释）。 */
+    char fbbuf[512];
+    fb_crash_dump(fbbuf, sizeof(fbbuf));
+    int len = snprintf(buf, sizeof(buf), "%s\n", fbbuf);
+    if (len > 0) {
+        ssize_t w = write(fd, buf, (size_t)len);
+        (void)w;
+    }
+    /* bt 帧的模块归属：兼作 mapsResolve 自检（这些地址必有归属，若也报
+     * no-map 说明解析不可信），并补齐 musl 截断掉的调用链。 */
+    for (int k = 0; k < n && k < 5; k++) {
+        char loc[256];
+        mapsResolve((uint64_t)(uintptr_t)bt[k], loc, sizeof(loc));
+        int blen = snprintf(buf, sizeof(buf), "bt[%d]@ %s\n", k, loc);
+        if (blen > 0) {
+            ssize_t w = write(fd, buf, (size_t)blen);
+            (void)w;
+        }
+    }
     backtrace_symbols_fd(bt, n, fd);
     /* hold 一下让日志转发线程把上面落盘的内容实时抬到 hilog，再退出。 */
     usleep(200 * 1000);
@@ -286,6 +567,7 @@ void installCrashHandlers()
 constexpr double kFloodBps = 4.0 * 1024 * 1024;      /* 4MB/s */
 constexpr int kFloodStreak = 2;                      /* 连续 2 个采样窗口 */
 constexpr long long kFloodTotal = 256LL * 1024 * 1024; /* 单文件累计 256MB（抓慢速刷屏） */
+constexpr long long kFloodChunk = 1LL * 1024 * 1024;   /* 单轮读入上限 1MB：防滞后时一次分配 GB 级 */
 constexpr int kFloodExitCode = 70;                   /* EX_SOFTWARE */
 
 void logFloodExit(const char *reason, long long bytes)
@@ -297,6 +579,33 @@ void logFloodExit(const char *reason, long long bytes)
         (void)w;
     }
     _exit(kFloodExitCode);
+}
+
+/* 洪泛看门狗：独立线程，只做 stat + _exit，绝不调 hilog。
+ * 为什么不能只靠 relay 线程的判据：判据要在循环里跑，而循环里的 OH_LOG_INFO
+ * 在洪流下会被 hilog 背压阻塞（实测一次转发就能把循环卡住数秒到数分钟），
+ * 判据于是永远轮不到执行——256MB 上限失效，日志涨到 2GB 进程仍活着。
+ * 本线程与转发彻底解耦：200ms 一次 stat 是纯本地 syscall，任何情况下都能落地。 */
+constexpr long long kWatchdogDelta = 1LL * 1024 * 1024; /* 200ms 增长 >1MB ≈ 5MB/s */
+void logFloodWatchdogThread(const std::string &logPath, std::atomic<bool> *stop)
+{
+    pthread_setname_np(pthread_self(), "qemu-log-wd");
+    long long last = 0;
+    while (!stop->load()) {
+        usleep(200 * 1000);
+        struct stat st{};
+        if (stat(logPath.c_str(), &st) != 0) {
+            continue;
+        }
+        long long sz = (long long)st.st_size;
+        if (sz > kFloodTotal) {
+            logFloodExit("logflood-total", sz);
+        }
+        if (sz - last > kWatchdogDelta) {
+            logFloodExit("logflood-rate", sz);
+        }
+        last = sz;
+    }
 }
 
 /* 后台线程：轮询读取 qemu-<vmId>.log 的新增内容，按行转发到 hilog（QemuVM 域）。
@@ -314,39 +623,31 @@ void relayQemuLogThread(const std::string &logPath, std::atomic<bool> *stop)
     struct timespec winStart{};
     clock_gettime(CLOCK_MONOTONIC, &winStart);
     while (!stop->load()) {
+        long long grew = 0;
+        std::string chunk;
         std::ifstream f(logPath, std::ios::in | std::ios::binary);
         if (f.is_open()) {
             f.seekg(0, std::ios::end);
             std::streamoff end = f.tellg();
+            /* 单轮读入上限：线程若被 hilog 阻塞或调度延迟拖住，pos 会落后很远，
+             * 不设上限就会出现「一次分配 + 读入 GB 级缓冲」，判据还没轮到就被拖死 */
+            if (end > pos + kFloodChunk) {
+                end = pos + kFloodChunk;
+            }
             if (end > pos) {
                 f.seekg(pos);
-                std::string chunk(static_cast<size_t>(end - pos), '\0');
-                if (!chunk.empty()) {
-                    f.read(&chunk[0], static_cast<std::streamsize>(end - pos));
-                }
-                long long grew = (long long)(end - pos);
+                chunk.assign(static_cast<size_t>(end - pos), '\0');
+                f.read(&chunk[0], static_cast<std::streamsize>(end - pos));
+                grew = (long long)(end - pos);
                 total += grew;
                 winBytes += grew;
                 pos = end;
-                /* 累计超限：抓「速率不高但一直写」的慢速刷屏，不必等窗口结算 */
-                if (total > kFloodTotal) {
-                    logFloodExit("logflood-total", total);
-                }
-                partial += chunk;
-                std::string line;
-                size_t nl;
-                while ((nl = partial.find('\n')) != std::string::npos) {
-                    line = partial.substr(0, nl);
-                    partial.erase(0, nl + 1);
-                    if (!line.empty()) {
-                        OH_LOG_INFO(LOG_APP, "qemu-log: %{public}s", line.c_str());
-                    }
-                }
             }
             f.close();
         }
-        /* 速率结算：窗口 >=1s 时算一次，超阈值要连续 kFloodStreak 个窗口才熔断，
-         * 避免启动瞬间的合理突发（例如 qemu 一次打一大段 backtrace）被误杀。 */
+        /* 速率结算放在转发之前：OH_LOG_INFO 在洪流下会被 hilog 背压阻塞数秒到数
+         * 分钟，实测「转发在前」使整个循环停摆，速率/总量判据永远轮不到执行——
+         * 256MB 熔断失效，日志涨到 2.48GB 进程仍活着。先判后转，判据与转发解耦。 */
         struct timespec now{};
         clock_gettime(CLOCK_MONOTONIC, &now);
         double elapsed = (double)(now.tv_sec - winStart.tv_sec) +
@@ -359,6 +660,30 @@ void relayQemuLogThread(const std::string &logPath, std::atomic<bool> *stop)
             }
             winStart = now;
             winBytes = 0;
+        }
+        /* 累计超限：抓「速率不高但一直写」的慢速刷屏，不必等窗口结算 */
+        if (total > kFloodTotal) {
+            logFloodExit("logflood-total", total);
+        }
+        /* 已连续一个窗口超阈值：疑似失控，停止转发（转发是熔断失效的根源），
+         * 丢弃缓冲避免 partial 无界增长；下一窗口结算决定是否 _exit。 */
+        if (streak > 0) {
+            partial.clear();
+        } else if (grew > 0) {
+            partial += chunk;
+            std::string line;
+            size_t nl;
+            int forwarded = 0;
+            /* 每轮限量转发：正常 KB 级启动日志照常可见，洪流下也不至于把循环
+             * 拖死（保底 <20 行/轮 ≈ 320 行/s）。 */
+            while ((nl = partial.find('\n')) != std::string::npos) {
+                line = partial.substr(0, nl);
+                partial.erase(0, nl + 1);
+                if (!line.empty() && forwarded < 20) {
+                    OH_LOG_INFO(LOG_APP, "qemu-log: %{public}s", line.c_str());
+                    forwarded++;
+                }
+            }
         }
         usleep(60 * 1000); /* 快速轮询，捕捉崩溃瞬间写入的 abort/backtrace */
     }
@@ -397,6 +722,18 @@ int vm_start(const std::string &arch, const std::vector<std::string> &args)
     ok &= resolveSym(so, "register_displaychangelistener", &qe_register_dcl);
     ok &= resolveSym(so, "qemu_console_lookup_default", &qe_console_lookup_default);
     ok &= resolveSym(so, "graphic_hw_update", &qe_graphic_hw_update);
+    /* invalidate 不强制要求（老 .so 缺失时槽重建后靠下一次自然脏区恢复画面） */
+    resolveSym(so, "graphic_hw_invalidate", &qe_graphic_hw_invalidate);
+    /* surface 真值查询不强制要求（缺失时 fb 跳过对齐，行为同旧版） */
+    resolveSym(so, "qemu_console_surface", &qe_console_surface);
+    /* virgl 的宿主 GL 工厂（仅 virtio-gl 需要）：console 挂 dgc 用
+     * set_display_gl_ctx，ops 委托 egl-* 工厂；rn_ctx 是 share 链源头 */
+    resolveSym(so, "qemu_console_set_display_gl_ctx", &qe_set_display_gl_ctx);
+    /* qemu 的 EGL/GL 全局：地址直接 dlsym（都是非 static 全局变量） */
+    qe_egl_display_p = (void **)dlsym(so, "qemu_egl_display");
+    qe_egl_config_p = (void **)dlsym(so, "qemu_egl_config");
+    qe_egl_rn_ctx_p = (void **)dlsym(so, "qemu_egl_rn_ctx");
+    qe_display_opengl_p = (int *)dlsym(so, "display_opengl");
     ok &= resolveSym(so, "qemu_input_event_send_key_qcode", &qe_input_send_key);
     ok &= resolveSym(so, "qemu_input_queue_abs", &qe_input_queue_abs);
     ok &= resolveSym(so, "qemu_input_queue_btn", &qe_input_queue_btn);

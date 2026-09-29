@@ -1,0 +1,18 @@
+diff --git a/src/dispatch_common.c b/src/dispatch_common.c
+index 153eb7c..7c78fdb 100644
+--- a/src/dispatch_common.c
++++ b/src/dispatch_common.c
+@@ -183,6 +183,13 @@
+ #define EGL_LIB "libEGL.so"
+ #define GLES1_LIB "libGLESv1_CM.so"
+ #define GLES2_LIB "libGLESv2.so"
++#elif defined(__OHOS__)
++/* OHOS：GL 库名与 Android 相同（无 SOVERSION 后缀、无 glvnd）。默认的
++ * Linux 名（libEGL.so.1 等）在 OHOS 上不存在，epoxy 的 dlopen 会失败。 */
++#define GLX_LIB "libGLESv2.so"
++#define EGL_LIB "libEGL.so"
++#define GLES1_LIB "libGLESv1_CM.so"
++#define GLES2_LIB "libGLESv2.so"
+ #elif defined(_WIN32)
+ #define EGL_LIB "libEGL.dll"
+ #define GLES1_LIB "libGLES_CM.dll"

@@ -1,0 +1,40 @@
+diff --git a/meson.build b/meson.build
+index ddb74da..30060e9 100644
+--- a/meson.build
++++ b/meson.build
+@@ -205,14 +205,12 @@ endif
+ 
+ if with_egl
+    if cc.has_header('epoxy/egl.h', dependencies: epoxy_dep) and epoxy_dep.get_pkgconfig_variable('epoxy_has_egl') == '1'
+-      gbm_dep = dependency('gbm', version: '>= ' + _gbm_ver, required: require_egl)
+-      have_egl = gbm_dep.found()
+-      if (have_egl)
+-         conf_data.set('HAVE_EPOXY_EGL_H', 1)
+-      else
+-         assert(not require_egl,
+-                'egl was explicitely requested which requires gbm, and this is not available')
+-      endif
++      # OHOS host: no GBM/DRM device. gbm exists only to satisfy the link
++      # (stub: gbm_create_device fails at runtime so egl->gbm stays NULL);
++      # EGL availability is decided by epoxy_has_egl alone.
++      gbm_dep = dependency('gbm', version: '>= ' + _gbm_ver, required: false)
++      have_egl = true
++      conf_data.set('HAVE_EPOXY_EGL_H', 1)
+    else
+       assert(not require_egl,
+              'egl was explicitely requested but it is not supported by epoxy')
+diff --git a/src/vrend_winsys_egl.c b/src/vrend_winsys_egl.c
+index 4b38d5e..9cfce8b 100644
+--- a/src/vrend_winsys_egl.c
++++ b/src/vrend_winsys_egl.c
+@@ -322,7 +322,9 @@ struct virgl_egl *virgl_egl_init(struct virgl_gbm *gbm, bool surfaceless, bool g
+       } else
+          egl->egl_display = get_platform_display (EGL_PLATFORM_GBM_KHR,
+                                                  (EGLNativeDisplayType)egl->gbm->device, NULL);
+-   } else {
++   } else if (egl->gbm) {
++      /* OHOS: no platform_base client ext -> would deref null gbm; fall
++       * through to the default-display fallback below instead */
+       egl->egl_display = eglGetDisplay((EGLNativeDisplayType)egl->gbm->device);
+    }
+ 

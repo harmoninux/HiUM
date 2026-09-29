@@ -14,7 +14,7 @@ const DOMAIN = 0x0210;
 const TAG = 'QemuProf';
 
 export type VmArch = 'x86_64' | 'i386' | 'aarch64' | 'arm' | 'loongarch64' | 'riscv64';
-export type VgaType = 'std' | 'virtio' | 'cirrus' | 'vmware';
+export type VgaType = 'std' | 'virtio' | 'cirrus' | 'vmware' | 'virtio-gl';
 export type VmBoard = 'pc' | 'q35' | 'virt' | 'raspi2' | 'raspi3';
 export type VmFirmware = 'seabios' | 'ovmf';
 export type DiskIface = 'virtio' | 'ide';
@@ -56,11 +56,11 @@ export function fitBoard(arch: VmArch, board: string): VmBoard {
   return allowed.indexOf(board) >= 0 ? board as VmBoard : defaultBoard(arch);
 }
 
-/* 显卡收紧：cirrus/vmware 仅 x86 板卡（pc/q35）；virt/raspi 无传统 VGA，回落 std（virt 的
- * virtio-gpu 是构建强制，此处仅保证字段合法）。 */
+/* 显卡收紧：cirrus/vmware/virtio-gl 仅 x86 板卡（pc/q35）；virt/raspi 无传统
+ * VGA，回落 std（virt 的 virtio-gpu 是构建强制，此处仅保证字段合法）。 */
 export function fitVga(board: VmBoard, vga: string): VgaType {
   const allowed: string[] = (board === 'pc' || board === 'q35') ?
-    ['std', 'virtio', 'cirrus', 'vmware'] : ['std'];
+    ['std', 'virtio', 'cirrus', 'vmware', 'virtio-gl'] : ['std'];
   return allowed.indexOf(vga) >= 0 ? vga as VgaType : 'std';
 }
 
@@ -645,7 +645,20 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     }
   } else {
     args.push('-machine', board);
-    args.push('-vga', fitVga(board, p.machine.vga));
+    /* virtio-gl：-vga none + -device virtio-gpu-gl（VirGL 3D 加速；-vga 型号
+     * 里没有它）。不带 -display egl-headless：OHOS 的 EGL 不支持 surfaceless
+     * makeCurrent，egl-headless 初始化即崩（实测 EglWrapperHookLayer init
+     * Failed / EGLDislay is invalid，随后 vCPU 线程 SIGSEGV pc=0）。
+     * virtio-gpu-gl 的 GL 检查（display_opengl）与 virgl 的上下文创建改由
+     * native 侧承接：vm.cpp 在 qemu 启动前把渲染线程已建好的 EGL 对象注入
+     * qemu 的 GL 全局（renderer_egl_export），GL 上下文工厂是我们的 dgc
+     * （renderer_gl_ctx），全部走 window surface 的 EGL。 */
+    if (p.machine.vga === 'virtio-gl') {
+      args.push('-vga', 'none');
+      args.push('-device', 'virtio-gpu-gl');
+    } else {
+      args.push('-vga', fitVga(board, p.machine.vga));
+    }
     /* 串口（v4）：默认 socket 交互（Console 串口视图读）+ logfile 同时落盘（见上）；
      * 关掉则维持纯落盘 file 日志 */
     if (p.machine.serialInteractive) {
@@ -772,17 +785,21 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     }
   }
   /* 声音（v6）：OHOS 音频后端（driver=ohos，见 libqemu 补丁）——
-   * pc/q35 用 intel-hda + hda-duplex：Vista 起的 Windows in-box 驱动即认，
-   * 不用装驱动就出声；AC97 只有 XP 认（不保）。virt 用 virtio-sound-pci
-   * （guest 走 snd_virtio）。每 VM 独立 qemu 进程，audiodev id=ohos0 天然
-   * 无冲突。raspi 无模拟声卡，忽略并 UI 禁用。 */
+   * pc/q35 用 intel-hda + hda-output：Vista 起的 Windows in-box 驱动即认，
+   * 不用装驱动就出声。**不能用 hda-duplex**：duplex 会建 adc（录音）voice，
+   * guest 驱动一激活输入流（Win10 装完驱动自动开 mic pin）就对 OHOS 后端
+   * 每 tick 报「Could not create a backend for voice adc」，日志洪流烧满
+   * BQL 主循环（实测 vCPU 饿死、IPC 饿死、整机假死）。后端只实现了播放，
+   * 输入 pin 没有意义——hda-output 从 codec 层就不建 adc，根除。virt 用
+   * virtio-sound-pci（guest 走 snd_virtio）。每 VM 独立 qemu 进程，
+   * audiodev id=ohos0 天然无冲突。raspi 无模拟声卡，忽略并 UI 禁用。 */
   if (!isRaspi) {
     if (p.runtime.audio) {
       args.push('-audiodev', 'driver=ohos,id=ohos0');
       if (board === 'virt') {
         args.push('-device', 'virtio-sound-pci,audiodev=ohos0');
       } else {
-        args.push('-device', 'intel-hda', '-device', 'hda-duplex,audiodev=ohos0');
+        args.push('-device', 'intel-hda', '-device', 'hda-output,audiodev=ohos0');
       }
     }
   }

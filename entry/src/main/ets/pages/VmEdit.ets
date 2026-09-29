@@ -454,7 +454,7 @@ export struct VmEdit {
             Text('显卡').fontSize(tLabel).width(72)
             if (this.isX86Board()) {
               Row({ space: sp2 }) {
-                ForEach(['std', 'cirrus', 'vmware', 'virtio'], (g: string) => {
+                ForEach(['std', 'cirrus', 'vmware', 'virtio', 'virtio-gl'], (g: string) => {
                   Text(g).fontSize(tSub)
                     .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
                     .fontColor(this.vga === g ? Color.White : cText)

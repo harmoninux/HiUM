@@ -76,6 +76,15 @@ make app-release  # 发布上架包 build/outputs/release/qemuohos-release-signe
   domain 不会输出）。
 - 更新 qemu 版本时：`qemu_abi.h` 的结构体布局需要与 qemu 源码重新核对
   （DisplayChangeListenerOps / DisplaySurface，CONFIG_OPENGL=off 变体）。
+- **virgl/virtio-gpu-gl 的平台坑（改动前必读）**：OHOS 上
+  `dlopen("libGLESv2.so")` 命中的是 `/system/lib64/ndk/libGLESv2.so`（与 EGL
+  上下文不同源的兼容库，其 GL 入口对本进程上下文无效）；真正的入口只能由
+  `eglGetProcAddress` 给出（指向 `/system/lib64/libGLESv3.so`）。libepoxy 默认走
+  dlsym，于是版本探测得 0、所有 provider 判据不成立 ⇒ 见
+  `deps/libepoxy/patches/libepoxy-0002-ohos-gl-proc-address.patch`（改成优先
+  eglGetProcAddress）。**epoxy 是静态链进各消费者（qemu 与 virglrenderer 各一份），
+  同名 GLOBAL 符号会跨库抢占——改了 epoxy 必须重建全部消费者**，只重建一处会出现
+  「补丁编进去了但行为不变」的假象。
 - VM 跑在 NCP 子进程（libqemu_child.so），一进程一台 VM、可多台并行：
   退出后父进程另起新子进程即可再启动，无需重启应用。窗口经
   `OH_NativeWindow_WriteToParcel` 跨进程传（裸 surfaceId 跨进程不可用，

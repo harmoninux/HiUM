@@ -16,6 +16,9 @@ PKGS=zstd \
     pcre2 \
     libglib \
     pixman \
+    libdrm \
+    libepoxy \
+    virglrenderer \
     libqemu
 STAMP=$(patsubst %,%/.stamp,$(PKGS))
 

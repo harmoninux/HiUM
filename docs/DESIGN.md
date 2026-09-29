@@ -106,6 +106,14 @@ vmId 路由注册表天然共享。
   `info --output=json <path>`（virtual-size/actual-size/format）。
 - **性能基线**：Alpine 3.21 (kernel 6.12) 从 ISO 引导到 `localhost login` 约 50s
   （TCG），键盘可进 shell，显示模式切换（640x480 → 720x400 → 1280x800）正常。
+- **virtio-gpu-gl（virgl）宿主侧已可用**：OHOS 上 virglrenderer 的 GL 初始化
+  依赖 libepoxy，而 epoxy 默认从 `libGLESv2.so` dlsym 取入口——在本平台拿到的是
+  ndk 兼容库的入口（对 EGL 上下文无效），必须改为优先 `eglGetProcAddress`
+  （见 AGENTS.md 的平台坑条目与 `deps/libepoxy/patches/libepoxy-0002`）。修复后
+  `vrend_renderer_init` 得到 `gl_version 32 - es profile enabled`，guest 侧能协商
+  `+virgl` capset 并加载 virtio_gpu 驱动。**未完成**：guest 的 framebuffer 刷新
+  尚未到达宿主 DCL（`dclUpd` 不动），GL scanout（guest 帧 → 宿主纹理直采）通路
+  待打通；纯 2D/VGA 路径不受影响。
 
 ### 线程模型
 

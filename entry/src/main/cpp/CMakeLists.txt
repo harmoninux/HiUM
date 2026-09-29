@@ -40,5 +40,7 @@ target_link_libraries(qemu_child PUBLIC
     libEGL.so
     libGLESv3.so
     libnative_window.so
+    libnative_buffer.so
+    libnative_image.so
     libipc_capi.so
     libdl.so)
