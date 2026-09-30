@@ -231,6 +231,23 @@ int qmp_connect(const std::string &vmId, const std::string &sockPath)
 
 std::string qmp_command(const std::string &vmId, const std::string &json)
 {
+    /* 耗时探针：napi 同步调用（ArkTS 主线程）；qemu 主循环被 guest 占住时
+     * 不回包，本函数会等满 respCv 的超时。RAII 覆盖所有 return 分支。 */
+    struct Probe {
+        const std::string &json;
+        std::chrono::steady_clock::time_point t0;
+        explicit Probe(const std::string &j) : json(j), t0(std::chrono::steady_clock::now()) {}
+        ~Probe()
+        {
+            auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - t0)
+                          .count();
+            if (dt >= 200) {
+                OH_LOG_WARN(LOG_APP, "SLOW-QMP blocked %{public}lld ms: %{public}s",
+                            (long long)dt, json.c_str());
+            }
+        }
+    } probe(json);
     QmpState *st = stateOf(vmId);
     std::lock_guard<std::mutex> cmdLk(st->cmdMu);
     int fd = st->fd.load();
@@ -259,7 +276,10 @@ std::string qmp_command(const std::string &vmId, const std::string &json)
         return "";
     }
     std::unique_lock<std::mutex> lk(st->respMu);
-    if (!st->respCv.wait_for(lk, std::chrono::seconds(5), [st] { return st->hasResp; })) {
+    /* 超时压在 2s：本函数是 napi 同步调用（跑在 ArkTS 主线程），qemu 主循环
+     * 被 guest 自旋占住时不回 QMP，阻塞时长会直接叠在 UI 线程上——与系统的
+     * THREAD_BLOCK_6S 阈值太近（实测连点两次关机=10s 即被 forceExit 杀掉）。 */
+    if (!st->respCv.wait_for(lk, std::chrono::seconds(2), [st] { return st->hasResp; })) {
         OH_LOG_WARN(LOG_APP, "qmp command timed out: %{public}s", json.c_str());
         return "";
     }

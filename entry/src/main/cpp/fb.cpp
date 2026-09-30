@@ -207,11 +207,13 @@ static void fb_copy_loop()
                     }
                     qe_bql_unlock();
                 }
-                OH_LOG_INFO(LOG_APP, "fbcopy hb: dirty=%{public}d dclUpd=%{public}llu live=%{public}dx%{public}d q=%{public}dx%{public}d frames=%{public}llu",
+                OH_LOG_INFO(LOG_APP, "fbcopy hb: dirty=%{public}d dclUpd=%{public}llu live=%{public}dx%{public}d q=%{public}dx%{public}d frames=%{public}llu virgl=%{public}d tex=%{public}u",
                             (int)f.dirty,
                             (unsigned long long)f.dclUpdates.load(),
                             curW, curH, f.w, f.h,
-                            (unsigned long long)f.frames);
+                            (unsigned long long)f.frames,
+                            (int)f.virglValid.load(),
+                            (unsigned)f.virglTexId.load());
             }
         }
 
@@ -433,6 +435,14 @@ static void ohos_gl_scanout_texture(DisplayChangeListener *dcl,
                                     uint32_t x, uint32_t y,
                                     uint32_t w, uint32_t h, void *d3d)
 {
+    /* 计数打点（诊断「画面停更」用）：低频打印，不刷 BQL 线程 */
+    static std::atomic<uint64_t> cnt{0};
+    uint64_t n = cnt.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n == 1 || n % 30 == 0) {
+        OH_LOG_INFO(LOG_APP,
+                    "gl scanout_texture #%{public}llu: id=%{public}u %{public}ux%{public}u y0top=%{public}d",
+                    (unsigned long long)n, backing_id, bw, bh, (int)y0top);
+    }
     g_fb.virglTexId.store(backing_id, std::memory_order_relaxed);
     g_fb.virglW.store(bw, std::memory_order_relaxed);
     g_fb.virglH.store(bh, std::memory_order_relaxed);
@@ -446,6 +456,15 @@ static void ohos_gl_scanout_texture(DisplayChangeListener *dcl,
 static void ohos_gl_update(DisplayChangeListener *dcl, uint32_t x, uint32_t y,
                            uint32_t w, uint32_t h)
 {
+    /* 计数打点（诊断「画面停更」用）：gl_update 是 qemu 通知"这帧内容已就绪"
+     * 的唯一信号，它停了 = guest 不再推帧；它还在涨而画面不动 = 宿主侧断链。 */
+    static std::atomic<uint64_t> cnt{0};
+    uint64_t n = cnt.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n == 1 || n % 30 == 0) {
+        OH_LOG_INFO(LOG_APP,
+                    "gl update #%{public}llu: %{public}u,%{public}u %{public}ux%{public}u",
+                    (unsigned long long)n, x, y, w, h);
+    }
     /* virgl 帧渲染完成：驱动渲染线程重画（纹理内容已就绪）。不递增 frameSeq
      * ——那是拷贝线程的进度，virgl 帧不走 bufferqueue。 */
     g_fb.dclUpdates.fetch_add(1, std::memory_order_relaxed);

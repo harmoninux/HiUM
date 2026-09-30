@@ -210,6 +210,17 @@ bool ensureVirglCtx()
 void drawFrame()
 {
     bool virgl = g_fb.virglValid.load(std::memory_order_acquire);
+    /* 帧计数打点（诊断「画面停更」）：与 DCL 侧的 gl scanout_texture/gl update
+     * 计数对读——渲染计数不动=渲染线程侧的链路断（如 ensureVirglCtx 反复失败
+     * 直接 return），DCL 计数不动=guest 侧没推帧。 */
+    static std::atomic<uint64_t> frameCnt{0};
+    uint64_t fn = frameCnt.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (fn == 1 || fn % 60 == 0) {
+        unsigned tex = virgl ? (unsigned)g_fb.virglTexId.load(std::memory_order_relaxed) : 0u;
+        OH_LOG_INFO(LOG_APP,
+                    "draw #%{public}llu virgl=%{public}d tex=%{public}u win=%{public}dx%{public}d",
+                    (unsigned long long)fn, (int)virgl, tex, g_rs.winW, g_rs.winH);
+    }
     if (virgl && !ensureVirglCtx()) {
         return; /* 共享 ctx 尚未建好（dgc 记录前）：黑屏等下一帧 */
     }
@@ -454,14 +465,32 @@ bool renderer_egl_make_current_root()
     return false;
 }
 
+/* dgc 回调都在 qemu 的工作线程（MTTCG 的 vCPU 线程 / 主循环）上被调，而不是
+ * 渲染线程——virgl 拿到 external winsys 后，所有 GL 上下文请求都落到这里。
+ * OHOS 的 libEGL 把「display 是否已初始化」记在线程本地：工作线程直接沿用渲染
+ * 线程的 display，eglCreateContext 会以 EGL_NOT_INITIALIZED 失败（实测每次
+ * 启动 8 次 invalid display pointer，guest 的 virtio-gpu 命令全部无法完成）。
+ * 故每个回调先在本线程认领一次：eglGetDisplay 幂等（同一句柄）、eglInitialize
+ * 幂等、eglBindAPI 亦属线程本地状态。 */
+static void ohos_gl_prepare_thread()
+{
+    EGLDisplay dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if (dpy == EGL_NO_DISPLAY) {
+        return;
+    }
+    eglInitialize(dpy, nullptr, nullptr);
+    eglBindAPI(EGL_OPENGL_ES_API);
+}
+
 static QEMUGLContext ohos_gl_ctx_create(DisplayGLCtx *dgc, QEMUGLParams *params)
 {
-    /* virglrenderer 在 create_gl_context 之后立刻在当前线程调 GL（vrend 初始化、
-     * 纹理操作），本线程必须先有 current context——qemu 的 egl_create_context
-     * 也是这么做的（先 makeCurrent 根上下文再 create）。 */
-    if (!eglMakeCurrent(g_rs.display, g_rs.surface, g_rs.surface, g_rs.context)) {
-        OH_LOG_ERROR(LOG_APP, "virgl create make_current failed: 0x%{public}x",
-                     eglGetError());
+    ohos_gl_prepare_thread();
+    /* virgl 在 create_gl_context 之后立刻在当前线程调 GL（vrend 初始化探测），
+     * 先替它把根上下文 make current，避免中间窗口期无 ctx 可用。surface 一律
+     * surfaceless：窗口表面不能跨线程 makeCurrent（实测），surfaceless 可以。 */
+    if (!eglMakeCurrent(g_rs.display, EGL_NO_SURFACE, EGL_NO_SURFACE, g_rs.context)) {
+        OH_LOG_WARN(LOG_APP, "virgl create: root make_current failed: 0x%{public}x",
+                    eglGetError());
     }
     EGLint attrs[] = {EGL_CONTEXT_CLIENT_VERSION,
                       params != nullptr ? params->major_ver : 2, EGL_NONE};
@@ -478,14 +507,15 @@ static QEMUGLContext ohos_gl_ctx_create(DisplayGLCtx *dgc, QEMUGLParams *params)
 static void ohos_gl_ctx_destroy(DisplayGLCtx *dgc, QEMUGLContext ctx)
 {
     if (ctx != nullptr) {
+        ohos_gl_prepare_thread();
         eglDestroyContext(g_rs.display, (EGLContext)ctx);
     }
 }
 
 static int ohos_gl_ctx_make_current(DisplayGLCtx *dgc, QEMUGLContext ctx)
 {
-    /* window surface（而非 qemu 的 surfaceless）——OHOS EGL 只支持前者 */
-    if (!eglMakeCurrent(g_rs.display, g_rs.surface, g_rs.surface, (EGLContext)ctx)) {
+    ohos_gl_prepare_thread();
+    if (!eglMakeCurrent(g_rs.display, EGL_NO_SURFACE, EGL_NO_SURFACE, (EGLContext)ctx)) {
         OH_LOG_ERROR(LOG_APP, "virgl make_current failed: 0x%{public}x", eglGetError());
         return -1;
     }

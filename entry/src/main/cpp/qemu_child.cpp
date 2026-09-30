@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -91,8 +92,28 @@ int32_t onAttach(const OHIPCParcel *data)
     return 0;
 }
 
+/* 耗时探针：onRequest 跑在子进程的 IPC 线程上，任何一次慢处理都会让父进程的
+ * 同步调用干等（napi 同步跑在 ArkTS 主线程，累计 6s 即 ANR）。超阈值打点，
+ * 把「主线程卡顿」定位到具体请求类型；RAII 覆盖所有 return 分支。 */
+struct SlowProbe {
+    uint32_t code;
+    std::chrono::steady_clock::time_point t0;
+    explicit SlowProbe(uint32_t c) : code(c), t0(std::chrono::steady_clock::now()) {}
+    ~SlowProbe()
+    {
+        auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - t0)
+                      .count();
+        if (dt >= 100) {
+            OH_LOG_WARN(LOG_APP, "SLOW-CHILD-IPC code=%{public}u took %{public}lld ms",
+                        code, (long long)dt);
+        }
+    }
+};
+
 int onRequest(uint32_t code, const OHIPCParcel *data, OHIPCParcel *reply, void *userData)
 {
+    SlowProbe probe(code);
     int32_t version = 0;
     if (data == nullptr || OH_IPCParcel_ReadInt32(data, &version) != OH_IPC_SUCCESS ||
         version != kProtoVersion) {
@@ -137,8 +158,14 @@ int onRequest(uint32_t code, const OHIPCParcel *data, OHIPCParcel *reply, void *
             return replyInt(reply, 0);
         }
         case kQuery: {
+            /* 显示尺寸要按「当前真实的输出」报：virgl 下帧不经 CPU surface，g_fb.w/h
+             * 停在引导早期的 console 尺寸（实测 guest 切到 1280x800 后仍报 640x480），
+             * 下游（布局比例/首帧 buffer 几何/输入反算）拿陈旧值会把画面算成异比例 */
             int fbW = 0, fbH = 0;
-            {
+            if (g_fb.virglValid.load(std::memory_order_acquire)) {
+                fbW = (int)g_fb.virglW.load(std::memory_order_acquire);
+                fbH = (int)g_fb.virglH.load(std::memory_order_acquire);
+            } else {
                 std::lock_guard<std::mutex> lock(g_fb.mu);
                 fbW = g_fb.w;
                 fbH = g_fb.h;

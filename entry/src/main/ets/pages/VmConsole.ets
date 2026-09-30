@@ -141,6 +141,9 @@ struct VmConsole {
   /* 用户主动停止（关机/强制断电）：QMP_DISCONNECT 随之而来，但那不是「启动失败」，
    * 不能写熔断标记，否则每次正常关机都会让下次进入不自动启动。 */
   private userStopped: boolean = false;
+  /* 关机流程进行中：forcePowerOff 里的 QMP quit 是同步调用，qemu 卡死不回时
+   * 每次点击各阻塞一个超时——连点三次即超系统 THREAD_BLOCK_6S 阈值被 forceExit。 */
+  private powerBusy: boolean = false;
   private xcController: VmXComponentController = new VmXComponentController();
   /* 底部状态栏尺寸（Pad/手机 vs PC 两档，见 STATUS_*_PAD/PC 常量注释） */
   private barH: number = isPadOrPhone() ? STATUS_H_PAD : STATUS_H_PC;
@@ -166,11 +169,10 @@ struct VmConsole {
   /* buffer 几何的权威源：系统在自由窗口拖拽期间会向 surface 发「铺满窗口内容区」
    * 的 onSurfaceChanged（比例偏离组件），渲染层若照单全收，buffer 就被做成异形、
    * letterbox 画的黑边被合成器压进画面（实测变形的根源）。因此 onSurfaceChanged
-   * 只更新缓存不透传，buffer 尺寸由本页下发。下发目标 = guest 分辨率：组件比例
-   * 恒等于 guest（布局层 letterbox），等比 buffer 经合成器等比拉伸即可铺满组件，
-   * 拷贝/上传/合成全链路按 guest 像素量计（组件物理尺寸可达 guest 的 3 倍），
-   * 且窗口拖拽不再触发 buffer 重下发与 EGLSurface 重建。guest 未出帧时比例未知，
-   * 兜底下发组件物理尺寸让首帧立即可见 */
+   * 只更新缓存不透传，buffer 尺寸由本页下发。下发目标 = 组件物理尺寸：清晰度由
+   * surface 的像素量决定，按 guest 分辨率下发会让合成器把 640x480 的 buffer 拉满
+   * 2800px 物理屏（实测糊）；guest→组件的缩放交给渲染侧 GL（GPU 采样，质量可控），
+   * 组件比例已由布局层 fit 成 guest 比例，渲染侧 letterbox 不会再切边 */
   private sentW: number = 0;
   private sentH: number = 0;
   private density: number = 0;
@@ -221,22 +223,15 @@ struct VmConsole {
     this.fitH = Math.max(1, Math.floor(this.fbH * scale));
   }
 
-  /* 下发 buffer 几何：guest 分辨率已知 → 按 guest 尺寸发（见 sentW 注释）；
-   * 未知 → 组件物理尺寸兜底。目标尺寸与已发尺寸相等即跳过（EGLSurface 重建
-   * 只发生在 guest 切分辨率或首帧校准时）。初始 sentW=0 保证首回路必发 */
+  /* 下发 buffer 几何：恒取组件物理尺寸（areaW×density，见 sentW 注释）。目标
+   * 尺寸与已发尺寸相等即跳过（EGLSurface 重建只发生在组件尺寸变化时：窗口
+   * 拖拽、布局重排、或 guest 切分辨率导致 fit 尺寸变化）。初始 sentW=0 保证首回路必发 */
   private syncBufferGeometry(): void {
     if (this.areaW <= 0 || this.areaH <= 0 || this.density <= 0) {
       return;
     }
-    let w: number;
-    let h: number;
-    if (this.fbW > 0 && this.fbH > 0) {
-      w = this.fbW;
-      h = this.fbH;
-    } else {
-      w = Math.round(this.areaW * this.density);
-      h = Math.round(this.areaH * this.density);
-    }
+    const w = Math.round(this.areaW * this.density);
+    const h = Math.round(this.areaH * this.density);
     if (w === this.sentW && h === this.sentH) {
       return;
     }
@@ -265,8 +260,8 @@ struct VmConsole {
       if (w > 0 && h > 0 && (w !== this.fbW || h !== this.fbH)) {
         this.fbW = w;
         this.fbH = h;
+        /* fit 尺寸随比例变 → 组件尺寸变 → onAreaChange 下发新 buffer 几何 */
         this.recomputeFit();
-        this.syncBufferGeometry(); /* guest 切分辨率 → buffer 跟着切到新 guest 尺寸 */
       }
       this.geoTimer = setTimeout(tick, this.fbW > 0 ? 1000 : 250);
     };
@@ -634,6 +629,10 @@ struct VmConsole {
    * （qmpCommand 同步阻塞 5s 后返回空），所以已判卡死就跳过它直接走 IPC 强杀。
    * 强杀走 kShutdown → 子进程 MainProc 置位后 _exit(0)，不依赖 qemu 合作。 */
   private forcePowerOff(): void {
+    if (this.powerBusy) {
+      return; /* 已有关机流程在跑：连点不再重复发命令（见 powerBusy 声明处） */
+    }
+    this.powerBusy = true;
     this.userStopped = true;
     this.stopReadyWatch();
     if (!napi.vmRunning(this.vmId)) {

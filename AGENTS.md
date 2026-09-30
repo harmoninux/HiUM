@@ -85,6 +85,21 @@ make app-release  # 发布上架包 build/outputs/release/qemuohos-release-signe
   eglGetProcAddress）。**epoxy 是静态链进各消费者（qemu 与 virglrenderer 各一份），
   同名 GLOBAL 符号会跨库抢占——改了 epoxy 必须重建全部消费者**，只重建一处会出现
   「补丁编进去了但行为不变」的假象。
+- **OHOS 的 EGLDisplay 初始化状态是线程本地的（改动 virgl/qemu GL 路径前必读）**：
+  线程首次使用某 display 前必须自己 `eglGetDisplay(EGL_DEFAULT_DISPLAY)` +
+  `eglInitialize`（幂等，返回同一句柄），否则 `eglCreateContext` 报
+  `invalid display pointer`/`EGL_NOT_INITIALIZED`。qemu 的 virtio-gpu-gl 在
+  **vCPU 线程**上跑 virgl（MTTCG 下与初始化线程不同）⇒ 必须让 virgl 的所有 GL
+  上下文经宿主 dgc 回调创建（`CONTEXT_EGL_EXTERNAL`），由 dgc 在每个回调里认领
+  线程。启用条件有三条**缺一不可**：① qemu 侧定义 `VIRGL_RENDERER_UNSTABLE_APIS`
+  （否则 `get_egl_display` 字段与 v4 分支被裁掉）；② `cbs.version = 4` 且
+  `get_egl_display` 非空；③ flags **不带** `VIRGL_RENDERER_USE_EGL`（virgl 里
+  「自带 winsys」与「external」二选一，前者先跑就永久挡住后者）。三条齐全后
+  guest 的 scanout 才经 `dpy_gl_scanout_texture`/`dpy_gl_update` 到达宿主 DCL
+  ——曾经的症状是「guest 能引导到 login 但画面永远停在 Display output is not
+  active，且 guest 满核自旋拖死 QMP」。见
+  `deps/libqemu/patches/qemu-0002-virgl-ohos.patch` 与
+  `entry/src/main/cpp/renderer.cpp` 的 dgc 回调。
 - VM 跑在 NCP 子进程（libqemu_child.so），一进程一台 VM、可多台并行：
   退出后父进程另起新子进程即可再启动，无需重启应用。窗口经
   `OH_NativeWindow_WriteToParcel` 跨进程传（裸 surfaceId 跨进程不可用，

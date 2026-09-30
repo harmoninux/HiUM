@@ -1,17 +1,34 @@
 diff --git a/hw/display/virtio-gpu-virgl.c b/hw/display/virtio-gpu-virgl.c
-index 07f6355..9dad7ae 100644
+index 07f6355..8475d43 100644
 --- a/hw/display/virtio-gpu-virgl.c
 +++ b/hw/display/virtio-gpu-virgl.c
-@@ -1162,6 +1162,13 @@ int virtio_gpu_virgl_init(VirtIOGPU *g)
+@@ -22,6 +22,16 @@
+ 
+ #include "ui/egl-helpers.h"
+ 
++/* OHOS：让 virglrenderer.h 暴露 v4 回调——结构体里的 get_egl_display 字段本身
++ * 也在 #ifdef VIRGL_RENDERER_UNSTABLE_APIS 内。qemu 默认按 CALLBACKS_VERSION=2
++ * 编译，v4 分支连字段带代码一起被裁掉，virgl 于是永远走自带 winsys；而 OHOS
++ * 的 libEGL 把「display 是否已初始化」记在线程本地，qemu 的工作线程（MTTCG 的
++ * vCPU 线程）上 eglCreateContext 必失败（实测每次启动 8 次 invalid display
++ * pointer），guest 的 virtio-gpu 命令全部无法完成 → 驱动自旋、宿主被拖死。
++ * 本进程的 GL 上下文由宿主 dgc（renderer_gl_ctx）提供，必须让 virgl 走
++ * external winsys，故在此启用该宏。 */
++#define VIRGL_RENDERER_UNSTABLE_APIS 1
++
+ #include <virglrenderer.h>
+ 
+ struct virtio_gpu_virgl_resource {
+@@ -1162,6 +1172,13 @@ int virtio_gpu_virgl_init(VirtIOGPU *g)
      }
  #endif
  
-+    /* OHOS: 经典 winsys 路径需要显式开启。不设 USE_EGL 时 virgl 不会初始化
-+     * 任何 winsys（flags=0 且无 get_egl_display 回调），virgl_renderer_init
-+     * 直接失败。SURFACELESS 让 virgl_egl_init 走到 eglGetDisplay(DEFAULT)
-+     * 的 fallback（OHOS 无 GBM 平台）；GLES 匹配 OHOS 的 GLES 实现。 */
-+    flags |= VIRGL_RENDERER_USE_EGL | VIRGL_RENDERER_USE_SURFACELESS |
-+             VIRGL_RENDERER_USE_GLES;
++    /* OHOS：不能设 VIRGL_RENDERER_USE_EGL——virglrenderer.c 里「自带 winsys」与
++     * 「external winsys」是二选一，flags 带 USE_EGL 时前者先执行并置位
++     * winsys_initialized，external 分支被永久跳过（详见文件头的宏说明）。
++     * USE_GLES 必须保留：它决定 vrend 的 GLES 语义（shader 生成等），且不参与
++     * winsys 选择。 */
++    flags |= VIRGL_RENDERER_USE_GLES;
 +
      ret = virgl_renderer_init(g, flags, &virtio_gpu_3d_cbs);
      if (ret != 0) {

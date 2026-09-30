@@ -2,10 +2,12 @@
 
 #include <hilog/log.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -57,9 +59,10 @@ void dispatch(SerialState *st, const std::string &text)
 bool sendAll(int fd, const char *data, size_t len)
 {
     while (len > 0) {
-        ssize_t n = send(fd, data, len, 0);
+        /* MSG_NOSIGNAL：对端已关闭时返回 EPIPE 而不是发 SIGPIPE 打死整个进程 */
+        ssize_t n = send(fd, data, len, MSG_NOSIGNAL);
         if (n <= 0) {
-            return false;
+            return false; /* EAGAIN（SO_SNDTIMEO 超时）/EPIPE 均按失败上报 */
         }
         data += n;
         len -= (size_t)n;
@@ -85,6 +88,11 @@ bool connectOnce(SerialState *st, const std::string &path)
         close(fd);
         return false;
     }
+    /* 写侧必须带超时：qemu 主循环被 guest 自旋占住时不读 chardev，阻塞 send
+     * 会把调用线程（= 应用主线程，napi 是同步调用）永久挂死，系统随即判
+     * THREAD_BLOCK_6S 杀掉整个应用（实测：10:14 ANR，freeze 报告已生成）。 */
+    struct timeval tv = {2, 0};
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     st->fd.store(fd);
     return true;
 }
@@ -155,7 +163,18 @@ int serial_write(const std::string &vmId, const std::string &text)
     if (fd < 0 || text.empty()) {
         return -1;
     }
-    return sendAll(fd, text.c_str(), text.size()) ? (int)text.size() : -1;
+    /* 耗时探针：本函数由 napi 同步调用（ArkTS 主线程），qemu 不读 socket 时
+     * 会卡到 SO_SNDTIMEO（见 connectOnce 的说明）。 */
+    auto t0 = std::chrono::steady_clock::now();
+    bool ok = sendAll(fd, text.c_str(), text.size());
+    auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - t0)
+                  .count();
+    if (dt >= 200) {
+        OH_LOG_WARN(LOG_APP, "SLOW-SERIAL write %{public}zu B blocked %{public}lld ms",
+                    text.size(), (long long)dt);
+    }
+    return ok ? (int)text.size() : -1;
 }
 
 void serial_close(const std::string &vmId)

@@ -8,6 +8,7 @@
 #include <IPCKit/ipc_error_code.h>
 #include <hilog/log.h>
 
+#include <chrono>
 #include <deque>
 #include <map>
 #include <mutex>
@@ -30,6 +31,8 @@ struct ChildState {
     bool vmRunning = false;
     bool attached = false;
     int64_t surfaceId = 0;
+    /* 自愈查询的最小间隔（见 ncp_client_running 的说明） */
+    std::chrono::steady_clock::time_point lastQuery{};
 };
 
 /* NCP 拉起请求。CreateNativeChildProcess 的回调不带任何可关联信息，
@@ -91,6 +94,22 @@ OHIPCParcel *newRequest()
     return req;
 }
 
+/* 父子 IPC 耗时探针：这两种调用都由 napi 同步发起（跑在 ArkTS 主线程），对端
+ * 忙时会把主线程卡满 6 秒触发 ANR。超阈值打点；与子进程侧 SLOW-CHILD-IPC 对读
+ * 即可区分「父进程等」与「子进程处理慢」。 */
+static void probeIpc(uint32_t code, const char *mode,
+                     std::chrono::steady_clock::time_point t0)
+{
+    auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - t0)
+                  .count();
+    if (dt >= 200) {
+        OH_LOG_WARN(LOG_APP,
+                    "SLOW-IPC code=%{public}u mode=%{public}s blocked %{public}lld ms",
+                    code, mode, (long long)dt);
+    }
+}
+
 /* 调用方须持有 ch.mu。返回 reply parcel（调用方负责 Destroy），失败返回 nullptr。 */
 OHIPCParcel *sendTo(ChildState &ch, uint32_t code, OHIPCParcel *req)
 {
@@ -102,7 +121,9 @@ OHIPCParcel *sendTo(ChildState &ch, uint32_t code, OHIPCParcel *req)
         return nullptr;
     }
     OH_IPC_MessageOption option = {OH_IPC_REQUEST_MODE_SYNC, 0, nullptr};
+    auto t0 = std::chrono::steady_clock::now();
     int32_t ret = OH_IPCRemoteProxy_SendRequest(ch.proxy, code, req, reply, &option);
+    probeIpc(code, "sync", t0);
     if (ret != OH_IPC_SUCCESS) {
         OH_LOG_ERROR(LOG_APP, "ipc send code=%{public}u failed ret=%{public}d", code, ret);
         OH_IPCParcel_Destroy(reply);
@@ -119,6 +140,28 @@ int32_t replyCode(OHIPCParcel *reply)
         OH_IPCParcel_Destroy(reply);
     }
     return v;
+}
+
+/* 无需回复的调用（按键/鼠标/滚轮/窗口操作/关机）：ASYNC fire-and-forget。
+ * 原先全程 SYNC 会阻塞调用线程等子进程回包，而这些调用来自 napi（同步跑在
+ * ArkTS 主线程）——guest 忙时子进程回包慢，主线程卡满 6 秒即被系统判
+ * THREAD_BLOCK_6S 弹框、可被 forceExit（实测：guest 启动 X 期间点虚拟键盘的
+ * 按键即可复现）。这些调用本就不需要结果，发出去即返回。 */
+bool sendNoReply(ChildState &ch, uint32_t code, OHIPCParcel *req)
+{
+    if (ch.proxy == nullptr || req == nullptr) {
+        return false;
+    }
+    OH_IPC_MessageOption option = {OH_IPC_REQUEST_MODE_ASYNC, 0, nullptr};
+    auto t0 = std::chrono::steady_clock::now();
+    int32_t ret = OH_IPCRemoteProxy_SendRequest(ch.proxy, code, req, nullptr, &option);
+    probeIpc(code, "async", t0);
+    if (ret != OH_IPC_SUCCESS) {
+        OH_LOG_ERROR(LOG_APP, "ipc send(async) code=%{public}u failed ret=%{public}d",
+                     code, ret);
+        return false;
+    }
+    return true;
 }
 
 OHNativeWindow *windowFromSurfaceId(int64_t surfaceId)
@@ -194,7 +237,7 @@ void onChildStarted(int errCode, OHIPCRemoteProxy *proxy)
         } else {
             /* VM 没起来：让子进程退出，别留着空转 */
             OHIPCParcel *sd = newRequest();
-            replyCode(sendTo(*chp, kShutdown, sd));
+            sendNoReply(*chp, kShutdown, sd);
             if (sd) {
                 OH_IPCParcel_Destroy(sd);
             }
@@ -305,7 +348,7 @@ void ncp_client_detach(const std::string &vmId)
         return;
     }
     OHIPCParcel *req = newRequest();
-    replyCode(sendTo(*chp, kDetachSurface, req));
+    sendNoReply(*chp, kDetachSurface, req);
     OH_IPCParcel_Destroy(req);
     chp->attached = false;
 }
@@ -323,7 +366,7 @@ void ncp_client_resize(const std::string &vmId, int32_t w, int32_t h)
     OHIPCParcel *req = newRequest();
     OH_IPCParcel_WriteInt32(req, w);
     OH_IPCParcel_WriteInt32(req, h);
-    replyCode(sendTo(*chp, kResizeSurface, req));
+    sendNoReply(*chp, kResizeSurface, req);
     OH_IPCParcel_Destroy(req);
 }
 
@@ -341,7 +384,7 @@ void ncp_client_pointer(const std::string &vmId, int32_t x, int32_t y, int32_t b
     OH_IPCParcel_WriteInt32(req, x);
     OH_IPCParcel_WriteInt32(req, y);
     OH_IPCParcel_WriteInt32(req, buttons);
-    replyCode(sendTo(*chp, kPointer, req));
+    sendNoReply(*chp, kPointer, req);
     OH_IPCParcel_Destroy(req);
 }
 
@@ -358,7 +401,7 @@ void ncp_client_key(const std::string &vmId, int32_t qcode, bool down)
     OHIPCParcel *req = newRequest();
     OH_IPCParcel_WriteInt32(req, qcode);
     OH_IPCParcel_WriteInt32(req, down ? 1 : 0);
-    replyCode(sendTo(*chp, kKey, req));
+    sendNoReply(*chp, kKey, req);
     OH_IPCParcel_Destroy(req);
 }
 
@@ -375,7 +418,7 @@ void ncp_client_scroll(const std::string &vmId, int32_t dx, int32_t dy)
     OHIPCParcel *req = newRequest();
     OH_IPCParcel_WriteInt32(req, dx);
     OH_IPCParcel_WriteInt32(req, dy);
-    replyCode(sendTo(*chp, kScroll, req));
+    sendNoReply(*chp, kScroll, req);
     OH_IPCParcel_Destroy(req);
 }
 
@@ -390,7 +433,15 @@ bool ncp_client_running(const std::string &vmId)
         return false;
     }
     /* 自愈：exit 回调未必可靠，主动向子进程 QUERY；子进程已死（发送失败）
-     * 或 VM 已退出（running=0）就清理状态 */
+     * 或 VM 已退出（running=0）就清理状态。该查询是 SYNC IPC、会阻塞调用
+     * 线程，而本函数被关机流程以 500ms 轮询（pollGone）——guest 忙时子进程
+     * 回包慢，连查 6 次足以把 ArkTS 主线程卡成 THREAD_BLOCK_6S。故设最小
+     * 间隔：3 秒内的重复调用直接返回缓存值（上方已确认 proxy/running 有效）。 */
+    auto now = std::chrono::steady_clock::now();
+    if (now - chp->lastQuery < std::chrono::seconds(3)) {
+        return true;
+    }
+    chp->lastQuery = now;
     OHIPCParcel *req = newRequest();
     OHIPCParcel *reply = sendTo(*chp, kQuery, req);
     OH_IPCParcel_Destroy(req);
@@ -485,7 +536,7 @@ void ncp_client_shutdown(const std::string &vmId)
         return;
     }
     OHIPCParcel *req = newRequest();
-    replyCode(sendTo(*chp, kShutdown, req));
+    sendNoReply(*chp, kShutdown, req);
     OH_IPCParcel_Destroy(req);
     /* 不在这里清状态：等下一次 QUERY 自愈清，避免重用已销毁 proxy */
 }
