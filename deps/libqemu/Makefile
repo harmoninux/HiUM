@@ -53,6 +53,12 @@ FIRMWARE_OPT := edk2-aarch64-code.fd edk2-arm-code.fd edk2-loongarch64-code.fd e
 # 另外它**不解决**「客户机内核在 ACPI 下 setup_smp BUG」那个问题，那是 -machine
 # virt,acpi=off 的事（见 vmprofile.ets）。
 
+# --disable-dbus-display（见 configure 行）：dbus 显示特性会把构建机（host）的
+# gdbus-codegen 版本与 target glib 耦合——host glib 2.88 生成的新版 GDBus 骨架引用
+# g_variant_builder_init_static（glib 2.84+ 才有），而 buildroot 的 glib 是 2.82.0，
+# 链接期报 undefined symbol（实测 host 2.88 / target 2.82 组合必挂）。本应用不用
+# dbus 显示（画面走自己的 DCL 渲染）。将来若要启用：先把 deps/libglib 的版本升到
+# 不低于构建机的 glib，再移除该开关。
 all: download/qemu
 	rm -rf temp build
 	mkdir -p temp build
@@ -72,7 +78,7 @@ all: download/qemu
 	 --enable-trace-backends=nop --disable-qom-cast-debug \
 	 --disable-stack-protector \
 	 --disable-bsd-user --disable-guest-agent --disable-gcrypt --disable-debug-info --disable-debug-tcg --enable-attr --disable-brlapi --disable-linux-aio \
-	 --disable-bzip2 --disable-cap-ng --disable-curl --disable-glusterfs --disable-gnutls --disable-nettle --disable-gtk --disable-rdma --disable-libiscsi \
+	 --disable-bzip2 --disable-cap-ng --disable-curl --disable-glusterfs --disable-gnutls --disable-nettle --disable-gtk --disable-dbus-display --disable-rdma --disable-libiscsi \
 	 --disable-vnc-jpeg --disable-lzo --disable-curses --disable-libnfs --disable-numa --disable-opengl --disable-rbd --disable-vnc-sasl --disable-sdl \
 	 --disable-seccomp --disable-smartcard --disable-snappy --disable-spice --disable-libusb --disable-usb-redir --disable-vde --disable-vhost-net --disable-virglrenderer \
 	 --disable-vte --disable-xen-pci-passthrough --enable-tools --disable-libudev --disable-passt \
