@@ -11,7 +11,7 @@ import { VmStorage } from './VmStorage';
 import { VmWizard } from './VmWizard';
 import { VmTemplate } from './VmTemplate';
 import { VmProfile } from '../lib/vmprofile';
-import { tBody, tSub, tCard, cSub, cWeak, cPrimary, cCard, cBorder, rCard, bw, sp2, spCard, rBtn, btnH, btnPadX } from '../lib/uiTokens';
+import { tBody, tSub, tCard, cSub, cWeak, cPrimary, cCard, cBorder, scrim, rCard, bw, sp2, spCard, rBtn, btnH, btnPadX } from '../lib/uiTokens';
 
 @Entry
 @Component
@@ -94,7 +94,7 @@ struct Index {
   @Builder
   wizardOverlay() {
     Stack() {
-      Column().width('100%').height('100%').backgroundColor('rgba(0,0,0,0.45)')
+      Column().width('100%').height('100%').backgroundColor(scrim)
         .onClick(() => this.closeWizard())
       Column() { this.wizardCover() }
         .width('88%').constraintSize({ maxWidth: 640 })
@@ -118,7 +118,7 @@ struct Index {
   @Builder
   templateOverlay() {
     Stack() {
-      Column().width('100%').height('100%').backgroundColor('rgba(0,0,0,0.45)')
+      Column().width('100%').height('100%').backgroundColor(scrim)
         .onClick(() => this.closeTemplate())
       Column() { this.templateCover() }
         .width('88%').constraintSize({ maxWidth: 640 })
@@ -137,7 +137,7 @@ struct Index {
   @Builder
   storageOverlay() {
     Stack() {
-      Column().width('100%').height('100%').backgroundColor('rgba(0,0,0,0.45)')
+      Column().width('100%').height('100%').backgroundColor(scrim)
         .onClick(() => this.closeStorage())
       Column() {
         VmStorage({ profile: this.storageParam, onClose: () => this.closeStorage() })

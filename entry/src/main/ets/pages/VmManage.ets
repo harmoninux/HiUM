@@ -2,21 +2,26 @@
 // 快照归属单台 VM，不进跨 VM 的库；临时会话打点/回滚见 lib/tempSession。
 // 从列表侧栏点行进（Navigation replace 渲染到 content/detail 区）；成功反馈走右下角 snackbar。
 import { promptAction } from '@kit.ArkUI';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
+import { image } from '@kit.ImageKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
 import napiModule from 'libentry.so';
-import { VmProfile, VmStore, VmDisk, buildArgs, sharedDir, qmpSockPath, mainDiskPath } from '../lib/vmprofile';
+import { VmProfile, VmStore, VmDisk, buildArgs, sharedDir, qmpSockPath, mainDiskPath, thumbPath } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
 import { cloneVm } from '../lib/vmclone';
 import {
   VmSnapshotEntry, snapshotApply, snapshotDelete, snapshotCreate, parseSnapshots,
 } from '../lib/vmsnapshot';
 import { isTempSnapshot } from '../lib/tempSession';
+import { pathExists } from '../lib/fsutil';
+import { Snackbar } from '../lib/uiWidgets';
 import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
-  cCard, cBlock, cChip, cBorder,
+  cCard, cBlock, cChip, cBorder, cConsoleScrim,
   tCard, tLabel, tBody, tSub, tSubL, tMono,
-  sp1, sp2, sp3, sp4, sp5, sp8, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
+  sp1, sp2, sp3, sp4, sp5, sp8, rCard, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
@@ -28,6 +33,8 @@ interface DiskNapi {
 
 const napi = napiModule as DiskNapi;
 const GB = 1024 * 1024 * 1024;
+const DOMAIN = 0x0002;
+const TAG = 'QemuUI';
 
 @Component
 export struct VmManage {
@@ -62,6 +69,7 @@ export struct VmManage {
   @State snapNameText: string = '';
   @State netEnabled: boolean = false;
   @State snack: string = '';
+  @State thumb: image.PixelMap | null = null; /* 画面缩略图（VmConsole 抓帧的缓存，见 loadThumb） */
   /* v6 克隆：cloneStage != '' = 克隆进行中（进度条显示 stage+pct） */
   @State cloneStage: string = '';
   @State clonePct: number = 0;
@@ -137,6 +145,60 @@ export struct VmManage {
     this.netEnabled = p.net.enabled;
     this.refreshDisk();
     this.refreshSnapshot();
+    this.loadThumb();
+  }
+
+  /* 缩略图：读 VmConsole 抓帧写入的缓存（8 字节小端宽高头 + RGBA_8888 裸像素，
+   * 见 VmConsole.captureThumb），转成 PixelMap 上屏。文件缺失/损坏一律静默置空
+   * （显示占位文案），不让详情页因缓存问题白屏。 */
+  private loadThumb(): void {
+    const p = this.profile;
+    if (!p) {
+      this.thumb = null;
+      return;
+    }
+    const path = thumbPath(p.id, this.vmDataDir);
+    if (!pathExists(path)) {
+      this.thumb = null;
+      return;
+    }
+    let old: image.PixelMap | null = this.thumb;
+    this.thumb = null;
+    if (old !== null) {
+      try {
+        old.release();
+      } catch {
+        /* best effort */
+      }
+      old = null;
+    }
+    try {
+      const size = fs.statSync(path).size;
+      if (size < 16) {
+        return;
+      }
+      const buf = new ArrayBuffer(size);
+      const f = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      const n = fs.readSync(f.fd, buf);
+      fs.closeSync(f);
+      const dv = new DataView(buf);
+      const w = dv.getUint32(0, true);
+      const h = dv.getUint32(4, true);
+      const need = 8 + w * h * 4;
+      if (w <= 0 || h <= 0 || need > n) {
+        return;
+      }
+      const opts: image.InitializationOptions = {
+        size: { width: w, height: h },
+        srcPixelFormat: image.PixelMapFormat.RGBA_8888,
+        pixelFormat: image.PixelMapFormat.RGBA_8888,
+        editable: false,
+      };
+      this.thumb = image.createPixelMapSync(buf.slice(8, need), opts);
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'loadThumb: %{public}s', JSON.stringify(e));
+      this.thumb = null;
+    }
   }
 
   /* 编辑页/存储页保存后 vmListVersion +1：重新读取 profile */
@@ -144,14 +206,12 @@ export struct VmManage {
     this.refreshProfile();
   }
 
-  /* 右下角 snackbar：成功类反馈走这里，错误类保留 toast */
+  /* 右下角 snackbar：成功类反馈走这里，错误类保留 toast。展示与 2 秒自动消失
+   * 在 Snackbar 组件内（@Link 自清）；先清空再赋值是为了让同文案连发也能重新
+   * 计时（@Watch 只在值变化时触发） */
   private showSnack(msg: string): void {
+    this.snack = '';
     this.snack = msg;
-    setTimeout(() => {
-      if (this.snack === msg) {
-        this.snack = '';
-      }
-    }, 2000);
   }
 
   private refreshDisk(): void {
@@ -777,6 +837,36 @@ export struct VmManage {
 
         Scroll() {
           Column() {
+            /* 画面卡：截图即启动/进入按钮（UTM 详情页范式）。有抓帧缓存显示画面
+             * 帧，无则占位文案；整卡和中央圆钮都点击进入（同顶部启动钮语义） */
+            Stack() {
+              if (this.thumb !== null) {
+                Image(this.thumb)
+                  .objectFit(ImageFit.Contain)
+                  .width('100%')
+                  .height('100%')
+              } else {
+                Text(this.isRunningNow() ? '画面加载中…' : '进入运行后这里显示画面截图')
+                  .fontSize(tSub).fontColor(cWeak)
+              }
+              Button() {
+                SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.arrow_up_left_and_arrow_down_right') : $r('sys.symbol.play_fill'))
+                  .fontSize(26)
+                  .fontColor([Color.White])
+              }
+              .focusable(false)
+              .width(52).height(52)
+              .backgroundColor(cConsoleScrim)
+              .borderRadius(26)
+              .onClick(() => this.openConsole())
+            }
+            .width('100%')
+            .aspectRatio(16 / 9)
+            .backgroundColor(Color.Black)
+            .borderRadius(rCard)
+            .margin({ top: sp1, bottom: sp2 })
+            .onClick(() => this.openConsole())
+
             this.secHead('概览')
             /* 概览胶囊一排（内存/核/机型/固件；无 vga） */
             Row({ space: sp2 }) {
@@ -848,14 +938,7 @@ export struct VmManage {
         .backgroundColor(cCard)
       }
 
-      if (this.snack.length > 0) {
-        Row() {
-          Text(this.snack).fontSize(tBody).fontColor(Color.White)
-        }
-        .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
-        .backgroundColor(cText).borderRadius(rElem)
-        .position({ right: sp4, bottom: sp4 })
-      }
+      Snackbar({ msg: this.$snack })
 
     }
     .width('100%')

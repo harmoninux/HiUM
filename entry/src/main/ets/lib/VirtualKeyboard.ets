@@ -11,7 +11,7 @@ import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import napiModule from 'libentry.so';
-import { rElem, sp1, sp8 } from './uiTokens';
+import { rElem, sp1, sp8, cKbPanel, cKbKey, cKbBorder, cKbHandle, cKbPressed } from './uiTokens';
 
 const DOMAIN = 0x0002;
 const TAG = 'KbdOverlay';
@@ -205,9 +205,9 @@ export struct VirtualKeyboard {
       .textAlign(TextAlign.Center)
       .width('100%')
       .height(38)
-      .backgroundColor($$.pressed || $$.latched ? '#ff0563ff' : '#1A000000')
+      .backgroundColor($$.pressed || $$.latched ? cKbPressed : cKbKey)
       .borderRadius(rElem)
-      .border({ width: 1, color: '#66FFFFFF' })
+      .border({ width: 1, color: cKbBorder })
       .layoutWeight($$.k.w)
       .onTouch((ev: TouchEvent) => {
         this.onKeyTouch($$.k, ev);
@@ -226,7 +226,7 @@ export struct VirtualKeyboard {
               .width(36)
               .height(4)
               .borderRadius(2)
-              .backgroundColor('#88FFFFFF')
+              .backgroundColor(cKbHandle)
           }
           .width('100%')
           .height(18)
@@ -270,7 +270,7 @@ export struct VirtualKeyboard {
         .width(this.scrW > 0 ? Math.min(this.scrW * 0.94, 860) : 640)
         .padding({ left: sp8, right: sp8, top: 2, bottom: sp8 })
         /* 半透明面板：压低不透明度让 VM 画面透出来（键帽同理） */
-        .backgroundColor('#4D000000')
+        .backgroundColor(cKbPanel)
         .borderRadius(12)
         /* 面板区域阻断下层：容器 Transparent（自身不阻塞下层），面板用
          * BLOCK_HIERARCHY（自身+子节点响应、阻止下层兄弟参与触摸测试） */

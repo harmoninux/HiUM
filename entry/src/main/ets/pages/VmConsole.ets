@@ -1,6 +1,6 @@
 // 虚拟机 Console 页：独立窗口（VmConsoleAbility）内的 XComponent 渲染 +
-// 顶部工具条（电源/QMP 控制/截图/全屏）。vmId 经 LocalStorage 传入，页面按
-// vmId 自载 profile。VM 跑在 NCP 子进程，关窗只是摘窗，重开窗口即重新挂窗。
+// 底部状态栏（电源/暂停/介质/串口/输入/虚拟键盘）。vmId 经 LocalStorage 传入，
+// 页面按 vmId 自载 profile。VM 跑在 NCP 子进程，关窗只是摘窗，重开窗口即重新挂窗。
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
 import { display } from '@kit.ArkUI';
@@ -9,13 +9,19 @@ import { promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import napiModule from 'libentry.so';
 import { HOS_TO_QKEYCODE } from '../lib/keymap';
-import { VmProfile, VmStore, buildArgs, qmpSockPath, serialSockPath, sharedDir, builtinIsoFor, mainDiskPath, ensureRiscvVars } from '../lib/vmprofile';
+import { VmProfile, VmStore, buildArgs, qmpSockPath, serialSockPath, serialLogPath, thumbPath, sharedDir, builtinIsoFor, mainDiskPath, ensureRiscvVars } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { pathExists, isoReadable, readTail } from '../lib/fsutil';
+import { pickIsoPath } from '../lib/isoPick';
 import { prepareStart } from '../lib/tempSession';
 import { takePendingVmId, isPadOrPhone } from '../lib/vmwindows';
 import { VirtualKeyboard } from '../lib/VirtualKeyboard';
-import { sp1, sp2, cCard, cText, cPrimary, cDanger } from '../lib/uiTokens';
+import {
+  sp1, sp2, cCard, cText, cPrimary,
+  cConsoleText, cConsoleAccent, cConsoleDanger, cConsoleLogText, cConsoleWarn,
+  cConsolePanel, cConsolePanelStrong, cConsoleInputBg, cConsolePlaceholder,
+  cConsoleBanner, cConsoleBtn, cConsoleScrim,
+} from '../lib/uiTokens';
 
 /* 多 ISO 启动前的可读性过滤在 doStart 内做：把不可读盘从本次启动的 ISO 列表里剔除，
  * 再经 buildArgs 的 isoOverride 传入（不动 profile 对象，避免污染后续配置/结算）。 */
@@ -39,6 +45,21 @@ interface QemuNapi {
   serialWrite: (vmId: string, text: string) => number;
   serialClose: (vmId: string) => void;
   setSerialCallback: (vmId: string, cb: ((text: string) => void) | null) => void;
+  /* 子进程缩放到 ≤512 宽后回传的 RGBA_8888 帧（详情页缩略图用）；未出帧/进程已死
+   * 返回 null */
+  captureScreen: (vmId: string) => CaptureShot | null;
+}
+
+interface CaptureShot {
+  width: number;
+  height: number;
+  pixels: ArrayBuffer;
+}
+
+/* 介质菜单里的一个光驱槽位（query-block 认定，见 refreshCdSlots） */
+interface CdSlot {
+  qmpId: string; /* QMP 块后端名（'cdN' 或 pc/q35 第一张的 'ide1-cd0'） */
+  file: string;  /* 当前介质路径；'' = 空盘 */
 }
 
 const napi: QemuNapi = napiModule as QemuNapi;
@@ -61,20 +82,21 @@ const STATUS_FS_PC = 12;
 const PANEL_H = 32;
 const PANEL_BTN_H = 26;
 const PANEL_FS = 12;
-const FAB_PREF = 'vmconsole_fab'; /* console 偏好文件名（现仅虚拟键盘显隐用） */
-const MENU_TEXT = '#fff5f7fa'; /* 浅色文字：熔断横幅/串口浮层等黑底深色浮层用 */
-/* console 整个界面都是深色的（画面区纯黑、状态栏与串口面板 #20242b）。uiTokens 的
- * cPrimary(#0563ff) / cDanger(#d92d20) / cWeak(#6b7280) 是给浅色背景设计的深色值，
- * 搬到这里对比度只有 2.1~2.9:1 —— 实测「画面」「强制断电」这类文字看不清。
- * 下面是对应色系的浅色版本，在该背景上均 ≥4.5:1（WCAG AA）。 */
-const DARK_ACCENT = '#ff94beff'; /* 主色：选中态/强调（亮蓝） 4.9:1 */
-const DARK_DANGER = '#ffffa8a8'; /* 危险操作（亮红） 4.8:1 */
-const DARK_WEAK = '#ffaab4c2';   /* 弱化文本（亮灰） 4.5:1 */
+const FAB_PREF = 'vmconsole_fab'; /* console 偏好文件名（虚拟键盘显隐 / 输入设置 / 串口字号共用） */
 /* 串口输入框的组件 id：发送后要把焦点交还给它（见 sendAndRefocus） */
 const SERIAL_INPUT_ID = 'hium-serial-input';
 /* 双指 tap 判定阈值（vp）：质心自双指落下起的累计位移小于该值、且期间没发过
  * 滚轮，抬起时合成一次右键点击。取值比单指移动阈值(8)放宽——两指比单指易抖 */
 const TWO_TAP_SLOP = 12;
+/* 触控板（相对）模式的光标速度档：手指位移 × 倍率 = 光标位移 */
+const SPEED_FACTORS: number[] = [0.6, 1.0, 1.7];
+const SPEED_LABELS: string[] = ['慢', '中', '快'];
+/* 串口日志字号档（循环切换） */
+const SERIAL_FS_LIST: number[] = [12, 14, 17];
+/* 惯性滑行的速度衰减与停止阈值（每 16ms 一拍）：0.82 的衰减下约 0.5s 滑停 */
+const GLIDE_DECAY = 0.82;
+const GLIDE_STOP = 0.4;
+const GLIDE_MIN_START = 1.2;
 
 interface QmpEvent {
   event: string;
@@ -121,6 +143,13 @@ struct VmConsole {
   /* QMP 可用（就绪往返过一次）：关机/重启/Ctrl+Alt+Del 的启用依据。
    * build 里不问 napi.vmRunning（同步 IPC 往返），经本状态由事件驱动翻转 */
   @State qmpAlive: boolean = false;
+  @State paused: boolean = false; /* guest 暂停态（QMP STOP/RESUME 事件驱动；电源菜单显示 暂停/继续） */
+  @State cdSlots: CdSlot[] = [];  /* 光驱槽位与当前介质（介质菜单数据源，query-block 拉取） */
+  /* 输入设置（触屏/触控板模式、滚轮反向、光标速度档；全局偏好，见 loadInputPrefs） */
+  @State inputMode: number = 0;
+  @State scrollReverse: boolean = false;
+  @State cursorSpeedIdx: number = 1;
+  @State serialFs: number = SERIAL_FS_LIST[0]; /* 串口日志字号（全局偏好） */
   @State showKbd: boolean = false;   /* 虚拟键盘显隐（底部状态栏开关，按 vmId 持久化） */
   @State showGestureHint: boolean = false; /* 首次进入的手势速查（全局看过一次不再弹） */
   @State immersive: boolean = false; /* 沉浸全屏态（最大化进入），沉浸时隐藏底部状态栏 */
@@ -193,6 +222,16 @@ struct VmConsole {
   private scrollAcc: number = 0;
   private lastX: number = 0;
   private lastY: number = 0;
+  /* 触控板（相对）模式：客户端虚拟光标 + 位移跟踪 + 惯性滑行。
+   * curX/curY 为 -1 表示未初始化（首次进相对模式时居中，见 ensureCursor） */
+  private curX: number = -1;
+  private curY: number = -1;
+  private trackLastX: number = 0;
+  private trackLastY: number = 0;
+  private trackMoved: boolean = false; /* 本次单指手势移动超过阈值（决定抬起是点按还是滑行） */
+  private trackVX: number = 0;         /* 最近一次移动的位移量（惯性滑行的初速度） */
+  private trackVY: number = 0;
+  private glideTimer: number = -1;
   private serialScroller: Scroller = new Scroller();
 
   private toSurfacePx(vp: number, vpSize: number, surfaceSize: number): number {
@@ -297,6 +336,7 @@ struct VmConsole {
     this.beginGeoWatch();
     this.loadKbd();
     this.loadGestureHint();
+    this.loadConsolePrefs();
     this.enterVm();
     /* 最大化→沉浸仅对自由窗口设备（PC 2in1 等）有意义；Pad/手机窗口本来就
      * 全屏沉浸（Ability 侧 layoutFullScreen），由系统手势/任务栏管，不监听 */
@@ -308,6 +348,10 @@ struct VmConsole {
 
   aboutToDisappear(): void {
     this.releaseAllKeys();
+    this.stopGlide();
+    /* 关窗留最后一帧缩略图（VM 仍在跑时；child 已死则内部空跑）。详情页靠
+     * vmListVersion 感知刷新，故 bump */
+    this.captureThumb(true);
     this.stopReadyWatch();
     this.stopGeoWatch();
     napi.setQmpEventCallback(this.vmId, null);
@@ -555,6 +599,7 @@ struct VmConsole {
     this.stopReadyWatch();
     this.readySeen = false;
     this.qmpAlive = false; /* 重新等待就绪，就绪后翻转（电源按钮随之启用） */
+    this.paused = false;   /* 新一轮启动，暂停态归零（STOP 事件会重新置位） */
     this.bootFailReason = ''; /* 新一轮启动，旧失败提示作废（再失败会重新落标记） */
     const started = Date.now();
     const WAIT_MS = 45000;
@@ -567,6 +612,9 @@ struct VmConsole {
         /* 起来了就把熔断标记销掉（用户已修好配置） */
         new VmStore(this.filesDir).clearBootFail(this.vmId);
         this.bootFailReason = '';
+        /* 拉一次光驱状态（介质菜单数据源）；首帧落定后留一张详情页缩略图 */
+        this.refreshCdSlots();
+        setTimeout(() => this.captureThumb(false), 3000);
         return;
       }
       if (!napi.vmRunning(this.vmId)) {
@@ -609,7 +657,7 @@ struct VmConsole {
       message: `将立即重启「${nm}」，未保存的数据可能丢失。确认？`,
       buttons: [
         { value: '取消', action: () => {} },
-        { value: '重启', fontColor: DARK_DANGER, action: () => this.qmp('system_reset') },
+        { value: '重启', fontColor: cConsoleDanger, action: () => this.qmp('system_reset') },
       ],
     });
   }
@@ -621,7 +669,7 @@ struct VmConsole {
       message: `将立即切断「${nm}」的电源，未保存的数据可能丢失。确认？`,
       buttons: [
         { value: '取消', action: () => {} },
-        { value: '强制关机', fontColor: DARK_DANGER, action: () => this.forcePowerOff() },
+        { value: '强制关机', fontColor: cConsoleDanger, action: () => this.forcePowerOff() },
       ],
     });
   }
@@ -679,18 +727,25 @@ struct VmConsole {
     hilog.info(DOMAIN, TAG, 'qmp event: %{public}s', name);
     switch (name) {
       case 'STOP':
+        this.paused = true;
         this.status = '已暂停';
         break;
       case 'RESUME':
+        this.paused = false;
         this.status = '运行中';
         break;
       case 'RESET':
         /* 复位是瞬时事件，复位完就是普通的运行中；标「复位」既像"卡在复位"，
          * 又会一直挂到下一个状态事件才被覆盖 */
+        this.paused = false;
         this.status = '运行中';
         break;
       case 'SHUTDOWN':
       case 'QMP_DISCONNECT':
+        /* qemu 大概率还活着（SHUTDOWN 先于进程退出）：留最后一帧缩略图
+         *（已退净时 ncp 抓帧失败，空跑无碍） */
+        this.captureThumb(true);
+        this.paused = false;
         this.stopReadyWatch();
         this.qmpAlive = false;
         this.vmListVersion++;
@@ -743,13 +798,197 @@ struct VmConsole {
     }
   }
 
+  /* ================= 详情页缩略图（运行期抓帧） ================= */
+
+  /* 抓一帧写缩略图缓存（详情页「截图=启动按钮」用）。触发点刻意少而准：就绪后
+   * 3 秒（首帧已画）、VM 死亡事件、本窗口关闭——每帧裸 RGBA 有几百 KB，不做
+   * 周期抓取。child 已死/未出帧时 ncp 抓帧失败返回 null，静默跳过。
+   * 文件格式 = 8 字节小端宽高头 + RGBA_8888 裸像素（读取侧见 VmManage.loadThumb）。
+   * bump=true 时 vmListVersion++，让已打开的详情页/列表刷出新图。 */
+  private captureThumb(bump: boolean): void {
+    if (this.vmId.length === 0) {
+      return;
+    }
+    try {
+      const shot = napi.captureScreen(this.vmId);
+      if (shot === null || shot.width <= 0 || shot.height <= 0) {
+        return;
+      }
+      const px = new Uint8Array(shot.pixels);
+      const buf = new ArrayBuffer(8 + px.length);
+      const dv = new DataView(buf);
+      dv.setUint32(0, shot.width, true);
+      dv.setUint32(4, shot.height, true);
+      new Uint8Array(buf).set(px, 8);
+      const fd = fs.openSync(thumbPath(this.vmId, this.vmDataDir),
+        fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      fs.writeSync(fd.fd, buf);
+      fs.closeSync(fd);
+      if (bump) {
+        this.vmListVersion++;
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'captureThumb: %{public}s', JSON.stringify(e));
+    }
+  }
+
+  /* ================= 介质（运行中换/弹 ISO） ================= */
+
+  /* 从 QMP query-block 拉当前光驱与介质。认定规则：removable=true 且设备名是
+   * 'cdN'（显式 id：附加盘、virt 第一张）或 'ide1-cd0'（pc/q35 第一张盘的 -cdrom
+   * 自动后端 id，实测），floppy0 等其它 removable 设备排除。槽位顺序 cd0,cd1…；
+   * 空盘 file=''。换/弹操作后需重新拉取（介质变了）。 */
+  private refreshCdSlots(): void {
+    if (!this.qmpAlive) {
+      return;
+    }
+    const slots: CdSlot[] = [];
+    const resp = napi.qmpCommand(this.vmId, '{"execute":"query-block"}');
+    try {
+      const obj = JSON.parse(resp) as Record<string, Object>;
+      const ret = obj['return'];
+      if (!Array.isArray(ret)) {
+        return;
+      }
+      for (const item of ret as Object[]) {
+        const e = item as Record<string, Object>;
+        const dev = typeof e['device'] === 'string' ? e['device'] as string : '';
+        const rm = e['removable'];
+        if (!(typeof rm === 'boolean' && rm as boolean) || !this.isCdDevice(dev)) {
+          continue;
+        }
+        let file = '';
+        const ins = e['inserted'];
+        if (typeof ins === 'object' && ins !== null) {
+          const io = ins as Record<string, Object>;
+          file = typeof io['file'] === 'string' ? io['file'] as string : '';
+        }
+        slots.push({ qmpId: dev, file: file });
+      }
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'query-block parse: %{public}s', JSON.stringify(err));
+      return;
+    }
+    slots.sort((a: CdSlot, b: CdSlot) => this.cdOrder(a.qmpId) - this.cdOrder(b.qmpId));
+    this.cdSlots = slots;
+  }
+
+  private isCdDevice(dev: string): boolean {
+    return dev === 'ide1-cd0' || /^cd\d+$/.test(dev);
+  }
+
+  private cdOrder(dev: string): number {
+    if (dev === 'ide1-cd0') {
+      return 0;
+    }
+    const n = Number(dev.substring(2));
+    return Number.isInteger(n) ? n : 99;
+  }
+
+  /* 换成新选的光盘：blockdev-change-medium（force 跳过 guest 的托盘锁）+
+   * 配置同步 + 槽位刷新。blockdev-change-medium 对不可换介质的设备会报
+   * "not removable"——virt 板已改用 usb-storage 挂第一张（见 buildArgs），
+   * 若仍出现该报错说明设备组合不在预期内，toast 会带出原文。 */
+  private changeCd(idx: number): void {
+    const slot = idx < this.cdSlots.length ? this.cdSlots[idx] : null;
+    if (slot === null || !this.qmpAlive) {
+      return;
+    }
+    pickIsoPath(this.vmCtx()).then((p: string) => {
+      if (p.length === 0) {
+        return;
+      }
+      this.qmp('blockdev-change-medium', JSON.stringify({
+        device: slot.qmpId, filename: p, format: 'raw', 'read-only-mode': 'read-only', force: true,
+      }));
+      this.persistCdSlots(idx, slot.file, p);
+      this.refreshCdSlots();
+      promptAction.showToast({ message: '已更换光盘' });
+    });
+  }
+
+  /* 弹出光盘（eject，force 同义）。profile 同步为「移除该盘」：下次启动即不带这台
+   * 光驱（与 UTM 的 Eject/Clear 语义一致）。 */
+  private ejectCd(idx: number): void {
+    const slot = idx < this.cdSlots.length ? this.cdSlots[idx] : null;
+    if (slot === null || slot.file.length === 0 || !this.qmpAlive) {
+      return;
+    }
+    this.qmp('eject', JSON.stringify({ device: slot.qmpId, force: true }));
+    this.persistCdSlots(idx, slot.file, '');
+    this.refreshCdSlots();
+    promptAction.showToast({ message: '已弹出光盘' });
+  }
+
+  /* 换/弹盘后同步落档：按「槽位优先、旧路径兜底」定位 profile.cdromPaths 里的条目，
+   * newFile='' 表示移除。槽位越界（启动时不可读盘被过滤，运行槽位比配置少）时
+   * 追加，保证新盘不丢。与其它页面一致：重读磁盘、改、save、bump 版本号。 */
+  private persistCdSlots(idx: number, oldFile: string, newFile: string): void {
+    const fresh = new VmStore(this.filesDir).load(this.vmId);
+    if (fresh === null) {
+      return;
+    }
+    const list = fresh.media.cdromPaths.slice();
+    let pos = idx;
+    if (pos >= list.length || (oldFile.length > 0 && list[pos] !== oldFile)) {
+      pos = oldFile.length > 0 ? list.indexOf(oldFile) : -1;
+    }
+    if (newFile.length === 0) {
+      if (pos >= 0 && pos < list.length) {
+        list.splice(pos, 1);
+      }
+    } else if (pos >= 0 && pos < list.length) {
+      list[pos] = newFile;
+    } else {
+      list.push(newFile);
+    }
+    fresh.media.cdromPaths = list;
+    new VmStore(this.filesDir).save(fresh);
+    this.vmListVersion++;
+  }
+
+  private shortName(path: string): string {
+    const nm = path.substring(path.lastIndexOf('/') + 1);
+    return nm.length > 18 ? nm.substring(0, 17) + '…' : nm;
+  }
+
+  /* 是否有光驱（决定「介质」按钮显隐）：profile 有配盘即显示（槽位就绪前后都在），
+   * 运行后即便 eject 光了槽位仍在（qemu 里光驱设备还挂着） */
+  private hasCds(): boolean {
+    return (this.profile !== null && this.profile.media.cdromPaths.length > 0) || this.cdSlots.length > 0;
+  }
+
+  /* 「介质」菜单：每槽一行「更换/装入」+ 有盘时一行「弹出」 */
+  @Builder
+  mediaMenu() {
+    Menu() {
+      if (this.cdSlots.length === 0) {
+        MenuItem({ content: this.qmpAlive ? '无光盘设备' : '未就绪' }).enabled(false)
+      }
+      ForEach(this.cdSlots, (s: CdSlot, i: number) => {
+        MenuItem({ content: s.file.length > 0 ? `更换光盘 ${i + 1}：${this.shortName(s.file)}` : `装入光盘 ${i + 1}` })
+          .enabled(this.qmpAlive)
+          .onClick(() => this.changeCd(i))
+        if (s.file.length > 0) {
+          MenuItem({ content: `弹出光盘 ${i + 1}` })
+            .enabled(this.qmpAlive)
+            .onClick(() => this.ejectCd(i))
+        }
+      }, (s: CdSlot, i: number) => `${i}:${s.file}`)
+    }
+  }
+
   /* ================= 触摸手势（单指移动/点击/长按右键，双指滚轮） ================= */
 
-  /* 「电源」菜单：四个电源操作收拢。重启/强制关机自带确认对话框，关机/CAD 直发。
+  /* 「电源」菜单：电源操作 + 暂停/继续收拢。重启/强制关机自带确认对话框，
+   * 关机/暂停/CAD 直发（暂停无数据风险，两态互切即撤销）。
    * 原生 Menu/MenuItem（同 VmList.newVmMenu 的既有结论：自拼 Button 样式嘈杂） */
   @Builder
   powerMenu() {
     Menu() {
+      MenuItem({ content: this.paused ? '继续' : '暂停' })
+        .enabled(this.qmpAlive)
+        .onClick(() => { this.qmp(this.paused ? 'cont' : 'stop'); })
       MenuItem({ content: '关机' })
         .enabled(this.qmpAlive)
         .onClick(() => {
@@ -760,7 +999,7 @@ struct VmConsole {
         .enabled(this.qmpAlive)
         .onClick(() => { this.confirmRestart() })
       MenuItem({ content: '强制关机' })
-        .contentFontColor(cDanger)
+        .contentFontColor(cConsoleDanger)
         .onClick(() => { this.confirmForceOff() })
       MenuItem({ content: 'Ctrl+Alt+Del' })
         .enabled(this.qmpAlive)
@@ -793,6 +1032,115 @@ struct VmConsole {
     this.sendPtrMedia(this.lastX, this.lastY, 0x02);
   }
 
+  /* ================= 触控板（相对）模式 ================= */
+
+  /* 虚拟光标未初始化（-1）时居中到画面区：首次进相对模式时的落点 */
+  private ensureCursor(): void {
+    if (this.curX < 0 || this.curY < 0) {
+      this.curX = this.areaW > 0 ? this.areaW / 2 : 100;
+      this.curY = this.areaH > 0 ? this.areaH / 2 : 100;
+    }
+  }
+
+  private moveCursorBy(dx: number, dy: number, buttons: number): void {
+    this.ensureCursor();
+    const maxX = this.areaW > 0 ? this.areaW : this.curX + dx;
+    const maxY = this.areaH > 0 ? this.areaH : this.curY + dy;
+    this.curX = Math.min(Math.max(this.curX + dx, 0), maxX);
+    this.curY = Math.min(Math.max(this.curY + dy, 0), maxY);
+    this.sendPtrMedia(this.curX, this.curY, buttons);
+  }
+
+  /* 惯性滑行：松手后按最后一段位移的初速度继续滑，16ms 一拍、逐拍衰减，
+   * 低于停止阈值即停。任何新的按下/双指手势都会先 stopGlide 打断 */
+  private startGlide(): void {
+    if (Math.abs(this.trackVX) < GLIDE_MIN_START && Math.abs(this.trackVY) < GLIDE_MIN_START) {
+      return;
+    }
+    this.stopGlide();
+    const tick = (): void => {
+      this.trackVX *= GLIDE_DECAY;
+      this.trackVY *= GLIDE_DECAY;
+      this.moveCursorBy(this.trackVX, this.trackVY, 0);
+      if (Math.abs(this.trackVX) < GLIDE_STOP && Math.abs(this.trackVY) < GLIDE_STOP) {
+        this.glideTimer = -1;
+        return;
+      }
+      this.glideTimer = setTimeout(tick, 16);
+    };
+    this.glideTimer = setTimeout(tick, 16);
+  }
+
+  private stopGlide(): void {
+    if (this.glideTimer >= 0) {
+      clearTimeout(this.glideTimer);
+      this.glideTimer = -1;
+    }
+  }
+
+  /* 触控板模式长按 = 按住左键（Click & Hold）：随后滑动即拖动，抬起补释放。
+   * 右键在相对模式由「双指轻点」承担（触屏模式长按仍是右键，见 fireLongPress） */
+  private fireLongPressTouchpad(): void {
+    this.longPressTimer = -1;
+    this.longPressed = true;
+    this.touchButtons = 0x01;
+    this.sendPtrMedia(this.curX, this.curY, 0x01);
+  }
+
+  /* 触控板模式单指收尾（Up 与 touches=0 两条路径共用，调用方保证只结算一次）：
+   * 长按 → 补左键抬起；没动过 → 点按左键；拖动过 → 惯性滑行 */
+  private finishTouchpadGesture(): void {
+    if (this.longPressed) {
+      this.sendPtrMedia(this.curX, this.curY, 0);
+      return;
+    }
+    if (!this.trackMoved) {
+      /* down/up 连续入队即完整一次点击（qemu 输入队列保序，同双指 tap 的处理） */
+      this.sendPtrMedia(this.curX, this.curY, 0x01);
+      this.sendPtrMedia(this.curX, this.curY, 0);
+      return;
+    }
+    this.startGlide();
+  }
+
+  /* 触控板模式单指处理：按下不按键也不跳光标；滑动移虚拟光标；长按阈值照旧 */
+  private handleTouchpad(t: TouchObject): void {
+    if (!this.singleDown) {
+      this.singleDown = true;
+      this.singleStartX = t.x;
+      this.singleStartY = t.y;
+      this.trackLastX = t.x;
+      this.trackLastY = t.y;
+      this.trackMoved = false;
+      this.trackVX = 0;
+      this.trackVY = 0;
+      this.longPressed = false;
+      this.touchButtons = 0;
+      this.stopGlide();
+      this.ensureCursor();
+      this.cancelLongPress();
+      this.longPressTimer = setTimeout(() => this.fireLongPressTouchpad(), 600);
+      return;
+    }
+    const speed = SPEED_FACTORS[this.cursorSpeedIdx];
+    const dx = (t.x - this.trackLastX) * speed;
+    const dy = (t.y - this.trackLastY) * speed;
+    this.trackLastX = t.x;
+    this.trackLastY = t.y;
+    this.trackVX = dx;
+    this.trackVY = dy;
+    if (!this.trackMoved) {
+      const mx = t.x - this.singleStartX;
+      const my = t.y - this.singleStartY;
+      if (mx > 8 || mx < -8 || my > 8 || my < -8) {
+        this.trackMoved = true;
+        this.cancelLongPress();
+      }
+    }
+    /* 长按已按住左键：滑动即拖动；否则纯移光标 */
+    this.moveCursorBy(dx, dy, this.longPressed ? 0x01 : 0);
+  }
+
   /* 双指手势收尾：期间没发过滚轮、且质心位移在 tap 阈值内 → 合成一次右键
    * 点击。down/up 连续入队即可：qemu 输入队列保序，guest 按自身 USB 轮询
    * 节奏看到完整的一次按下/释放，无需人为延时。返回是否判定为 tap */
@@ -805,8 +1153,11 @@ struct VmConsole {
     this.twoFingerScrolled = false;
     this.scrollAcc = 0;
     if (wasTap) {
-      this.sendPtrMedia(this.twoFingerStartX, this.twoFingerStartY, 0x02);
-      this.sendPtrMedia(this.twoFingerStartX, this.twoFingerStartY, 0);
+      /* 触控板模式光标在虚拟位置：右键点在那里而不是双指质心 */
+      const cx = this.inputMode === 1 ? this.curX : this.twoFingerStartX;
+      const cy = this.inputMode === 1 ? this.curY : this.twoFingerStartY;
+      this.sendPtrMedia(cx, cy, 0x02);
+      this.sendPtrMedia(cx, cy, 0);
     }
     return wasTap;
   }
@@ -827,17 +1178,26 @@ struct VmConsole {
         this.touchButtons = 0;
         this.singleStartX = t0.x;
         this.singleStartY = t0.y;
+        this.trackLastX = t0.x;
+        this.trackLastY = t0.y;
+        this.trackMoved = false;
       }
       return;
     }
     if (event.type === TouchType.Up) {
       this.cancelLongPress();
-      const releaseBtns = this.touchButtons;
-      this.touchButtons = 0;
       this.singleDown = false;
       this.twoFinger = false;
-      this.longPressed = false;
       this.scrollAcc = 0;
+      if (this.inputMode === 1) {
+        this.finishTouchpadGesture();
+        this.touchButtons = 0;
+        this.longPressed = false;
+        return;
+      }
+      const releaseBtns = this.touchButtons;
+      this.touchButtons = 0;
+      this.longPressed = false;
       if (releaseBtns !== 0) {
         this.sendPtrMedia(this.lastX, this.lastY, 0);
       }
@@ -850,6 +1210,7 @@ struct VmConsole {
       const cX = (event.touches[0].x + event.touches[1].x) / 2;
       const cY = (event.touches[0].y + event.touches[1].y) / 2;
       if (!this.twoFinger) {
+        this.stopGlide();
         this.twoFinger = true;
         this.twoFingerStartX = cX;
         this.twoFingerStartY = cY;
@@ -868,8 +1229,9 @@ struct VmConsole {
       } else {
         /* 自然滚动（对齐 wineohos 虚拟桌面的手感）：手指上滑 → 内容上移，
          * 即发 WHEEL_DOWN。步长 24vp：wineohos 同档的 12vp 实测 guest 侧
-         * 滚动过快（一格滚 3 行文本，轻扫就飞过十来行），放慢一倍 */
-        const delta = this.scrollCenterY - cY;
+         * 滚动过快（一格滚 3 行文本，轻扫就飞过十来行），放慢一倍。
+         * 「滚轮反向」偏好对两种手势模式与轴事件（触控板/物理滚轮）统一生效 */
+        const delta = (this.scrollCenterY - cY) * (this.scrollReverse ? -1 : 1);
         this.scrollCenterX = cX;
         this.scrollCenterY = cY;
         this.scrollAcc += delta;
@@ -890,6 +1252,10 @@ struct VmConsole {
 
     if (n === 1) {
       const t = event.touches[0];
+      if (this.inputMode === 1) {
+        this.handleTouchpad(t);
+        return;
+      }
       if (!this.singleDown) {
         this.singleDown = true;
         this.singleStartX = t.x;
@@ -911,12 +1277,23 @@ struct VmConsole {
       return;
     }
 
-    /* n === 0：全部抬起 → 释放按住的键 */
+    /* n === 0：全部抬起 → 释放按住的键。触控板模式下仅在 Up 未送达（wasDown
+     * 仍为 true）时兜底结算，避免与 Up 路径重复合成点击 */
+    const wasDown = this.singleDown;
     this.cancelLongPress();
-    const releaseBtns = this.longPressed ? 0 : this.touchButtons;
-    this.touchButtons = 0;
     this.singleDown = false;
     this.twoFinger = false;
+    this.scrollAcc = 0;
+    if (this.inputMode === 1) {
+      if (wasDown) {
+        this.finishTouchpadGesture();
+        this.touchButtons = 0;
+        this.longPressed = false;
+      }
+      return;
+    }
+    const releaseBtns = this.longPressed ? 0 : this.touchButtons;
+    this.touchButtons = 0;
     this.longPressed = false;
     if (releaseBtns !== 0) {
       this.sendPtrMedia(this.lastX, this.lastY, 0);
@@ -976,6 +1353,50 @@ struct VmConsole {
     });
   }
 
+  /* 输入设置与串口字号是「设备级」偏好（不分 vmId，换台 VM 手感一致）：一次读齐 */
+  private loadConsolePrefs(): void {
+    preferences.getPreferences(this.vmCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
+      this.inputMode = prefs.getSync('input_mode', 0) as number;
+      this.scrollReverse = prefs.getSync('scroll_reverse', false) as boolean;
+      this.cursorSpeedIdx = prefs.getSync('cursor_speed', 1) as number;
+      this.serialFs = prefs.getSync('serial_fs', SERIAL_FS_LIST[0]) as number;
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN, TAG, 'loadConsolePrefs: %{public}s', JSON.stringify(e));
+    });
+  }
+
+  private saveConsolePrefs(): void {
+    preferences.getPreferences(this.vmCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
+      prefs.putSync('input_mode', this.inputMode);
+      prefs.putSync('scroll_reverse', this.scrollReverse);
+      prefs.putSync('cursor_speed', this.cursorSpeedIdx);
+      prefs.putSync('serial_fs', this.serialFs);
+      prefs.flush();
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN, TAG, 'saveConsolePrefs: %{public}s', JSON.stringify(e));
+    });
+  }
+
+  /* 「输入」菜单：模式二选一（✓ 前缀标记）+ 滚轮反向 + 光标速度循环。
+   * 触屏=绝对定位（点哪指哪）；触控板=相对移动（点按＝左键、长按＝按住左键拖动、
+   * 双指轻点＝右键、双指滑动＝滚轮），落点由客户端虚拟光标维护（见 handleTouchpadMove）。 */
+  @Builder
+  inputMenu() {
+    Menu() {
+      MenuItem({ content: (this.inputMode === 0 ? '✓ ' : '') + '触屏模式' })
+        .onClick(() => { this.inputMode = 0; this.saveConsolePrefs(); })
+      MenuItem({ content: (this.inputMode === 1 ? '✓ ' : '') + '触控板模式' })
+        .onClick(() => { this.inputMode = 1; this.stopGlide(); this.saveConsolePrefs(); })
+      MenuItem({ content: (this.scrollReverse ? '✓ ' : '') + '滚轮反向' })
+        .onClick(() => { this.scrollReverse = !this.scrollReverse; this.saveConsolePrefs(); })
+      MenuItem({ content: '光标速度：' + SPEED_LABELS[this.cursorSpeedIdx] })
+        .onClick(() => {
+          this.cursorSpeedIdx = (this.cursorSpeedIdx + 1) % SPEED_FACTORS.length;
+          this.saveConsolePrefs();
+        })
+    }
+  }
+
   private actReset(): void {
     this.qmp('send-key',
       '{"keys":[{"type":"qcode","data":"ctrl"},' +
@@ -985,8 +1406,11 @@ struct VmConsole {
 
   /* ================= 交互式串口（v4）：画面 ↔ 串口视图 ================= */
 
-  /* 打开串口视图：连接本 VM 的 socket（qemu -serial chardev:socket,server=on）
-   * 并注册数据回调；VM 未启用交互串口（serialInteractive=false / raspi）时提示 */
+  /* 打开串口视图：先回放本 VM 的落盘日志尾部（chardev logfile，跨启动累积；
+   * 与实时流是同一条数据流，直接续上不插标记），再连 socket（qemu
+   * -serial chardev:socket,server=on）并注册数据回调；VM 未启用交互串口
+   * （serialInteractive=false / raspi）时提示。只读 64KB 尾部：日志无轮转
+   * 上限，guest 刷屏时可达 MB 级（同 qemuLogTail 的教训） */
   private openSerial(): void {
     const p = this.profile;
     if (!p) {
@@ -997,7 +1421,7 @@ struct VmConsole {
       return;
     }
     this.serialView = true;
-    this.serialText = '';
+    this.serialText = readTail(serialLogPath(this.vmId, this.vmDataDir), 64 * 1024);
     this.serialInput = '';
     this.ctrlOn = false;
     napi.serialOpen(this.vmId, serialSockPath(p, this.vmDataDir));
@@ -1005,6 +1429,13 @@ struct VmConsole {
     setTimeout(() => {
       this.serialScroller.scrollEdge(Edge.Bottom);
     }, 100);
+  }
+
+  /* 串口日志字号循环切换（12→14→17），全局偏好 */
+  private cycleSerialFs(): void {
+    const cur = SERIAL_FS_LIST.indexOf(this.serialFs);
+    this.serialFs = SERIAL_FS_LIST[(cur < 0 ? 0 : cur + 1) % SERIAL_FS_LIST.length];
+    this.saveConsolePrefs();
   }
 
   private closeSerial(): void {
@@ -1196,7 +1627,7 @@ struct VmConsole {
               return;
             }
             const steps = Math.max(-3, Math.min(3, Math.round(vert)));
-            napi.scroll(this.vmId, 0, steps);
+            napi.scroll(this.vmId, 0, this.scrollReverse ? -steps : steps);
           })
         /* 虚拟键盘 overlay：盖在 VM 画面上。面板空白处透传给画面，
          * 键帽/把手消费触摸（见 VirtualKeyboard 组件 hitTest 说明） */
@@ -1209,22 +1640,22 @@ struct VmConsole {
          * 不在 build 里问 napi.vmRunning —— 那是同步 IPC 往返，每次重绘都打一次。 */
         if (this.bootFailReason.length > 0) {
           Column({ space: sp2 }) {
-            Text('上次启动失败').fontSize(PANEL_FS).fontColor('#fffecaca')
-            Text(this.bootFailReason).fontSize(PANEL_FS).fontColor(MENU_TEXT).maxLines(2)
+            Text('上次启动失败').fontSize(PANEL_FS).fontColor(cConsoleWarn)
+            Text(this.bootFailReason).fontSize(PANEL_FS).fontColor(cConsoleText).maxLines(2)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
             Row({ space: sp2 }) {
               Button('仍要启动').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp2, right: sp2 })
-                .fontColor(MENU_TEXT).backgroundColor('#40ffffff')
+                .fontColor(cConsoleText).backgroundColor(cConsoleBtn)
                 .onClick(() => { this.retryAnyway() })
               Button('看日志').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp2, right: sp2 })
-                .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
                 .onClick(() => { this.failStart('上次启动失败'); })
             }
           }
           .width('100%')
-          .backgroundColor('#e6601b1b')
+          .backgroundColor(cConsoleBanner)
           .padding(sp2)
           .alignItems(HorizontalAlign.Start)
         }
@@ -1234,10 +1665,14 @@ struct VmConsole {
           Column() {
             Scroll(this.serialScroller) {
               Text(this.serialText)
-                .fontSize(PANEL_FS)
-                .fontColor('#fff1f2f4')
+                .fontSize(this.serialFs)
+                .fontColor(cConsoleLogText)
                 .width('100%')
                 .padding({ left: sp2, right: sp2, top: sp2, bottom: sp2 })
+                /* 长按选中复制（触摸场景 SELECTABLE_UNFOCUSABLE 即可；Ctrl+C
+                 * 才需 SELECTABLE_FOCUSABLE）。数据刷新会重置选择，属预期 */
+                .copyOption(CopyOptions.LocalDevice)
+                .textSelectable(TextSelectableMode.SELECTABLE_UNFOCUSABLE)
             }
             .layoutWeight(1)
             .align(Alignment.TopStart)
@@ -1247,25 +1682,29 @@ struct VmConsole {
             Row({ space: sp2 }) {
               Text('Ctrl').fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp1, right: sp1 })
-                .fontColor(this.ctrlOn ? DARK_ACCENT : MENU_TEXT)
+                .fontColor(this.ctrlOn ? cConsoleAccent : cConsoleText)
                 .backgroundColor(Color.Transparent)
                 .onClick(() => { this.ctrlOn = !this.ctrlOn })
               Text('Esc').fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp1, right: sp1 })
-                .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
                 .onClick(() => { this.serialSendByte(0x1b) })
               Text('Enter').fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp1, right: sp1 })
-                .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
                 .onClick(() => { this.serialSendByte(0x0d) })
               Text('清屏').fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp1, right: sp1 })
-                .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
                 .onClick(() => { this.serialText = '' })
+              Text(`字号 ${this.serialFs}`).fontSize(PANEL_FS).height(PANEL_BTN_H)
+                .padding({ left: sp1, right: sp1 })
+                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
+                .onClick(() => { this.cycleSerialFs() })
             }
             .width('100%')
             .height(PANEL_H)
-            .backgroundColor('#e620242b')
+            .backgroundColor(cConsolePanel)
             .padding({ left: sp2, right: sp2 })
             .alignItems(VerticalAlign.Center)
 
@@ -1274,51 +1713,53 @@ struct VmConsole {
                 .layoutWeight(1)
                 .fontSize(PANEL_FS)
                 .height(PANEL_H)
-                .fontColor(MENU_TEXT)
+                .fontColor(cConsoleText)
                 /* placeholder/光标必须显式给色：不设就跟随系统主题，深色主题下是深色，
                  * 落在深色面板（半透明 #20242b + 底下 VM 常是黑屏）上等于隐形（实测踩过）。
                  * 背景也要与所在行分开：原来同为 #e620242b，看不出输入框边界。 */
-                .placeholderColor('#ff9aa4b2')
+                .placeholderColor(cConsolePlaceholder)
                 .placeholderFont({ size: PANEL_FS }) /* 不给就用默认字号，比同栏其他文字大一圈 */
-                .caretColor(DARK_ACCENT)
-                .backgroundColor('#ff2b313b')
+                .caretColor(cConsoleAccent)
+                .backgroundColor(cConsoleInputBg)
                 .padding({ left: sp2, right: sp2 })
                 .id(SERIAL_INPUT_ID)
                 .onChange((v: string) => this.serialInput = v)
                 .onSubmit(() => this.sendAndRefocus())
               Text('发送').fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp1, right: sp1 })
-                .fontColor(MENU_TEXT).backgroundColor(Color.Transparent)
+                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
                 .onClick(() => this.sendAndRefocus())
             }
             .width('100%')
             .height(PANEL_H)
-            .backgroundColor('#e620242b')
+            .backgroundColor(cConsolePanel)
             .padding({ left: sp2, right: sp2 })
             .alignItems(VerticalAlign.Center)
           }
           .width('100%')
           .height('100%')
-          .backgroundColor('#e620242b')
+          .backgroundColor(cConsolePanel)
         }
         /* 手势速查（首次进入）：盖在一切之上，点任意处关闭 */
         if (this.showGestureHint) {
           Column() {
             Column({ space: sp2 }) {
-              Text('操作手势').fontSize(16).fontWeight(FontWeight.Medium).fontColor(MENU_TEXT)
-              Text('触摸屏').fontSize(PANEL_FS).fontColor(DARK_ACCENT)
+              Text('操作手势').fontSize(16).fontWeight(FontWeight.Medium).fontColor(cConsoleText)
+              Text('触摸屏').fontSize(PANEL_FS).fontColor(cConsoleAccent)
               Text('单指点按＝左键，拖动＝移动光标；长按＝右键\n双指轻点＝右键；双指上下滑动＝滚轮')
-                .fontSize(PANEL_FS).fontColor(MENU_TEXT).textAlign(TextAlign.Center)
-              Text('触控板').fontSize(PANEL_FS).fontColor(DARK_ACCENT)
+                .fontSize(PANEL_FS).fontColor(cConsoleText).textAlign(TextAlign.Center)
+              Text('触控板').fontSize(PANEL_FS).fontColor(cConsoleAccent)
               Text('双指点击＝右键；双指滑动＝滚轮')
-                .fontSize(PANEL_FS).fontColor(MENU_TEXT).textAlign(TextAlign.Center)
+                .fontSize(PANEL_FS).fontColor(cConsoleText).textAlign(TextAlign.Center)
+              Text('「输入」里可切换为触控板模式：滑动移光标，点按＝左键，\n长按＝按住左键拖动；滚轮方向与光标速度也在那里调')
+                .fontSize(PANEL_FS).fontColor(cConsoleText).textAlign(TextAlign.Center)
               Button('知道了').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H + 6)
                 .padding({ left: sp2 * 2, right: sp2 * 2 })
-                .fontColor(MENU_TEXT).backgroundColor('#40ffffff')
+                .fontColor(cConsoleText).backgroundColor(cConsoleBtn)
                 .onClick(() => this.dismissGestureHint())
             }
             .padding(sp2 * 3)
-            .backgroundColor('#ee20242b')
+            .backgroundColor(cConsolePanelStrong)
             .borderRadius(12)
             .alignItems(HorizontalAlign.Center)
           }
@@ -1326,7 +1767,7 @@ struct VmConsole {
           .height('100%')
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
-          .backgroundColor('rgba(0,0,0,0.55)')
+          .backgroundColor(cConsoleScrim)
           .onClick(() => this.dismissGestureHint())
         }
       }
@@ -1349,7 +1790,8 @@ struct VmConsole {
             Text(this.vmName).fontSize(this.barFs).fontWeight(FontWeight.Medium).fontColor(cText)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .constraintSize({ maxWidth: '40%' })
+              /* 按钮多了一排（介质/输入），状态栏宽度金贵：窄屏设备再收一档 */
+              .constraintSize({ maxWidth: isPadOrPhone() ? '26%' : '40%' })
           }
           Text(this.status).fontSize(this.barFs).fontColor(cText)
             .layoutWeight(1).maxLines(1)
@@ -1358,10 +1800,20 @@ struct VmConsole {
             .padding({ left: sp1, right: sp1 })
             .fontColor(cText).backgroundColor(Color.Transparent)
             .bindMenu(this.powerMenu)
+          if (this.hasCds()) {
+            Button('介质').focusable(false).fontSize(this.barFs).height(this.barBtnH)
+              .padding({ left: sp1, right: sp1 })
+              .fontColor(cText).backgroundColor(Color.Transparent)
+              .bindMenu(this.mediaMenu)
+          }
           Button(this.serialView ? '屏幕' : '串口').focusable(false).fontSize(this.barFs).height(this.barBtnH)
             .padding({ left: sp1, right: sp1 })
             .fontColor(this.serialView ? cPrimary : cText).backgroundColor(Color.Transparent)
             .onClick(() => { this.toggleSerialView() })
+          Button('输入').focusable(false).fontSize(this.barFs).height(this.barBtnH)
+            .padding({ left: sp1, right: sp1 })
+            .fontColor(this.inputMode === 1 ? cPrimary : cText).backgroundColor(Color.Transparent)
+            .bindMenu(this.inputMenu)
           if (isPadOrPhone()) {
             Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(this.barFs).height(this.barBtnH)
               .padding({ left: sp1, right: sp1 })

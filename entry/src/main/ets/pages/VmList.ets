@@ -19,7 +19,7 @@ import {
 import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
   cBg, cCard, cBorder, cChip, cSel, cSelBg,
-  tPage, tCard, tLabel, tBody, tSub,
+  tPage, tCard, tLabel, tBody, tSub, tSubL,
   sp1, sp2, sp3, sp4, sp5, rCard, rElem, rBadge, bw, btnH, btnPadX,
 } from '../lib/uiTokens';
 
@@ -277,7 +277,7 @@ export struct VmList {
       Column({ space: sp1 }) {
         Row({ space: sp1 }) {
           Text(p.name)
-            .fontSize(13)
+            .fontSize(tSubL)
             .fontWeight(FontWeight.Medium)
             .fontColor(cText)
             .maxLines(1)

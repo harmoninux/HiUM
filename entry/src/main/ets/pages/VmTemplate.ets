@@ -29,6 +29,7 @@ import {
   sp1, sp2, sp3, sp4, sp8, spCard, bw, rElem, rBtn, rBadge, btnH, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
+import { Chip, SecHead } from '../lib/uiWidgets';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -255,17 +256,6 @@ export struct VmTemplate {
     });
   }
 
-  /* 分组标题 + 分割线（与 VmWizard 同款组头） */
-  @Builder
-  groupHeader(label: string) {
-    Row({ space: sp8 }) {
-      Text(label).fontSize(tLabel).fontColor(cSub)
-      Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
-    }
-    .width('100%')
-    .margin({ top: sp2, bottom: sp1 })
-  }
-
   build() {
     Column() {
       Row() {
@@ -311,49 +301,44 @@ export struct VmTemplate {
             })
           }, (t: TplDef) => t.id)
 
-          this.groupHeader('CPU 架构')
+          SecHead({ label: 'CPU 架构' })
           Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
             ForEach(this.tpl().archs, (a: VmArch) => {
-              Text(this.archLabel(a)).fontSize(tBody)
-                .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-                .margin({ right: sp2, bottom: sp2 })
-                .fontColor(this.arch === a ? Color.White : cSub)
-                .backgroundColor(this.arch === a ? cPrimary : cChip)
-                .borderRadius(rBadge)
-                .onClick(() => {
-                  this.arch = a;
-                  this.refreshDerived();
+              Row() {
+                Chip({
+                  label: this.archLabel(a), active: this.arch === a,
+                  onTap: () => {
+                    this.arch = a;
+                    this.refreshDerived();
+                  },
                 })
+              }.margin({ right: sp2, bottom: sp2 })
             }, (a: VmArch) => a)
           }
           .width('100%')
 
-          this.groupHeader('CPU 核数')
+          SecHead({ label: 'CPU 核数' })
           Text(`${Math.round(this.cpus)} 核`).fontSize(tLabel).width('100%')
           Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
             .onChange((v: number) => this.cpus = v)
 
-          this.groupHeader('内存')
+          SecHead({ label: '内存' })
           Text(`${Math.round(this.memoryMB)} MB`).fontSize(tLabel).width('100%')
           Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
             .onChange((v: number) => this.memoryMB = v)
 
-          this.groupHeader('系统盘')
+          SecHead({ label: '系统盘' })
           Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
             ForEach(DISK_SIZES, (g: number) => {
-              Text(`${g}G`).fontSize(tBody)
-                .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-                .margin({ right: sp2, bottom: sp2 })
-                .fontColor(this.diskGB === g ? Color.White : cSub)
-                .backgroundColor(this.diskGB === g ? cPrimary : cChip)
-                .borderRadius(rBadge)
-                .onClick(() => this.diskGB = g)
+              Row() {
+                Chip({ label: `${g}G`, active: this.diskGB === g, onTap: () => { this.diskGB = g; } })
+              }.margin({ right: sp2, bottom: sp2 })
             }, (g: number) => String(g))
           }
           .width('100%')
           Text('磁盘空间按需占用：设置的是上限，不会立刻占满').fontSize(tSub).fontColor(cWeak).width('100%')
 
-          this.groupHeader('安装镜像')
+          SecHead({ label: '安装镜像' })
           if (this.tpl().iso === 'builtin') {
             Text(this.isoOk
               ? '内置 Alpine 镜像已就绪，无需下载'
@@ -377,7 +362,7 @@ export struct VmTemplate {
           Divider().strokeWidth(1).color(cBorder)
           /* 名称可空：placeholder 动态展示自动名兜底（随模板/架构联动）——模板名 ≠
            * 装的系统（Win10 模板常用来装 Win7/8），想装别的就在这里起名 */
-          this.groupHeader('名称')
+          SecHead({ label: '名称' })
           TextInput({ text: this.nameInput, placeholder: `留空自动命名（${this.namePreview}）` })
             .fontSize(tBody)
             .maxLength(60)

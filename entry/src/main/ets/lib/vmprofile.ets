@@ -471,6 +471,17 @@ export function serialSockPath(p: VmProfile, vmDataDir: string): string {
   return `${vmDataDir}/serial-${p.id}.sock`;
 }
 
+/* 交互式串口的落盘日志（chardev logfile，交互之外同时留档；详情页/串口页回放历史用） */
+export function serialLogPath(vmId: string, vmDataDir: string): string {
+  return `${vmDataDir}/serial-${vmId}.log`;
+}
+
+/* 详情页画面缩略图缓存：VmConsole 运行期抓帧写入（格式 = 8 字节小端宽高头 + 裸
+ * RGBA_8888 像素，见 VmConsole.captureThumb 与 VmManage.loadThumb，两边别写岔）。 */
+export function thumbPath(vmId: string, vmDataDir: string): string {
+  return `${vmDataDir}/thumb-${vmId}.raw`;
+}
+
 /* riscv64 变量存储 pflash 的每 VM 路径（buildArgs 用同一个式样，两边别写岔） */
 export function riscvVarsPath(p: VmProfile, vmDataDir: string): string {
   return `${vmDataDir}/edk2-riscv-vars-${p.id}.fd`;
@@ -728,11 +739,20 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     }
   }
   if (!isRaspi) {
-    /* 多 ISO：第一张保持 -cdrom（linux 单盘行为不变）；附加盘按板卡挂 CD 设备
-     * （pc/q35 用 ide-cd；virt 挂到公共段那个 USB 控制器上的 usb-storage，两种
-     * 控制器下这条路径都通）。 */
+    /* 多 ISO：第一张与附加盘按板卡分挂法。
+     * pc/q35：第一张保持 -cdrom（qemu 按 index=2 挂 ide-cd，自动后端 id=ide1-cd0，
+     * 实测该设备 removable=true，运行中可 blockdev-change-medium/eject）；
+     * virt：**不能**用 -cdrom —— 它会生成不可换介质的 virtio-blk（实测对其换盘报
+     * "Device 'virtio2' is not removable"），故与附加盘同走 usb-storage（挂在公共段
+     * 的 USB 控制器上，removable=true 可换盘）。附加盘本就是这套：pc/q35 用 ide-cd，
+     * virt 用 usb-storage，id 依次 cd1、cd2…（virt 第一张为 cd0）。 */
     if (isos.length > 0) {
-      args.push('-cdrom', isos[0]);
+      if (board === 'virt') {
+        args.push('-drive', `if=none,format=raw,file=${isos[0]},id=cd0,media=cdrom,readonly=on`);
+        args.push('-device', 'usb-storage,drive=cd0,bus=usb.0');
+      } else {
+        args.push('-cdrom', isos[0]);
+      }
       for (let i = 1; i < isos.length; i++) {
         const id = 'cd' + i;
         args.push('-drive', `if=none,format=raw,file=${isos[i]},id=${id},media=cdrom,readonly=on`);
@@ -795,8 +815,10 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
 
 export class VmStore {
   readonly dir: string;
+  private readonly filesDir: string; /* 缩略图在 filesDir/vm 下，remove 清理要用 */
 
   constructor(filesDir: string) {
+    this.filesDir = filesDir;
     this.dir = filesDir + '/vms';
     if (!fs.accessSync(this.dir)) {
       fs.mkdirSync(this.dir, true);
@@ -915,6 +937,15 @@ export class VmStore {
       } catch {
         /* best effort */
       }
+    }
+    /* 详情页缩略图缓存（VmConsole 写，位置在 vms 之外） */
+    try {
+      const thumb = thumbPath(p.id, this.filesDir + '/vm');
+      if (fs.accessSync(thumb)) {
+        fs.unlinkSync(thumb);
+      }
+    } catch {
+      /* best effort */
     }
   }
 }

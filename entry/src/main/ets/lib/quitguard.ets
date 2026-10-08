@@ -14,6 +14,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import napiModule from 'libentry.so';
 import { VmStore } from './vmprofile';
 import { livingWindowCount, anyWindow } from './vmwindows';
+import { cPrimary, cDanger } from './uiTokens';
 
 const DOMAIN = 0x0001;
 const TAG = 'QemuEntry';
@@ -76,8 +77,8 @@ export function showQuitDialog(win: window.Window | undefined, count: number): P
         title: '仍有虚拟机正在运行',
         message: `退出应用将强制停止 ${count} 台正在运行的虚拟机（相当于直接断电），虚拟机内未保存的数据可能丢失。`,
         buttons: [
-          { text: '取消', color: '#FF0A59F7' },
-          { text: '强制退出', color: '#FFE84026' },
+          { text: '取消', color: cPrimary },
+          { text: '强制退出', color: cDanger },
         ],
       }).then((r) => {
         resolve(r.index !== 1);

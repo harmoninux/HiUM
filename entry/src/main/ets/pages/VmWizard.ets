@@ -13,6 +13,8 @@ import {
 } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { pickIsoPath, pickFilePath } from '../lib/isoPick';
+import { Chip, SecHead, FoldHead } from '../lib/uiWidgets';
+import { PortForwardEditor } from '../lib/PortForwardEditor';
 import {
   cPrimary, cSub, cWeak, cText, cBorder, cDanger, cBg, cBlock, cChip, cCard,
   tPage, tCard, tBody, tSub, tLabel, tMono,
@@ -368,17 +370,6 @@ export struct VmWizard {
     }
   }
 
-  /* 分组标题 + 分割线（组头）：灰字在左，细线延伸至右；组间留距 */
-  @Builder
-  groupHeader(label: string) {
-    Row({ space: sp8 }) {
-      Text(label).fontSize(tLabel).fontColor(cSub)
-      Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
-    }
-    .width('100%')
-    .margin({ top: sp2, bottom: sp1 })
-  }
-
   private boardName(b: string): string {
     if (b === 'virt') return 'virt (通用)';
     if (b === 'raspi2') return 'raspi2b (树莓派2B)';
@@ -617,7 +608,7 @@ export struct VmWizard {
   @Builder
   stepBoard() {
     Column({ space: spCard }) {
-      this.groupHeader('机器类型')
+      SecHead({ label: '机器类型' })
       Row({ space: sp2 }) {
         ForEach(this.boards(), (b: string) => {
           Column() {
@@ -640,17 +631,13 @@ export struct VmWizard {
       Text(this.firmwareHint()).fontSize(tSub).fontColor(cWeak).width('100%')
 
       /* —— v4 显卡（x86 板卡可换；virt 固定 virtio-gpu；raspi 板载） —— */
-      this.groupHeader('显卡')
+      SecHead({ label: '显卡' })
       if (this.isX86Board()) {
         Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
           ForEach(['std', 'cirrus', 'vmware', 'virtio'], (g: string) => {
-            Text(g).fontSize(tBody)
-              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-              .margin({ right: sp2, bottom: sp2 })
-              .fontColor(this.vga === g ? Color.White : cText)
-              .backgroundColor(this.vga === g ? cPrimary : cBg)
-              .borderRadius(rBtn)
-              .onClick(() => { this.vga = g as VgaType; })
+            Row() {
+              Chip({ label: g, active: this.vga === g, onTap: () => { this.vga = g as VgaType; } })
+            }.margin({ right: sp2, bottom: sp2 })
           }, (g: string) => g)
         }
         .width('100%')
@@ -662,40 +649,17 @@ export struct VmWizard {
       }
 
       /* CPU 机型组：默认折叠，点组头展开/收起 */
-      /* CPU 机型组：默认折叠，点组头展开/收起。
-       * 标题+提示合成同一 Text 的 Span（单行盒排版），避免两个独立 Text
-       * 因符号字符(▸)字体度量不同而垂直错位 */
-      Row({ space: sp8 }) {
-        Text() {
-          Span('CPU 机型').fontColor(cSub)
-          Span(this.cpuModelCollapsed ? ' ▸ 展开' : ' ▾ 收起').fontColor(cWeak).fontSize(tSub)
-        }
-        .fontSize(tLabel)
-        Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
-      }
-      .width('100%')
-      .margin({ top: sp2, bottom: sp1 })
-      .onClick(() => this.cpuModelCollapsed = !this.cpuModelCollapsed)
+      FoldHead({ label: 'CPU 机型', collapsed: this.cpuModelCollapsed, onToggle: () => { this.cpuModelCollapsed = !this.cpuModelCollapsed; } })
 
       if (!this.cpuModelCollapsed) {
         Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
-          Text('自动')
-            .fontSize(tBody)
-            .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-            .margin({ right: sp2, bottom: sp2 })
-            .fontColor(this.cpuModel.trim().length === 0 ? Color.White : cText)
-            .backgroundColor(this.cpuModel.trim().length === 0 ? cPrimary : cBg)
-            .borderRadius(rBtn)
-            .onClick(() => this.cpuModel = '')
+          Row() {
+            Chip({ label: '自动', active: this.cpuModel.trim().length === 0, onTap: () => { this.cpuModel = ''; } })
+          }.margin({ right: sp2, bottom: sp2 })
           ForEach(this.cpuPresets(), (m: string) => {
-            Text(m)
-              .fontSize(tBody)
-              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-              .margin({ right: sp2, bottom: sp2 })
-              .fontColor(this.cpuModel.trim() === m ? Color.White : cText)
-              .backgroundColor(this.cpuModel.trim() === m ? cPrimary : cBg)
-              .borderRadius(rBtn)
-              .onClick(() => this.cpuModel = m)
+            Row() {
+              Chip({ label: m, active: this.cpuModel.trim() === m, onTap: () => { this.cpuModel = m; } })
+            }.margin({ right: sp2, bottom: sp2 })
           }, (m: string) => m)
         }
         .width('100%')
@@ -718,7 +682,7 @@ export struct VmWizard {
   @Builder
   stepCpuMem() {
     Column({ space: spCard }) {
-      this.groupHeader('内存与核数')
+      SecHead({ label: '内存与核数' })
       Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
       Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
         .onChange((v: number) => this.memoryMB = v)
@@ -727,7 +691,7 @@ export struct VmWizard {
         .onChange((v: number) => this.cpus = v)
 
       /* —— v4 系统增强：RNG/balloon（需 PCI；raspi 禁用） —— */
-      this.groupHeader('系统增强')
+      SecHead({ label: '系统增强' })
       Row() {
         Text('随机数发生器 (RNG)').fontSize(tLabel).layoutWeight(1)
         Toggle({ type: ToggleType.Switch, isOn: this.rng })
@@ -755,17 +719,7 @@ export struct VmWizard {
         .fontSize(tSub).fontColor(cWeak).width('100%')
 
       /* TCG 模拟组：默认折叠，点组头展开/收起 */
-      Row({ space: sp8 }) {
-        Text() {
-          Span('TCG 模拟').fontColor(cSub)
-          Span(this.tcgCollapsed ? ' ▸ 展开' : ' ▾ 收起').fontColor(cWeak).fontSize(tSub)
-        }
-        .fontSize(tLabel)
-        Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
-      }
-      .width('100%')
-      .margin({ top: sp2, bottom: sp1 })
-      .onClick(() => this.tcgCollapsed = !this.tcgCollapsed)
+      FoldHead({ label: 'TCG 模拟', collapsed: this.tcgCollapsed, onToggle: () => { this.tcgCollapsed = !this.tcgCollapsed; } })
 
       if (!this.tcgCollapsed) {
         Row() {
@@ -795,20 +749,10 @@ export struct VmWizard {
     Column({ space: spCard }) {
       /* 系统盘必配（无开关）：新建空白盘 或 导入现有镜像（创建时复制进 vms/）。
        * 来源/分配方式用分段胶囊（与概览 chips 同款），不用 Radio——圆点+对勾太嘈杂 */
-      this.groupHeader('系统盘')
+      SecHead({ label: '系统盘' })
       Row({ space: sp2 }) {
-        Text('新建空白盘').fontSize(tBody)
-          .fontColor(this.diskSource === 'new' ? Color.White : cSub)
-          .backgroundColor(this.diskSource === 'new' ? cPrimary : cChip)
-          .borderRadius(rBadge)
-          .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-          .onClick(() => { this.diskSource = 'new' })
-        Text('导入现有镜像').fontSize(tBody)
-          .fontColor(this.diskSource === 'import' ? Color.White : cSub)
-          .backgroundColor(this.diskSource === 'import' ? cPrimary : cChip)
-          .borderRadius(rBadge)
-          .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-          .onClick(() => { this.diskSource = 'import' })
+        Chip({ label: '新建空白盘', active: this.diskSource === 'new', onTap: () => { this.diskSource = 'new'; } })
+        Chip({ label: '导入现有镜像', active: this.diskSource === 'import', onTap: () => { this.diskSource = 'import'; } })
       }
       if (this.diskSource === 'new') {
         Text(`磁盘大小: ${Math.round(this.diskGB)}GB`).fontSize(tLabel)
@@ -816,18 +760,8 @@ export struct VmWizard {
           min: 0, max: DISK_SIZES.length - 1, step: 1 })
           .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
         Row({ space: sp2 }) {
-          Text('动态分配').fontSize(tBody)
-            .fontColor(this.diskAlloc === 'dynamic' ? Color.White : cSub)
-            .backgroundColor(this.diskAlloc === 'dynamic' ? cPrimary : cChip)
-            .borderRadius(rBadge)
-            .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-            .onClick(() => { this.diskAlloc = 'dynamic' })
-          Text('固定大小').fontSize(tBody)
-            .fontColor(this.diskAlloc === 'fixed' ? Color.White : cSub)
-            .backgroundColor(this.diskAlloc === 'fixed' ? cPrimary : cChip)
-            .borderRadius(rBadge)
-            .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-            .onClick(() => { this.diskAlloc = 'fixed' })
+          Chip({ label: '动态分配', active: this.diskAlloc === 'dynamic', onTap: () => { this.diskAlloc = 'dynamic'; } })
+          Chip({ label: '固定大小', active: this.diskAlloc === 'fixed', onTap: () => { this.diskAlloc = 'fixed'; } })
           Text('动态：用到多少占多少；固定：创建即占满')
             .fontSize(tSub).fontColor(cWeak).layoutWeight(1)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -853,18 +787,8 @@ export struct VmWizard {
       if (this.arch === 'x86_64' || this.arch === 'i386') {
         Row({ space: sp2 }) {
           Text('磁盘接口').fontSize(tSub).fontColor(cSub)
-          Text('virtio').fontSize(tBody)
-            .fontColor(this.diskIface === 'virtio' ? Color.White : cSub)
-            .backgroundColor(this.diskIface === 'virtio' ? cPrimary : cChip)
-            .borderRadius(rBadge)
-            .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-            .onClick(() => { this.diskIface = 'virtio' })
-          Text('ide（Windows）').fontSize(tBody)
-            .fontColor(this.diskIface === 'ide' ? Color.White : cSub)
-            .backgroundColor(this.diskIface === 'ide' ? cPrimary : cChip)
-            .borderRadius(rBadge)
-            .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-            .onClick(() => { this.diskIface = 'ide' })
+          Chip({ label: 'virtio', active: this.diskIface === 'virtio', onTap: () => { this.diskIface = 'virtio'; } })
+          Chip({ label: 'ide（Windows）', active: this.diskIface === 'ide', onTap: () => { this.diskIface = 'ide'; } })
           Text(this.diskIface === 'ide' ? 'Windows 免装驱动' : '适合 Linux')
             .fontSize(tSub).fontColor(cWeak).layoutWeight(1)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -874,17 +798,7 @@ export struct VmWizard {
       }
 
       /* 直接内核引导：默认折叠的高级组；选了 kernel 即绕过固件引导（-kernel） */
-      Row({ space: sp8 }) {
-        Text() {
-          Span('内核引导').fontColor(cSub)
-          Span(this.kernelCollapsed ? ' ▸ 展开' : ' ▾ 收起').fontColor(cWeak).fontSize(tSub)
-        }
-        .fontSize(tLabel)
-        Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
-      }
-      .width('100%')
-      .margin({ top: sp2, bottom: sp1 })
-      .onClick(() => this.kernelCollapsed = !this.kernelCollapsed)
+      FoldHead({ label: '内核引导', collapsed: this.kernelCollapsed, onToggle: () => { this.kernelCollapsed = !this.kernelCollapsed; } })
 
       if (!this.kernelCollapsed) {
         Row({ space: sp2 }) {
@@ -928,7 +842,7 @@ export struct VmWizard {
       }
 
       /* 数据盘不入向导（同 UTM：创建后「存储管理」弹窗按需添加；快照仅含系统盘） */
-      this.groupHeader('光盘')
+      SecHead({ label: '光盘' })
       /* 多 ISO 有序列表：第一张为启动盘候选（从光盘启动时）；每张一行可独立移除 */
       if (this.cdromPaths.length > 0) {
         ForEach(this.cdromPaths, (p: string, idx: number) => {
@@ -973,7 +887,7 @@ export struct VmWizard {
   @Builder
   stepNet() {
     Column({ space: spCard }) {
-      this.groupHeader('网络')
+      SecHead({ label: '网络' })
       Row() {
         Text('启用网络').fontSize(tLabel).layoutWeight(1)
         Toggle({ type: ToggleType.Switch, isOn: this.netEnabled })
@@ -981,11 +895,7 @@ export struct VmWizard {
       }
       if (this.netEnabled) {
         Text('端口转发').fontSize(tLabel)
-        TextInput({ placeholder: '如 2222:22,8080:80', text: this.portForwards })
-          .fontSize(tBody)
-          .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-          .onChange((v: string) => this.portForwards = v)
-        Text('设备端口:虚拟机端口，多个用逗号分隔，如 2222:22,8080:80').fontSize(tSub).fontColor(cWeak)
+        PortForwardEditor({ text: this.$portForwards })
         Row() {
           Text('9p 共享目录').fontSize(tLabel).layoutWeight(1)
           Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })

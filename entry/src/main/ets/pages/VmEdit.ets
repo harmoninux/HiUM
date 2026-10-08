@@ -7,7 +7,9 @@ import { VmProfile, VmStore, VmArch, VgaType, VmDisk, DiskIface, NetModel, SCHEM
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { isoReadable } from '../lib/fsutil';
 import { pickIsoPath } from '../lib/isoPick';
-import { cPrimary, cDanger, cRunning, cSub, cWeak, cBg, cBorder, cText, cChip, tPage, tLabel, tBody, tSub, tMono, rBtn, rBadge, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp5, sp8, spCard } from '../lib/uiTokens';
+import { Chip, SecHead, FoldHead } from '../lib/uiWidgets';
+import { PortForwardEditor } from '../lib/PortForwardEditor';
+import { cPrimary, cDanger, cSub, cWeak, cBg, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp5, sp8, spCard } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -61,6 +63,9 @@ export struct VmEdit {
   @State showAdvanced: boolean = false;
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine ISO 下载中 */
   @State isoPct: number = 0;
+  /* 保存被校验拦下时的内联红字（替代 toast：点过保存就常驻页头下方，
+   * 滚动到哪都看得见；成功保存不会走到这里） */
+  @State saveErrorMsg: string = '';
   /* 已建系统盘的元信息（qemu-img info），直接在「系统盘」行内展示 */
   @State diskFmt: string = '?';
   @State diskVirtualGB: number = 0;
@@ -278,10 +283,13 @@ export struct VmEdit {
     if (!this.profile) {
       return;
     }
-    /* 保存前静态校验：拦下明显无效的组合，避免落盘后启动才暴露（与向导 calcError 对齐） */
+    /* 保存前静态校验：拦下明显无效的组合，避免落盘后启动才暴露（与向导 calcError 对齐）。
+     * 失败走内联红字（页头下方常驻）而不是 toast——四条校验都可能命中表单深处，
+     * toast 一闪而过用户不知改哪 */
+    this.saveErrorMsg = '';
     const verr = this.saveError();
     if (verr.length > 0) {
-      promptAction.showToast({ message: verr });
+      this.saveErrorMsg = verr;
       return;
     }
     /* 保存基线从磁盘重读：本页与存储页各持内存副本（@Prop 深拷贝），谁后保存
@@ -361,34 +369,6 @@ export struct VmEdit {
     return [first].concat(rest);
   }
 
-  /* 分组标题 + 分割线（与 VmWizard groupHeader / VmManage secHead 同款：灰字在左，细线延伸至右） */
-  @Builder
-  groupHead(label: string) {
-    Row({ space: sp8 }) {
-      Text(label).fontSize(tLabel).fontColor(cSub)
-      Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
-    }
-    .width('100%')
-    .margin({ top: sp2, bottom: sp2 })
-  }
-
-  /* 高级折叠组头：点击展开/收起。标题+展开提示合成同一 Text 的 Span（单行盒排版），
-   * 避免 ▸/▾ 符号与文字字体度量不同而垂直错位——同 VmWizard 折叠组头手法 */
-  @Builder
-  groupHeadAdvanced() {
-    Row({ space: sp8 }) {
-      Text() {
-        Span('高级').fontColor(cSub)
-        Span(this.showAdvanced ? ' ▾ 收起' : ' ▸ 展开').fontColor(cWeak).fontSize(tSub)
-      }
-      .fontSize(tLabel)
-      Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
-    }
-    .width('100%')
-    .margin({ top: sp2, bottom: sp2 })
-    .onClick(() => this.showAdvanced = !this.showAdvanced)
-  }
-
   build() {
     Column() {
       Row() {
@@ -409,10 +389,16 @@ export struct VmEdit {
       .width('100%')
       .padding({ left: sp8, right: sp8, top: sp8, bottom: sp8 })
 
+      /* 校验拦截提示（内联红字，常驻页头下方） */
+      if (this.saveErrorMsg.length > 0) {
+        Text(this.saveErrorMsg).fontSize(tSub).fontColor(cDanger).width('100%')
+          .padding({ left: sp3, right: sp3, bottom: sp2 })
+      }
+
       Scroll() {
         Column() {
           /* —— 基础 —— */
-          this.groupHead('基础')
+          SecHead({ label: '基础' })
 
           Row() {
             Text('名称').fontSize(tLabel).width(72)
@@ -455,12 +441,7 @@ export struct VmEdit {
             if (this.isX86Board()) {
               Row({ space: sp2 }) {
                 ForEach(['std', 'cirrus', 'vmware', 'virtio'], (g: string) => {
-                  Text(g).fontSize(tSub)
-                    .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-                    .fontColor(this.vga === g ? Color.White : cText)
-                    .backgroundColor(this.vga === g ? cPrimary : cBg)
-                    .borderRadius(rBtn)
-                    .onClick(() => { this.vga = g as VgaType; })
+                  Chip({ label: g, active: this.vga === g, onTap: () => { this.vga = g as VgaType; } })
                 }, (g: string) => g)
               }
             } else {
@@ -478,7 +459,7 @@ export struct VmEdit {
           }.width('100%').padding({ top: sp1, bottom: sp1 })
 
           /* —— 存储 —— */
-          this.groupHead('存储')
+          SecHead({ label: '存储' })
 
           Column({ space: sp1 }) {
             Row() {
@@ -521,18 +502,8 @@ export struct VmEdit {
           if (this.isX86Board()) {
             Row({ space: sp2 }) {
               Text('磁盘接口').fontSize(tLabel).layoutWeight(1)
-              Text('virtio').fontSize(tBody)
-                .fontColor(this.diskIface === 'virtio' ? Color.White : cSub)
-                .backgroundColor(this.diskIface === 'virtio' ? cPrimary : cChip)
-                .borderRadius(rBadge)
-                .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-                .onClick(() => { this.diskIface = 'virtio' })
-              Text('ide（Windows）').fontSize(tBody)
-                .fontColor(this.diskIface === 'ide' ? Color.White : cSub)
-                .backgroundColor(this.diskIface === 'ide' ? cPrimary : cChip)
-                .borderRadius(rBadge)
-                .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-                .onClick(() => { this.diskIface = 'ide' })
+              Chip({ label: 'virtio', active: this.diskIface === 'virtio', onTap: () => { this.diskIface = 'virtio'; } })
+              Chip({ label: 'ide（Windows）', active: this.diskIface === 'ide', onTap: () => { this.diskIface = 'ide'; } })
             }.width('100%').padding({ top: sp1, bottom: sp1 })
             Text(this.diskIface === 'ide'
               ? 'Windows 免装驱动即可识别'
@@ -640,7 +611,7 @@ export struct VmEdit {
           }
 
           /* —— 网络 —— */
-          this.groupHead('网络')
+          SecHead({ label: '网络' })
 
           Row() {
             Text('启用网络').fontSize(tLabel).layoutWeight(1)
@@ -651,11 +622,7 @@ export struct VmEdit {
           if (this.netEnabled) {
             Column({ space: 4 }) {
               Text('端口映射').fontSize(tLabel)
-              Text('设备端口:虚拟机端口，多个用逗号分隔').fontSize(tSub).fontColor(cWeak)
-              TextInput({ placeholder: '如 2222:22,8080:80', text: this.portForwards })
-                .fontSize(tBody)
-                .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-                .onChange((v: string) => this.portForwards = v)
+              PortForwardEditor({ text: this.$portForwards })
             }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
             Column({ space: 4 }) {
               Row() {
@@ -671,18 +638,8 @@ export struct VmEdit {
               Column({ space: 4 }) {
                 Row({ space: sp2 }) {
                   Text('网卡型号').fontSize(tLabel).layoutWeight(1)
-                  Text('virtio').fontSize(tBody)
-                    .fontColor(this.netModel === 'virtio' ? Color.White : cSub)
-                    .backgroundColor(this.netModel === 'virtio' ? cPrimary : cChip)
-                    .borderRadius(rBadge)
-                    .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-                    .onClick(() => { this.netModel = 'virtio' })
-                  Text('rtl8139').fontSize(tBody)
-                    .fontColor(this.netModel === 'rtl8139' ? Color.White : cSub)
-                    .backgroundColor(this.netModel === 'rtl8139' ? cPrimary : cChip)
-                    .borderRadius(rBadge)
-                    .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-                    .onClick(() => { this.netModel = 'rtl8139' })
+                  Chip({ label: 'virtio', active: this.netModel === 'virtio', onTap: () => { this.netModel = 'virtio'; } })
+                  Chip({ label: 'rtl8139', active: this.netModel === 'rtl8139', onTap: () => { this.netModel = 'rtl8139'; } })
                 }.width('100%')
                 Text(this.netModel === 'rtl8139'
                   ? 'Windows 默认'
@@ -693,7 +650,7 @@ export struct VmEdit {
           }
 
           /* —— 高级（折叠组头） —— */
-          this.groupHeadAdvanced()
+          FoldHead({ label: '高级', collapsed: !this.showAdvanced, onToggle: () => { this.showAdvanced = !this.showAdvanced; } })
           if (this.showAdvanced) {
             Row() {
               Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)

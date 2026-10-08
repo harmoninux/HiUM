@@ -54,3 +54,31 @@ export const inpH = 44;      /* 标准输入框高 */
 export const inpBg = cBlock; /* 输入框底，浅灰块 */
 export const inpRadius = 8;  /* 输入框圆角 */
 export const inpPadX = 16;   /* 输入框左右内边距 */
+
+/* ---- 弹窗遮罩（主窗口全窗口模态共用；console 内另有更深的 cConsoleScrim） ---- */
+export const scrim = 'rgba(0,0,0,0.45)';
+
+/* ---- console 深色浮层专档：console 界面恒深色（画面纯黑底、串口面板 #20242b），
+ * 不随系统深浅切换，故不走资源双色板而是固定值。注意不能直接套上面那组资源色：
+ * cPrimary/cDanger/cWeak 是给浅色背景设计的深色值，搬到这里对比度只有 2.1~2.9:1
+ *（实测「画面」「强制断电」这类文字看不清）；下面这组是深色浮层上的浅色版本，
+ * 均 ≥4.5:1（WCAG AA）。同一语义值只留此处一份，改色只改这里。 ---- */
+export const cConsoleText = '#fff5f7fa';      /* 浮层主文本 4.9:1 */
+export const cConsoleAccent = '#ff94beff';    /* 浮层主色：选中态/强调 4.9:1 */
+export const cConsoleDanger = '#ffffa8a8';    /* 浮层危险操作（亮红） 4.8:1 */
+export const cConsoleLogText = '#fff1f2f4';   /* 串口日志正文 */
+export const cConsoleWarn = '#fffecaca';      /* 熔断横幅标题（亮黄红） */
+export const cConsolePanel = '#e620242b';     /* 串口面板/键帽行底（半透明深灰） */
+export const cConsolePanelStrong = '#ee20242b'; /* 速查卡片底（更实一点） */
+export const cConsoleInputBg = '#ff2b313b';   /* 串口输入框底（与面板拉开边界） */
+export const cConsolePlaceholder = '#ff9aa4b2'; /* 串口输入框占位/光标提示 */
+export const cConsoleBanner = '#e6601b1b';    /* 启动失败横幅底 */
+export const cConsoleBtn = '#40ffffff';       /* 深色浮层上的浅色按钮底 */
+export const cConsoleScrim = 'rgba(0,0,0,0.55)'; /* 全屏遮罩（手势速查/截图卡按钮） */
+
+/* ---- 虚拟键盘浮动面板（恒深色底，同 console 专档理由；主色为固定亮蓝而非主题色） ---- */
+export const cKbPanel = '#4D000000';   /* 面板底（半透明黑，透出画面） */
+export const cKbKey = '#1A000000';     /* 键帽底 */
+export const cKbBorder = '#66FFFFFF';  /* 键帽描边 */
+export const cKbHandle = '#88FFFFFF';  /* 拖动把手 */
+export const cKbPressed = '#ff0563ff'; /* 按下/锁存键帽底（固定在深底上白字可读的蓝） */

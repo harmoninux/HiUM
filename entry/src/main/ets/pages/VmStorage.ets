@@ -15,11 +15,12 @@ import { copyFileWithProgress } from '../lib/fsutil';
 import { mainDiskPath } from '../lib/vmprofile';
 import {
   cPrimary, cDanger, cRunning, cText, cSub, cWeak,
-  cCard, cBlock, cChip, cBorder,
+  cCard, cBlock, cBorder,
   tCard, tLabel, tBody, tSub,
-  sp1, sp2, sp3, sp4, sp5, sp8, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
+  sp1, sp2, sp3, sp5, sp8, rElem, rBtn, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
+import { Chip, SecHead, Snackbar } from '../lib/uiWidgets';
 
 interface DiskNapi {
   diskInfo: (path: string) => string;
@@ -75,14 +76,11 @@ export struct VmStorage {
     this.refreshDisk();
   }
 
-  /* 右下角 snackbar：成功类反馈走这里，错误类保留 toast */
+  /* 右下角 snackbar：成功类反馈走这里，错误类保留 toast。展示与自动消失已收进
+   * Snackbar 组件（@Link 自清）；先清空再赋值让同文案连发也能重新计时 */
   private showSnack(msg: string): void {
+    this.snack = '';
     this.snack = msg;
-    setTimeout(() => {
-      if (this.snack === msg) {
-        this.snack = '';
-      }
-    }, 2000);
   }
 
   private baseName(path: string): string {
@@ -533,21 +531,12 @@ export struct VmStorage {
     });
   }
 
-  /* 分区标题（与 VmWizard groupHeader 同款：灰字在左，细线延伸至右） */
-  @Builder
-  secHead(t: string) {
-    Row({ space: sp8 }) {
-      Text(t).fontSize(tSub).fontColor(cSub)
-      Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
-    }
-    .width('100%')
-    .margin({ top: sp2, bottom: sp1 })
-  }
+  /* 分区标题走公共组件 SecHead（字号统一为 tLabel） */
 
   /* 系统盘：扩容 / 重建 / 创建快照（从 VmManage 平移到 per-VM 存储页）。盘不可移除，只可重建 */
   @Builder
   secSystemDisk() {
-    this.secHead('系统盘')
+    SecHead({ label: '系统盘' })
     if (!this.diskPath) {
       Row({ space: sp2 }) {
         Text('系统盘缺失').fontSize(tSub).fontColor(cWeak).layoutWeight(1).padding({ top: sp1, bottom: sp1 })
@@ -627,7 +616,7 @@ export struct VmStorage {
    * 系统盘（disks[0]）在本弹窗「系统盘」区；快照与临时会话只含系统盘。 */
   @Builder
   secSecondDisk() {
-    this.secHead('数据盘')
+    SecHead({ label: '数据盘' })
     Column({ space: sp2 }) {
       /* 逐行：名字 + 只读 Toggle + 扩容 + 移除 */
       ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
@@ -725,18 +714,8 @@ export struct VmStorage {
               .onChange((v: boolean) => this.secondNewReadonly = v)
           }.width('100%')
           Row({ space: sp2 }) {
-            Text('动态分配').fontSize(tBody)
-              .fontColor(this.secondNewAlloc === 'dynamic' ? Color.White : cSub)
-              .backgroundColor(this.secondNewAlloc === 'dynamic' ? cPrimary : cChip)
-              .borderRadius(rBadge)
-              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-              .onClick(() => { this.secondNewAlloc = 'dynamic' })
-            Text('预分配').fontSize(tBody)
-              .fontColor(this.secondNewAlloc === 'fixed' ? Color.White : cSub)
-              .backgroundColor(this.secondNewAlloc === 'fixed' ? cPrimary : cChip)
-              .borderRadius(rBadge)
-              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
-              .onClick(() => { this.secondNewAlloc = 'fixed' })
+            Chip({ label: '动态分配', active: this.secondNewAlloc === 'dynamic', onTap: () => { this.secondNewAlloc = 'dynamic'; } })
+            Chip({ label: '预分配', active: this.secondNewAlloc === 'fixed', onTap: () => { this.secondNewAlloc = 'fixed'; } })
             Text(this.secondNewAlloc === 'fixed' ? '创建即占满，写入更快' : '按需占用，用到多少占多少')
               .fontSize(tSub).fontColor(cWeak).layoutWeight(1)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -750,7 +729,7 @@ export struct VmStorage {
   /* 光盘 ISO：该 VM 的 ISO 引用列表（可加/移除；第一张为启动盘候选） */
   @Builder
   secCdrom() {
-    this.secHead('光盘 ISO')
+    SecHead({ label: '光盘 ISO' })
     Column() {
       if (this.cdromPaths.length > 0) {
         ForEach(this.cdromPaths, (p: string, idx: number) => {
@@ -826,14 +805,7 @@ export struct VmStorage {
       .height('100%')
       .backgroundColor(cCard)
 
-      if (this.snack.length > 0) {
-        Row() {
-          Text(this.snack).fontSize(tBody).fontColor(Color.White)
-        }
-        .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
-        .backgroundColor(cText).borderRadius(rElem)
-        .position({ right: sp4, bottom: sp4 })
-      }
+      Snackbar({ msg: this.$snack })
     }
     .width('100%')
     .height('100%')
