@@ -1,7 +1,7 @@
 // 单台虚拟机的管理页（per-VM）：分区滚动 —— 概览 chips + 系统盘 / 快照·时光机 / 网络 / 高级。
 // 快照归属单台 VM，不进跨 VM 的库；临时会话打点/回滚见 lib/tempSession。
 // 从列表侧栏点行进（Navigation replace 渲染到 content/detail 区）；成功反馈走右下角 snackbar。
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, display } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
@@ -78,6 +78,11 @@ export struct VmManage {
   @State netEnabled: boolean = false;
   @State snack: string = '';
   @State thumb: image.PixelMap | null = null; /* 画面缩略图（VmConsole 抓帧的缓存，见 loadThumb） */
+  /* 缩略图的像素尺寸：抓帧上限 512 是**物理像素**，而 Image 不设尺寸会把同数值
+   * 当 vp 渲染（高密屏 512vp = 3.5×512 物理像素），天生上采样发糊——显示尺寸
+   * 必须按屏幕密度换算回 px/density vp，才能 1:1 物理像素呈现（见卡片 Image）。 */
+  @State thumbPxW: number = 0;
+  @State thumbPxH: number = 0;
   /* v6 克隆：cloneStage != '' = 克隆进行中（进度条显示 stage+pct） */
   @State cloneStage: string = '';
   @State clonePct: number = 0;
@@ -221,6 +226,8 @@ export struct VmManage {
         editable: false,
       };
       this.thumb = image.createPixelMapSync(buf.slice(8, need), opts);
+      this.thumbPxW = w;
+      this.thumbPxH = h;
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'loadThumb: %{public}s', JSON.stringify(e));
       this.thumb = null;
@@ -898,10 +905,14 @@ export struct VmManage {
              * 帧，无则占位文案；整卡和中央圆钮都点击进入（同顶部启动钮语义） */
             Stack() {
               if (this.thumb !== null) {
-                /* 按原图尺寸居中（抓帧上限 512 宽），超出卡片才缩——铺满 100% 会
-                 * 把小图放大到糊（用户实测反馈） */
+                /* 显示尺寸 = 物理像素 ÷ 密度（1:1 不上采样，见 thumbPxW 注释）；
+                 * constraintSize 兜窄屏/竖图溢出（卡片无 clip，溢出会画出圆角外） */
                 Image(this.thumb)
                   .objectFit(ImageFit.Contain)
+                  .width(display.getDefaultDisplaySync().densityPixels > 0
+                    ? this.thumbPxW / display.getDefaultDisplaySync().densityPixels : this.thumbPxW)
+                  .height(display.getDefaultDisplaySync().densityPixels > 0
+                    ? this.thumbPxH / display.getDefaultDisplaySync().densityPixels : this.thumbPxH)
                   .constraintSize({ maxWidth: '100%', maxHeight: '100%' })
               } else {
                 Text(this.isRunningNow() ? '画面加载中…' : '进入运行后这里显示画面截图')
