@@ -21,7 +21,7 @@ import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
   cCard, cBlock, cChip, cBorder, cConsoleScrim,
   tCard, tLabel, tBody, tSub, tSubL, tMono,
-  sp1, sp2, sp3, sp4, sp5, sp8, rCard, rElem, rBadge, rBtn, btnH, btnSh, btnPadX,
+  sp1, sp2, sp3, sp4, sp5, sp8, rCard, rElem, rBadge, rBtn, btnH, btnSh, btnPadX, bw,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
@@ -913,9 +913,10 @@ export struct VmManage {
 
         Scroll() {
           Column() {
-            /* 画面卡：截图即启动/进入按钮（UTM 详情页范式）。有抓帧缓存时黑框
-             * 贴合图片本身——1:1 显示已经不大，再套通栏卡片只会四周露黑底；
-             * 无图时才用通栏 16:9 占位卡。两形态整卡都可点进控制台 */
+            /* 画面卡：截图即启动/进入按钮（UTM 详情页范式）。有图/无图同尺寸
+             * （通栏、定高）——尺寸随图变化会让整个页面在抓帧瞬间跳动。
+             * 有图：黑底居中按物理像素 1:1 显示（上采样会糊）；无图：浅色虚线
+             * 占位（通栏纯黑大卡在停机 VM 上是一大块突兀的黑）。整卡可点进控制台 */
             if (this.thumb !== null) {
               Stack() {
                 Image(this.thumb)
@@ -932,29 +933,21 @@ export struct VmManage {
                 .borderRadius(18)
                 .onClick(() => this.openConsole())
               }
-              .constraintSize({ maxWidth: '100%' })
+              .width('100%')
+              .height(180)
               .backgroundColor(Color.Black)
               .borderRadius(rCard)
               .margin({ top: sp1, bottom: sp2 })
               .onClick(() => this.openConsole())
             } else {
               Stack() {
-                Text(this.isRunningNow() ? '画面加载中…' : '进入运行后这里显示画面截图')
+                Text(this.isRunningNow() ? '画面加载中…' : '启动后这里显示画面截图，点此进入控制台')
                   .fontSize(tSub).fontColor(cWeak)
-                Button() {
-                  SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.arrow_up_left_and_arrow_down_right') : $r('sys.symbol.play_fill'))
-                    .fontSize(26)
-                    .fontColor([Color.White])
-                }
-                .focusable(false)
-                .width(52).height(52)
-                .backgroundColor(cConsoleScrim)
-                .borderRadius(26)
-                .onClick(() => this.openConsole())
               }
               .width('100%')
-              .aspectRatio(16 / 9)
-              .backgroundColor(Color.Black)
+              .height(180)
+              .backgroundColor(cCard)
+              .border({ width: bw, color: cBorder, style: BorderStyle.Dashed })
               .borderRadius(rCard)
               .margin({ top: sp1, bottom: sp2 })
               .onClick(() => this.openConsole())
