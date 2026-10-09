@@ -25,18 +25,17 @@ import {
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
-/* captureScreen 的返回（native 侧 X8R8G8B8 已转 RGBA_8888，宽最大 512） */
+/* captureScreen 的返回（子进程写盘成功后的实际宽高，宽最大 512） */
 interface CaptureShot {
   width: number;
   height: number;
-  pixels: ArrayBuffer;
 }
 
 interface DiskNapi {
   diskInfo: (path: string) => string;
   qmpConnect: (vmId: string, sockPath: string) => number;
   qmpCommand: (vmId: string, cmd: string) => string;
-  captureScreen: (vmId: string) => CaptureShot | null;
+  captureScreen: (vmId: string, path: string) => CaptureShot | null;
 }
 
 const napi = napiModule as DiskNapi;
@@ -213,37 +212,22 @@ export struct VmManage {
   }
 
   /* 详情页主动采集：VM 在跑但缓存缺失时，经同一 IPC 接口（captureScreen 按 vmId
-   * 路由到子进程，与控制台同通道）直接要一帧，落盘回填缓存并上屏。触发点即
-   * loadThumb 的缓存缺失分支（进入/切回详情页），天然低频。抓帧失败（子进程
-   * 刚拉起还没出帧）静默放弃，占位文案继续兜着，下次切回再试。 */
+   * 路由到子进程，与控制台同通道）直接要一帧——子进程落盘到缩略图路径，成功后
+   * 走 loadThumb 统一读取。触发点即 loadThumb 的缓存缺失分支（进入/切回详情页），
+   * 天然低频。抓帧失败（子进程刚拉起还没出帧）静默放弃，占位文案继续兜着，
+   * 下次切回再试。 */
   private captureNow(): void {
     const p = this.profile;
     if (!p || !this.isRunningNow()) {
       return;
     }
     try {
-      const shot = napi.captureScreen(p.id);
+      const shot = napi.captureScreen(p.id, thumbPath(p.id, this.vmDataDir));
       if (shot === null || shot.width <= 0 || shot.height <= 0) {
         hilog.warn(DOMAIN, TAG, 'captureNow: captureScreen empty vm=%{public}s', p.id);
         return;
       }
-      const px = new Uint8Array(shot.pixels);
-      const buf = new ArrayBuffer(8 + px.length);
-      const dv = new DataView(buf);
-      dv.setUint32(0, shot.width, true);
-      dv.setUint32(4, shot.height, true);
-      new Uint8Array(buf).set(px, 8);
-      const fd = fs.openSync(thumbPath(p.id, this.vmDataDir),
-        fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
-      fs.writeSync(fd.fd, buf);
-      fs.closeSync(fd);
-      const opts: image.InitializationOptions = {
-        size: { width: shot.width, height: shot.height },
-        srcPixelFormat: image.PixelMapFormat.RGBA_8888,
-        pixelFormat: image.PixelMapFormat.RGBA_8888,
-        editable: false,
-      };
-      this.thumb = image.createPixelMapSync(shot.pixels, opts);
+      this.loadThumb();
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'captureNow: %{public}s', JSON.stringify(e));
     }

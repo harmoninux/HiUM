@@ -438,8 +438,8 @@ int ncp_client_query_display(const std::string &vmId, int *w, int *h)
     return 0;
 }
 
-int ncp_client_screenshot(const std::string &vmId, int maxW, int *w, int *h,
-                          std::vector<uint8_t> &pixels)
+int ncp_client_screenshot(const std::string &vmId, int maxW, const std::string &path,
+                          int *w, int *h)
 {
     ChildState *chp = getChild(vmId);
     if (chp == nullptr) {
@@ -451,6 +451,7 @@ int ncp_client_screenshot(const std::string &vmId, int maxW, int *w, int *h,
     }
     OHIPCParcel *req = newRequest();
     OH_IPCParcel_WriteInt32(req, maxW);
+    OH_IPCParcel_WriteString(req, path.c_str());
     OHIPCParcel *reply = sendTo(*chp, kScreenshot, req);
     OH_IPCParcel_Destroy(req);
     if (reply == nullptr) {
@@ -459,19 +460,15 @@ int ncp_client_screenshot(const std::string &vmId, int maxW, int *w, int *h,
     int32_t ver = 0;
     OH_IPCParcel_ReadInt32(reply, &ver);
     OH_IPCParcel_ReadInt32(reply, w);
-    OH_IPCParcel_ReadInt32(reply, h);
-    if (*w > 0 && *h > 0) {
-        int32_t expect = (*w) * (*h) * 4;
-        const uint8_t *buf = OH_IPCParcel_ReadBuffer(reply, expect); /* len 不符返回 nullptr */
-        if (buf != nullptr) {
-            pixels.assign(buf, buf + expect);
-        } else {
-            *w = 0;
-            *h = 0;
-        }
-    }
+    int32_t written = 0;
+    OH_IPCParcel_ReadInt32(reply, &written);
     OH_IPCParcel_Destroy(reply);
-    return pixels.empty() ? -1 : 0;
+    if (*w <= 0 || *h <= 0 || !written) {
+        *w = 0;
+        *h = 0;
+        return -1;
+    }
+    return 0;
 }
 
 void ncp_client_shutdown(const std::string &vmId)

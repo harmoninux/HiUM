@@ -337,27 +337,29 @@ static napi_value SetSerialCallback(napi_env env, napi_callback_info info)
     return nullptr;
 }
 
-/* captureScreen(vmId: string): { width, height, pixels: ArrayBuffer(RGBA_8888) } | null
- * 子进程缩放到 ≤512 宽后回传（缩略图足够，且受 binder 事务大小限制） */
+/* captureScreen(vmId: string, path: string): { width, height } | null
+ * 子进程缩放到 ≤512 宽后直接写 path（8 字节头 + RGBA，与缩略图缓存同格式）。
+ * 像素不走 parcel（容量装不下，见 qemu_ipc.h kScreenshot 注释），返回值只带
+ * 实际写出的宽高；失败返回 null。 */
 static napi_value CaptureScreen(napi_env env, napi_callback_info info)
 {
-    size_t argc = 1;
-    napi_value args[1] = {nullptr};
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
     std::string vmId = stringArg(env, args[0]);
-
-    int w = 0, h = 0;
-    std::vector<uint8_t> pixels;
-    if (ncp_client_screenshot(vmId, 512, &w, &h, pixels) != 0) {
+    std::string path = stringArg(env, args[1]);
+    if (path.empty()) {
         napi_value result;
         napi_get_null(env, &result);
         return result;
     }
-    void *data = nullptr;
-    napi_value buffer;
-    napi_create_arraybuffer(env, pixels.size(), &data, &buffer);
-    memcpy(data, pixels.data(), pixels.size());
 
+    int w = 0, h = 0;
+    if (ncp_client_screenshot(vmId, 512, path, &w, &h) != 0) {
+        napi_value result;
+        napi_get_null(env, &result);
+        return result;
+    }
     napi_value result;
     napi_create_object(env, &result);
     napi_value wv, hv;
@@ -365,7 +367,6 @@ static napi_value CaptureScreen(napi_env env, napi_callback_info info)
     napi_create_int32(env, h, &hv);
     napi_set_named_property(env, result, "width", wv);
     napi_set_named_property(env, result, "height", hv);
-    napi_set_named_property(env, result, "pixels", buffer);
     return result;
 }
 

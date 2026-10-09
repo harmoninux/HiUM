@@ -16,6 +16,7 @@
 #include <hilog/log.h>
 
 #include <stdint.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <atomic>
 #include <string>
@@ -152,18 +153,35 @@ int onRequest(uint32_t code, const OHIPCParcel *data, OHIPCParcel *reply, void *
             return 0;
         }
         case kScreenshot: {
+            /* [ver][maxW][path] → [ver][w][h][written]。数据直接落盘（协议注释：
+             * parcel 装不下 512 宽的 RGBA），父进程凭 [w][h][written] 即可。 */
             int32_t maxW = 0;
             OH_IPCParcel_ReadInt32(data, &maxW);
+            const char *path = OH_IPCParcel_ReadString(data);
             int w = 0, h = 0;
             std::vector<uint32_t> px = fb_capture_rgba(maxW > 0 ? maxW : 512, &w, &h);
+            int32_t written = 0;
+            if (path != nullptr && !px.empty()) {
+                /* 8 字节小端宽高头 + RGBA_8888 裸像素，与读取侧（VmManage.loadThumb）
+                 * 的既有约定一致 */
+                const uint32_t hdr[2] = {static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
+                int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0664);
+                if (fd >= 0) {
+                    written = write(fd, hdr, sizeof(hdr)) == static_cast<ssize_t>(sizeof(hdr)) &&
+                              write(fd, px.data(), px.size() * sizeof(uint32_t)) ==
+                                  static_cast<ssize_t>(px.size() * sizeof(uint32_t));
+                    close(fd);
+                }
+            }
+            if (!written) {
+                OH_LOG_ERROR(LOG_APP, "screenshot: write failed path=%{public}s w=%{public}d h=%{public}d px=%{public}zu",
+                             path ? path : "(null)", w, h, px.size());
+            }
             if (reply) {
                 OH_IPCParcel_WriteInt32(reply, kProtoVersion);
                 OH_IPCParcel_WriteInt32(reply, w);
                 OH_IPCParcel_WriteInt32(reply, h);
-                if (!px.empty()) {
-                    OH_IPCParcel_WriteBuffer(reply, reinterpret_cast<const uint8_t *>(px.data()),
-                                             static_cast<int32_t>(px.size() * sizeof(uint32_t)));
-                }
+                OH_IPCParcel_WriteInt32(reply, written);
             }
             return 0;
         }

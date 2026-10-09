@@ -45,15 +45,14 @@ interface QemuNapi {
   serialWrite: (vmId: string, text: string) => number;
   serialClose: (vmId: string) => void;
   setSerialCallback: (vmId: string, cb: ((text: string) => void) | null) => void;
-  /* 子进程缩放到 ≤512 宽后回传的 RGBA_8888 帧（详情页缩略图用）；未出帧/进程已死
-   * 返回 null */
-  captureScreen: (vmId: string) => CaptureShot | null;
+  /* 子进程抓帧缩放到 ≤512 宽后写 path（缩略图文件，数据不走 parcel，见
+   * qemu_ipc.h kScreenshot）；返回实际宽高，未出帧/进程已死/写盘失败返回 null */
+  captureScreen: (vmId: string, path: string) => CaptureShot | null;
 }
 
 interface CaptureShot {
   width: number;
   height: number;
-  pixels: ArrayBuffer;
 }
 
 /* 介质菜单里的一个光驱槽位（query-block 认定，见 refreshCdSlots） */
@@ -810,23 +809,13 @@ struct VmConsole {
       return;
     }
     try {
-      const shot = napi.captureScreen(this.vmId);
+      /* native 侧直接写缩略图文件（kScreenshot 数据走文件不走 parcel，
+       * 见 qemu_ipc.h）；本函数只管时机与刷新信号 */
+      const shot = napi.captureScreen(this.vmId, thumbPath(this.vmId, this.vmDataDir));
       if (shot === null || shot.width <= 0 || shot.height <= 0) {
-        /* 诊断：抓帧链（ncp proxy → kScreenshot → fb_capture_rgba）任一层失败
-         * 都汇成 null，没有日志就无法区分——真机上出现过 thumb 从未生成的悬案 */
         hilog.warn(DOMAIN, TAG, 'captureThumb: captureScreen empty vm=%{public}s', this.vmId);
         return;
       }
-      const px = new Uint8Array(shot.pixels);
-      const buf = new ArrayBuffer(8 + px.length);
-      const dv = new DataView(buf);
-      dv.setUint32(0, shot.width, true);
-      dv.setUint32(4, shot.height, true);
-      new Uint8Array(buf).set(px, 8);
-      const fd = fs.openSync(thumbPath(this.vmId, this.vmDataDir),
-        fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
-      fs.writeSync(fd.fd, buf);
-      fs.closeSync(fd);
       hilog.info(DOMAIN, TAG, 'captureThumb: %{public}dx%{public}d vm=%{public}s', shot.width, shot.height, this.vmId);
       if (bump) {
         this.vmListVersion++;

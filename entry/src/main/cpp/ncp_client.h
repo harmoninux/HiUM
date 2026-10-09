@@ -23,9 +23,11 @@ void ncp_client_key(const std::string &vmId, int32_t qcode, bool down);
 bool ncp_client_running(const std::string &vmId);
 /* 子进程侧当前 guest 分辨率；无子进程返回 -1 */
 int ncp_client_query_display(const std::string &vmId, int *w, int *h);
-/* 截图（子进程缩放到 ≤maxW 宽的 RGBA_8888）；无帧返回 -1 */
-int ncp_client_screenshot(const std::string &vmId, int maxW, int *w, int *h,
-                          std::vector<uint8_t> &pixels);
+/* 截图：子进程缩放到 ≤maxW 宽后直接写 path（8 字节小端宽高头 + RGBA_8888，
+ * 数据不走 parcel——容量装不下，见 qemu_ipc.h kScreenshot 注释）。
+ * 实际写出的宽高经 w/h 带回；无帧/写失败返回 -1。 */
+int ncp_client_screenshot(const std::string &vmId, int maxW, const std::string &path,
+                          int *w, int *h);
 /* 让子进程整体退出（VM 随之消失） */
 void ncp_client_shutdown(const std::string &vmId);
 
