@@ -338,7 +338,10 @@ static napi_value SetSerialCallback(napi_env env, napi_callback_info info)
 }
 
 /* captureScreen(vmId: string, path: string): { width, height } | null
- * 子进程缩放到 ≤512 宽后直接写 path（8 字节头 + RGBA，与缩略图缓存同格式）。
+ * 子进程缩放到 ≤1024 宽后直接写 path（8 字节头 + RGBA，与缩略图缓存同格式）。
+ * 1024 ≈ 常见 guest 原生宽：详情页卡片按 px/density 显示时接近 1:1（上采样
+ * 仅 ~1.1x，再大会糊）。文件 ~3MB/张，抓帧都挂在用户可见的时机（首帧/详情页
+ * 周期 30s/关机），写盘量可控。
  * 像素不走 parcel（容量装不下，见 qemu_ipc.h kScreenshot 注释），返回值只带
  * 实际写出的宽高；失败返回 null。 */
 static napi_value CaptureScreen(napi_env env, napi_callback_info info)
@@ -355,7 +358,7 @@ static napi_value CaptureScreen(napi_env env, napi_callback_info info)
     }
 
     int w = 0, h = 0;
-    if (ncp_client_screenshot(vmId, 512, path, &w, &h) != 0) {
+    if (ncp_client_screenshot(vmId, 1024, path, &w, &h) != 0) {
         napi_value result;
         napi_get_null(env, &result);
         return result;

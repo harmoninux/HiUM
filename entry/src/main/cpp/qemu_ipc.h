@@ -25,7 +25,7 @@ constexpr uint32_t kResizeSurface = 4; /* [ver][w][h] → int32 */
 constexpr uint32_t kPointer = 5;       /* [ver][x][y][buttons] → int32，绝对坐标（virtio-tablet） */
 constexpr uint32_t kKey = 6;           /* [ver][qcode][down] → int32 */
 constexpr uint32_t kQuery = 7;         /* [ver] → [ver][fbW][fbH][running] */
-/* kScreenshot 数据走文件不走 parcel：512 宽的 RGBA 约 0.8MB，实测超出 OHIPC
+/* kScreenshot 数据走文件不走 parcel：整幅 RGBA（MB 级）实测超出 OHIPC
  * parcel 的单事务容量——子进程 WriteBuffer 失败而父进程 ReadBuffer 拿到空，
  * 两端都不报错、汇成一个「抓不到帧」的假象（该通道在 NCP 迁移时就存在，
  * UI 接上后才发现从未成功过）。缩略图恰好本来就要落盘缓存（thumb-<vmId>.raw），
