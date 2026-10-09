@@ -1,7 +1,7 @@
 // 单台虚拟机的管理页（per-VM）：分区滚动 —— 概览 chips + 系统盘 / 快照·时光机 / 网络 / 高级。
 // 快照归属单台 VM，不进跨 VM 的库；临时会话打点/回滚见 lib/tempSession。
 // 从列表侧栏点行进（Navigation replace 渲染到 content/detail 区）；成功反馈走右下角 snackbar。
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, display } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
@@ -78,6 +78,10 @@ export struct VmManage {
   @State netEnabled: boolean = false;
   @State snack: string = '';
   @State thumb: image.PixelMap | null = null; /* 画面缩略图（VmConsole 抓帧的缓存，见 loadThumb） */
+  /* 显示尺寸 = 抓帧像素 ÷ 屏幕密度：Image 不设尺寸会把像素数值当 vp 渲染，
+   * 高密屏天生上采样 ~3.5x 发糊（实测踩过），必须显式换算回物理 1:1 */
+  @State thumbPxW: number = 0;
+  @State thumbPxH: number = 0;
   /* v6 克隆：cloneStage != '' = 克隆进行中（进度条显示 stage+pct） */
   @State cloneStage: string = '';
   @State clonePct: number = 0;
@@ -222,6 +226,8 @@ export struct VmManage {
         editable: false,
       };
       this.thumb = image.createPixelMapSync(buf.slice(8, need), opts);
+      this.thumbPxW = w;
+      this.thumbPxH = h;
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'loadThumb: %{public}s', JSON.stringify(e));
       this.thumb = null;
@@ -249,6 +255,17 @@ export struct VmManage {
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'captureNow: %{public}s', JSON.stringify(e));
     }
+  }
+
+  /* 抓帧像素 → 显示 vp（物理 1:1，见 thumbPxW 注释） */
+  private thumbVpW(): number {
+    const d = display.getDefaultDisplaySync().densityPixels;
+    return d > 0 ? this.thumbPxW / d : this.thumbPxW;
+  }
+
+  private thumbVpH(): number {
+    const d = display.getDefaultDisplaySync().densityPixels;
+    return d > 0 ? this.thumbPxH / d : this.thumbPxH;
   }
 
   /* 编辑页/存储页保存后 vmListVersion +1：重新读取 profile */
@@ -895,17 +912,16 @@ export struct VmManage {
 
         Scroll() {
           Column() {
-            /* 画面卡：截图即启动/进入按钮（UTM 详情页范式）。尺寸取 320×240——
-             * 抓帧上限 1024 物理像素 ÷ 高密屏密度 ≈ 293vp，与卡宽几乎 1:1，
-             * 图基本撑满卡片（通栏卡必然左右大片黑边：卡 ~700vp vs 图 ~293vp）；
-             * 上采样仅 ~1.1x 不糊。有图黑底 Contain、无图浅色虚线占位，同尺寸
-             * 不跳动。整卡可点进控制台 */
+            /* 画面卡：截图即启动/进入按钮（UTM 详情页范式）。黑框直接贴合图片
+             * （抓帧 1024 物理像素 ÷ 密度 ≈ 293vp，1:1 清晰），通栏卡必然左右
+             * 大片黑边。无图占位取同尺寸（16:9 典型帧），出图不跳。整卡可点进
+             * 控制台；constraintSize 兜窄屏溢出 */
             if (this.thumb !== null) {
               Stack() {
                 Image(this.thumb)
-                  .width('100%')
-                  .height('100%')
-                  .objectFit(ImageFit.Contain)
+                  .width(this.thumbVpW())
+                  .height(this.thumbVpH())
+                  .constraintSize({ maxWidth: '100%', maxHeight: '100%' })
                 Button() {
                   SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right'))
                     .fontSize(18)
@@ -917,8 +933,7 @@ export struct VmManage {
                 .borderRadius(18)
                 .onClick(() => this.openConsole())
               }
-              .width(320)
-              .height(240)
+              .constraintSize({ maxWidth: '100%' })
               .backgroundColor(Color.Black)
               .borderRadius(rCard)
               .margin({ top: sp1, bottom: sp2 })
@@ -928,8 +943,8 @@ export struct VmManage {
                 Text(this.isRunningNow() ? '画面加载中…' : '启动后这里显示画面截图，点此进入控制台')
                   .fontSize(tSub).fontColor(cWeak)
               }
-              .width(320)
-              .height(240)
+              .width(292)
+              .height(164)
               .backgroundColor(cCard)
               .border({ width: bw, color: cBorder, style: BorderStyle.Dashed })
               .borderRadius(rCard)
