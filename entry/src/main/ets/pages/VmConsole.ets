@@ -611,9 +611,10 @@ struct VmConsole {
         /* 起来了就把熔断标记销掉（用户已修好配置） */
         new VmStore(this.filesDir).clearBootFail(this.vmId);
         this.bootFailReason = '';
-        /* 拉一次光驱状态（介质菜单数据源）；首帧落定后留一张详情页缩略图 */
+        /* 拉一次光驱状态（介质菜单数据源）；首帧落定后留一张详情页缩略图。
+         * bump=true：抓帧晚于启动数秒，已打开的详情页不会自己知道文件变了 */
         this.refreshCdSlots();
-        setTimeout(() => this.captureThumb(false), 3000);
+        setTimeout(() => this.captureThumb(true), 3000);
         return;
       }
       if (!napi.vmRunning(this.vmId)) {
@@ -813,7 +814,7 @@ struct VmConsole {
        * 见 qemu_ipc.h）；本函数只管时机与刷新信号 */
       const shot = napi.captureScreen(this.vmId, thumbPath(this.vmId, this.vmDataDir));
       if (shot === null || shot.width <= 0 || shot.height <= 0) {
-        hilog.warn(DOMAIN, TAG, 'captureThumb: captureScreen empty vm=%{public}s', this.vmId);
+        /* 未出帧/黑帧（慢引导 guest 启动初期）为预期，静默等下一个时机 */
         return;
       }
       hilog.info(DOMAIN, TAG, 'captureThumb: %{public}dx%{public}d vm=%{public}s', shot.width, shot.height, this.vmId);

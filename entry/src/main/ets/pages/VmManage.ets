@@ -84,9 +84,25 @@ export struct VmManage {
   @State isWide: boolean = false; /* 宽屏(Split)下隐藏返回；getWindowSize 判宽 */
   @Consume('showStorage') showStorage: boolean; /* 存储弹窗开关（Index 全窗口遮罩层） */
   @Consume('storageParam') storageParam: VmProfile | null; /* 当前打开的存储弹窗所属 VM */
+  /* 截图卡片周期刷新：详情页不会被动感知 thumb 文件变化（inactive 期间收不到
+   * vmListVersion，窗口切回也不触发 onShown——那只覆盖路由返回），运行期间由
+   * 本页自己的低频定时器主动采。aboutToDisappear 即停，不给后台留写入。 */
+  private thumbTimer: number = -1;
 
   aboutToAppear(): void {
     this.refreshProfile();
+    this.thumbTimer = setInterval(() => {
+      if (this.isRunningNow()) {
+        this.captureNow();
+      }
+    }, 10000);
+  }
+
+  aboutToDisappear(): void {
+    if (this.thumbTimer >= 0) {
+      clearInterval(this.thumbTimer);
+      this.thumbTimer = -1;
+    }
   }
 
   /* 本页 VM 是否运行：build 直接依赖 @StorageLink('runningMap')（响应式），
@@ -222,9 +238,10 @@ export struct VmManage {
       return;
     }
     try {
+      /* 未出帧/黑帧（慢引导 guest 启动初期，见 qemu_child kScreenshot）返回 null，
+       * 属预期，不打日志；本轮采不到等下个周期 */
       const shot = napi.captureScreen(p.id, thumbPath(p.id, this.vmDataDir));
       if (shot === null || shot.width <= 0 || shot.height <= 0) {
-        hilog.warn(DOMAIN, TAG, 'captureNow: captureScreen empty vm=%{public}s', p.id);
         return;
       }
       this.loadThumb();

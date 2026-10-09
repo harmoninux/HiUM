@@ -154,14 +154,26 @@ int onRequest(uint32_t code, const OHIPCParcel *data, OHIPCParcel *reply, void *
         }
         case kScreenshot: {
             /* [ver][maxW][path] → [ver][w][h][written]。数据直接落盘（协议注释：
-             * parcel 装不下 512 宽的 RGBA），父进程凭 [w][h][written] 即可。 */
+             * parcel 装不下 512 宽的 RGBA），父进程凭 [w][h][written] 即可。
+             * 全黑帧不落盘：就绪判定只说明 QMP 活了，慢引导 guest（Windows）
+             * 这时往往还在黑屏期，抓到的是纯黑——存进缓存会在详情页顶着一个
+             * 「假画面」卡到下一次抓帧。抽样 RGB 分量全小于阈值即视为黑。 */
             int32_t maxW = 0;
             OH_IPCParcel_ReadInt32(data, &maxW);
             const char *path = OH_IPCParcel_ReadString(data);
             int w = 0, h = 0;
             std::vector<uint32_t> px = fb_capture_rgba(maxW > 0 ? maxW : 512, &w, &h);
             int32_t written = 0;
-            if (path != nullptr && !px.empty()) {
+            bool allBlack = true;
+            for (size_t i = 0; i < px.size(); i += 16) {
+                uint32_t p = px[i];
+                int r = (p >> 16) & 0xff, g = (p >> 8) & 0xff, b = p & 0xff;
+                if (r > 8 || g > 8 || b > 8) {
+                    allBlack = false;
+                    break;
+                }
+            }
+            if (path != nullptr && !px.empty() && !allBlack) {
                 /* 8 字节小端宽高头 + RGBA_8888 裸像素，与读取侧（VmManage.loadThumb）
                  * 的既有约定一致 */
                 const uint32_t hdr[2] = {static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
@@ -173,7 +185,7 @@ int onRequest(uint32_t code, const OHIPCParcel *data, OHIPCParcel *reply, void *
                     close(fd);
                 }
             }
-            if (!written) {
+            if (!written && !allBlack) {
                 OH_LOG_ERROR(LOG_APP, "screenshot: write failed path=%{public}s w=%{public}d h=%{public}d px=%{public}zu",
                              path ? path : "(null)", w, h, px.size());
             }
