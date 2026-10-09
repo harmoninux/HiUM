@@ -59,6 +59,7 @@ export struct VmManage {
   @State arch: string = '';
   @State diskPath: string = '';
   @State cdromPaths: string[] = [];
+  @State argsOpen: boolean = false; /* qemu 参数预览默认收起（长串干扰浏览，点标题行展开） */
   @State bootFromCdrom: boolean = false;
   @State diskFmt: string = '?';
   @State diskVirtualGB: number = 0;
@@ -707,22 +708,30 @@ export struct VmManage {
   @Builder
   secAdvanced() {
     this.secHead('高级')
+    /* 标题行点击折叠/展开；复制按钮独立于折叠态（收起时也允许复制）。
+     * Blank 会吃掉标题行左侧的空隙点击，把 onClick 挂在整行兜底 */
     Row() {
-      Text('qemu 启动参数预览').fontSize(tSubL).fontColor(cSub)
+      Text() {
+        Span('qemu 启动参数预览')
+        Span(this.argsOpen ? ' ▾ 收起' : ' ▸ 展开').fontColor(cWeak)
+      }.fontSize(tSubL).fontColor(cSub)
       Blank()
       Button('复制').focusable(false).fontSize(tBody)
         .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
         .backgroundColor(Color.Transparent).fontColor(cPrimary)
         .onClick(() => this.copyArgs())
     }.width('100%').padding({ top: sp1, bottom: sp1 }).alignItems(VerticalAlign.Center)
-    Text(this.qemuArgsText())
-      .fontSize(tMono)
-      .fontColor(cText)
-      .padding(sp8)
-      .width('100%')
-      .backgroundColor(cBlock)
-      .borderRadius(rElem)
-      .textAlign(TextAlign.Start)
+    .onClick(() => { this.argsOpen = !this.argsOpen; })
+    if (this.argsOpen) {
+      Text(this.qemuArgsText())
+        .fontSize(tMono)
+        .fontColor(cText)
+        .padding(sp8)
+        .width('100%')
+        .backgroundColor(cBlock)
+        .borderRadius(rElem)
+        .textAlign(TextAlign.Start)
+    }
   }
 
   /* qemu 命令行预览：buildArgs 是纯函数，直接用当前 profile 派生（同 VmWizard 第⑥步）。

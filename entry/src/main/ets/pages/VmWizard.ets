@@ -45,6 +45,7 @@ export struct VmWizard {
   @StorageLink('vmListVersion') vmListVersion: number = 0;
 
   @State step: number = 0;
+  @State previewOpen: boolean = false; /* 第⑥步参数预览默认收起，点标题行展开 */
   @State arch: VmArch = 'x86_64';
   @State vga: VgaType = 'std';
   @State board: VmBoard = 'pc';
@@ -922,16 +923,23 @@ export struct VmWizard {
         .onChange((v: string) => this.name = v)
       this.stepErrorMsg()
       Row() {
-        Text('qemu 参数预览').fontSize(tSub).fontColor(cSub)
+        Text() {
+          Span('qemu 参数预览')
+          Span(this.previewOpen ? ' ▾ 收起' : ' ▸ 展开').fontColor(cWeak)
+        }.fontSize(tSub).fontColor(cSub)
         Blank()
       }
-      Text(buildArgs(this.assemble(newProfileId()), this.vmDataDir, sharedDir(this.filesDir)).join(' '))
-        .fontSize(tMono)
-        .fontColor(cText)
-        .padding(sp8)
-        .width('100%')
-        .backgroundColor(cBlock)
-        .borderRadius(rElem)
+      .width('100%')
+      .onClick(() => { this.previewOpen = !this.previewOpen; })
+      if (this.previewOpen) {
+        Text(buildArgs(this.assemble(newProfileId()), this.vmDataDir, sharedDir(this.filesDir)).join(' '))
+          .fontSize(tMono)
+          .fontColor(cText)
+          .padding(sp8)
+          .width('100%')
+          .backgroundColor(cBlock)
+          .borderRadius(rElem)
+      }
     }
     .alignItems(HorizontalAlign.Start)
     .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
