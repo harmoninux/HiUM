@@ -898,10 +898,11 @@ export struct VmManage {
              * 帧，无则占位文案；整卡和中央圆钮都点击进入（同顶部启动钮语义） */
             Stack() {
               if (this.thumb !== null) {
+                /* 按原图尺寸居中（抓帧上限 512 宽），超出卡片才缩——铺满 100% 会
+                 * 把小图放大到糊（用户实测反馈） */
                 Image(this.thumb)
                   .objectFit(ImageFit.Contain)
-                  .width('100%')
-                  .height('100%')
+                  .constraintSize({ maxWidth: '100%', maxHeight: '100%' })
               } else {
                 Text(this.isRunningNow() ? '画面加载中…' : '进入运行后这里显示画面截图')
                   .fontSize(tSub).fontColor(cWeak)
