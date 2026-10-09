@@ -257,6 +257,18 @@ export struct VmManage {
     }
   }
 
+  /* 抓帧像素 → 显示 vp：按屏幕密度换算，物理像素 1:1 呈现（高密屏上把同数值
+   * 当 vp 渲染会天生上采样发糊，见 thumbPxW 注释） */
+  private thumbVpW(): number {
+    const d = display.getDefaultDisplaySync().densityPixels;
+    return d > 0 ? this.thumbPxW / d : this.thumbPxW;
+  }
+
+  private thumbVpH(): number {
+    const d = display.getDefaultDisplaySync().densityPixels;
+    return d > 0 ? this.thumbPxH / d : this.thumbPxH;
+  }
+
   /* 编辑页/存储页保存后 vmListVersion +1：重新读取 profile */
   private onVmListChanged(): void {
     this.refreshProfile();
@@ -901,40 +913,52 @@ export struct VmManage {
 
         Scroll() {
           Column() {
-            /* 画面卡：截图即启动/进入按钮（UTM 详情页范式）。有抓帧缓存显示画面
-             * 帧，无则占位文案；整卡和中央圆钮都点击进入（同顶部启动钮语义） */
-            Stack() {
-              if (this.thumb !== null) {
-                /* 显示尺寸 = 物理像素 ÷ 密度（1:1 不上采样，见 thumbPxW 注释）；
-                 * constraintSize 兜窄屏/竖图溢出（卡片无 clip，溢出会画出圆角外） */
+            /* 画面卡：截图即启动/进入按钮（UTM 详情页范式）。有抓帧缓存时黑框
+             * 贴合图片本身——1:1 显示已经不大，再套通栏卡片只会四周露黑底；
+             * 无图时才用通栏 16:9 占位卡。两形态整卡都可点进控制台 */
+            if (this.thumb !== null) {
+              Stack() {
                 Image(this.thumb)
-                  .objectFit(ImageFit.Contain)
-                  .width(display.getDefaultDisplaySync().densityPixels > 0
-                    ? this.thumbPxW / display.getDefaultDisplaySync().densityPixels : this.thumbPxW)
-                  .height(display.getDefaultDisplaySync().densityPixels > 0
-                    ? this.thumbPxH / display.getDefaultDisplaySync().densityPixels : this.thumbPxH)
-                  .constraintSize({ maxWidth: '100%', maxHeight: '100%' })
-              } else {
+                  .width(this.thumbVpW())
+                  .height(this.thumbVpH())
+                Button() {
+                  SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right'))
+                    .fontSize(18)
+                    .fontColor([Color.White])
+                }
+                .focusable(false)
+                .width(36).height(36)
+                .backgroundColor(cConsoleScrim)
+                .borderRadius(18)
+                .onClick(() => this.openConsole())
+              }
+              .constraintSize({ maxWidth: '100%' })
+              .backgroundColor(Color.Black)
+              .borderRadius(rCard)
+              .margin({ top: sp1, bottom: sp2 })
+              .onClick(() => this.openConsole())
+            } else {
+              Stack() {
                 Text(this.isRunningNow() ? '画面加载中…' : '进入运行后这里显示画面截图')
                   .fontSize(tSub).fontColor(cWeak)
+                Button() {
+                  SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.arrow_up_left_and_arrow_down_right') : $r('sys.symbol.play_fill'))
+                    .fontSize(26)
+                    .fontColor([Color.White])
+                }
+                .focusable(false)
+                .width(52).height(52)
+                .backgroundColor(cConsoleScrim)
+                .borderRadius(26)
+                .onClick(() => this.openConsole())
               }
-              Button() {
-                SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.arrow_up_left_and_arrow_down_right') : $r('sys.symbol.play_fill'))
-                  .fontSize(26)
-                  .fontColor([Color.White])
-              }
-              .focusable(false)
-              .width(52).height(52)
-              .backgroundColor(cConsoleScrim)
-              .borderRadius(26)
+              .width('100%')
+              .aspectRatio(16 / 9)
+              .backgroundColor(Color.Black)
+              .borderRadius(rCard)
+              .margin({ top: sp1, bottom: sp2 })
               .onClick(() => this.openConsole())
             }
-            .width('100%')
-            .aspectRatio(16 / 9)
-            .backgroundColor(Color.Black)
-            .borderRadius(rCard)
-            .margin({ top: sp1, bottom: sp2 })
-            .onClick(() => this.openConsole())
 
             this.secHead('概览')
             /* 概览胶囊一排（内存/核/机型/固件；无 vga） */
