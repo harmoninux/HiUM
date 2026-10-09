@@ -69,7 +69,8 @@ make app-release  # 发布上架包 build/outputs/release/qemuohos-release-signe
 ## 注意
 
 - `entry/src/main/resources/rawfile/vm/` 和 `entry/libs/` 由 deps/构建产物
-  填充（含 ~66MB Alpine ISO），不入 git（见 .gitignore）。没有跑过
+  填充（固件 + 键位表，不含 ISO——内置 Alpine ISO 由应用运行时按需下载到
+  vms/ 目录，见 `lib/isoDl.ets`），不入 git（见 .gitignore）。没有跑过
   `make deps` 的干净 checkout 需要先 `make deps` 才能出可运行的包。
 - native 日志 tag：QemuEntry/QemuUI/QemuRender/QemuVM/QemuFB/QemuNapi/
   QemuInput/QemuQmp/QemuChild（hilog domain 0x0001-0x0008；自定义大
