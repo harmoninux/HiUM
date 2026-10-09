@@ -25,10 +25,18 @@ import {
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
+/* captureScreen 的返回（native 侧 X8R8G8B8 已转 RGBA_8888，宽最大 512） */
+interface CaptureShot {
+  width: number;
+  height: number;
+  pixels: ArrayBuffer;
+}
+
 interface DiskNapi {
   diskInfo: (path: string) => string;
   qmpConnect: (vmId: string, sockPath: string) => number;
   qmpCommand: (vmId: string, cmd: string) => string;
+  captureScreen: (vmId: string) => CaptureShot | null;
 }
 
 const napi = napiModule as DiskNapi;
@@ -150,8 +158,9 @@ export struct VmManage {
   }
 
   /* 缩略图：读 VmConsole 抓帧写入的缓存（8 字节小端宽高头 + RGBA_8888 裸像素，
-   * 见 VmConsole.captureThumb），转成 PixelMap 上屏。文件缺失/损坏一律静默置空
-   * （显示占位文案），不让详情页因缓存问题白屏。 */
+   * 见 VmConsole.captureThumb），转成 PixelMap 上屏。缓存缺失且 VM 在跑时主动
+   * 采一帧（见 captureNow）——控制台的抓帧时机（就绪+3s/关机/关窗）错过或失败
+   * 后，运行中详情页不该永远停在占位文案。文件损坏仍静默置空走占位。 */
   private loadThumb(): void {
     const p = this.profile;
     if (!p) {
@@ -161,6 +170,7 @@ export struct VmManage {
     const path = thumbPath(p.id, this.vmDataDir);
     if (!pathExists(path)) {
       this.thumb = null;
+      this.captureNow();
       return;
     }
     let old: image.PixelMap | null = this.thumb;
@@ -199,6 +209,42 @@ export struct VmManage {
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'loadThumb: %{public}s', JSON.stringify(e));
       this.thumb = null;
+    }
+  }
+
+  /* 详情页主动采集：VM 在跑但缓存缺失时，经同一 IPC 接口（captureScreen 按 vmId
+   * 路由到子进程，与控制台同通道）直接要一帧，落盘回填缓存并上屏。触发点即
+   * loadThumb 的缓存缺失分支（进入/切回详情页），天然低频。抓帧失败（子进程
+   * 刚拉起还没出帧）静默放弃，占位文案继续兜着，下次切回再试。 */
+  private captureNow(): void {
+    const p = this.profile;
+    if (!p || !this.isRunningNow()) {
+      return;
+    }
+    try {
+      const shot = napi.captureScreen(p.id);
+      if (shot === null || shot.width <= 0 || shot.height <= 0) {
+        return;
+      }
+      const px = new Uint8Array(shot.pixels);
+      const buf = new ArrayBuffer(8 + px.length);
+      const dv = new DataView(buf);
+      dv.setUint32(0, shot.width, true);
+      dv.setUint32(4, shot.height, true);
+      new Uint8Array(buf).set(px, 8);
+      const fd = fs.openSync(thumbPath(p.id, this.vmDataDir),
+        fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      fs.writeSync(fd.fd, buf);
+      fs.closeSync(fd);
+      const opts: image.InitializationOptions = {
+        size: { width: shot.width, height: shot.height },
+        srcPixelFormat: image.PixelMapFormat.RGBA_8888,
+        pixelFormat: image.PixelMapFormat.RGBA_8888,
+        editable: false,
+      };
+      this.thumb = image.createPixelMapSync(shot.pixels, opts);
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'captureNow: %{public}s', JSON.stringify(e));
     }
   }
 
