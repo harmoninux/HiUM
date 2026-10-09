@@ -460,6 +460,7 @@ int ncp_client_screenshot(const std::string &vmId, int maxW, const std::string &
     int32_t ver = 0;
     OH_IPCParcel_ReadInt32(reply, &ver);
     OH_IPCParcel_ReadInt32(reply, w);
+    OH_IPCParcel_ReadInt32(reply, h);
     int32_t written = 0;
     OH_IPCParcel_ReadInt32(reply, &written);
     OH_IPCParcel_Destroy(reply);
