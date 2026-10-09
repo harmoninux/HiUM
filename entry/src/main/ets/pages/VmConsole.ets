@@ -812,6 +812,9 @@ struct VmConsole {
     try {
       const shot = napi.captureScreen(this.vmId);
       if (shot === null || shot.width <= 0 || shot.height <= 0) {
+        /* 诊断：抓帧链（ncp proxy → kScreenshot → fb_capture_rgba）任一层失败
+         * 都汇成 null，没有日志就无法区分——真机上出现过 thumb 从未生成的悬案 */
+        hilog.warn(DOMAIN, TAG, 'captureThumb: captureScreen empty vm=%{public}s', this.vmId);
         return;
       }
       const px = new Uint8Array(shot.pixels);
@@ -824,6 +827,7 @@ struct VmConsole {
         fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
       fs.writeSync(fd.fd, buf);
       fs.closeSync(fd);
+      hilog.info(DOMAIN, TAG, 'captureThumb: %{public}dx%{public}d vm=%{public}s', shot.width, shot.height, this.vmId);
       if (bump) {
         this.vmListVersion++;
       }

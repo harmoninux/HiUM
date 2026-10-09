@@ -224,6 +224,7 @@ export struct VmManage {
     try {
       const shot = napi.captureScreen(p.id);
       if (shot === null || shot.width <= 0 || shot.height <= 0) {
+        hilog.warn(DOMAIN, TAG, 'captureNow: captureScreen empty vm=%{public}s', p.id);
         return;
       }
       const px = new Uint8Array(shot.pixels);
