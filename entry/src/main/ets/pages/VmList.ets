@@ -41,6 +41,8 @@ export struct VmList {
   @State diskUsage: Record<string, number> = {}; /* vmId → 磁盘实占字节数 */
   @Consume('showWizard') showWizard: boolean; /* 全窗口工坊模态开关（Index @Provide） */
   @Consume('showTemplate') showTemplate: boolean; /* 模板创建模态开关（Index @Provide） */
+  @Consume('showEdit') showEdit: boolean; /* 编辑弹窗开关（行长按菜单「编辑」用） */
+  @Consume('editParam') editParam: VmProfile | null;
   @State selectedId: string = ''; /* 当前选中行（详情区正在展示的 VM） */
   private pollTimer: number = -1;
   private lifecycleCb: ((e: VmLifecycleEvent) => void) | null = null;
@@ -204,7 +206,7 @@ export struct VmList {
       MenuItem({ content: '进入控制台' })
         .onClick(() => this.openConsole(p))
       MenuItem({ content: '编辑' })
-        .onClick(() => this.navStack.pushPath({ name: 'edit', param: p }))
+        .onClick(() => { this.editParam = p; this.showEdit = true; })
       MenuItem({ content: '删除' })
         .contentFontColor(cDanger)
         .onClick(() => this.confirmDeleteVm(p))

@@ -88,6 +88,8 @@ export struct VmManage {
   @State isWide: boolean = false; /* 宽屏(Split)下隐藏返回；getWindowSize 判宽 */
   @Consume('showStorage') showStorage: boolean; /* 存储弹窗开关（Index 全窗口遮罩层） */
   @Consume('storageParam') storageParam: VmProfile | null; /* 当前打开的存储弹窗所属 VM */
+  @Consume('showEdit') showEdit: boolean; /* 编辑弹窗开关（Index 全窗口遮罩层） */
+  @Consume('editParam') editParam: VmProfile | null;
   /* 截图卡片周期刷新：详情页不会被动感知 thumb 文件变化（inactive 期间收不到
    * vmListVersion，窗口切回也不触发 onShown——那只覆盖路由返回），运行期间由
    * 本页自己的定时器主动采。节奏自适应：无图（首帧未到）5s 快试——抓空不写盘
@@ -511,8 +513,9 @@ export struct VmManage {
     if (!p) {
       return;
     }
-    /* 工坊已迁模态（VmList 侧栏长按「编辑」承载）；详情页编辑走扁平高级入口 VmEdit */
-    this.navStack.pushPath({ name: 'edit', param: p });
+    /* 编辑为全窗口模态（与工坊/存储弹窗同款），不再 Navigation 压栈 */
+    this.editParam = p;
+    this.showEdit = true;
   }
 
   /* 打开这台 VM 的「存储」弹窗：由 Index 层以全窗口遮罩承载（铺满主界面，含侧栏），
@@ -722,11 +725,12 @@ export struct VmManage {
         Text(this.snapStatus()).fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp3 })
       } else if (!this.snapCreateMode) {
         Row() {
+          /* 区块级操作入口与「存储管理」同位：右端（Blank 先占位把按钮推右） */
+          Blank()
           Button('创建快照').focusable(false).fontSize(tBody)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cPrimary)
             .onClick(() => { this.snapCreateMode = true; this.snapNameText = ''; })
-          Blank()
         }.width('100%').padding({ top: sp1, bottom: sp3 })
       }
       if (this.snapCreateMode && this.canSnapshot()) {

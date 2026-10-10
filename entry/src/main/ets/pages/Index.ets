@@ -22,6 +22,8 @@ struct Index {
   @Provide('showTemplate') showTemplate: boolean = false; /* 模板创建模态（与工坊并列的独立流程） */
   @Provide('showStorage') showStorage: boolean = false;
   @Provide('storageParam') storageParam: VmProfile | null = null;
+  @Provide('showEdit') showEdit: boolean = false;
+  @Provide('editParam') editParam: VmProfile | null = null;
   @StorageLink('vmListVersion') vmListVersion: number = 0;
   /* 详情页重新显示的信号。编辑页压栈期间 VmManage 处于 inactive —— 官方文档明确
    * 「非栈顶 NavDestination 不响应状态变量变化、不触发 @Watch 回调」，而 pop 回来
@@ -34,8 +36,6 @@ struct Index {
     NavDestination() {
       if (name === 'manage') {
         VmManage({ profile: param as VmProfile })
-      } else if (name === 'edit') {
-        VmEdit({ profile: param as VmProfile })
       } else if (name === 'idle') {
         /* 未选中任何虚拟机时的内容区占位：居中引导，避免右侧留白 */
         Column({ space: sp3 }) {
@@ -133,6 +133,38 @@ struct Index {
     .alignContent(Alignment.Center)
   }
 
+  /* 编辑弹窗：与工坊/存储同款的全窗口遮罩 + 居中卡。编辑页从 Navigation 压栈迁来：
+   * 单页长表单四类字段混排、保存钮在页尾，弹窗 + 左侧 Tab 每类聚焦。
+   * 本 overlay 渲染在 storageOverlay 之前——编辑「存储」Tab 内可打开存储弹窗，
+   * 后渲染者在上层，存储弹窗盖住编辑弹窗。 */
+  @Builder
+  editCover() {
+    VmEdit({ profile: this.editParam, onClose: () => this.closeEdit() })
+  }
+
+  @Builder
+  editOverlay() {
+    Stack() {
+      Column().width('100%').height('100%').backgroundColor(scrim)
+        .onClick(() => this.closeEdit())
+      Column() { this.editCover() }
+        .width('88%').constraintSize({ maxWidth: 680 })
+        .height(540)
+        .backgroundColor(cCard)
+        .border({ width: bw, color: cBorder })
+        .borderRadius(rCard)
+        .clip(true)
+        .onClick(() => { /* 吃掉卡片区点击，避免透传遮罩误关 */ })
+    }
+    .width('100%').height('100%')
+    .alignContent(Alignment.Center)
+  }
+
+  private closeEdit(): void {
+    this.showEdit = false;
+    this.editParam = null;
+  }
+
   /* 存储弹窗：与工坊同款的全窗口遮罩 + 居中卡片，铺满主界面（侧栏+内容一起压暗）。 */
   @Builder
   storageOverlay() {
@@ -169,6 +201,9 @@ struct Index {
       }
       if (this.showTemplate) {
         this.templateOverlay()
+      }
+      if (this.showEdit) {
+        this.editOverlay()
       }
       if (this.showStorage) {
         this.storageOverlay()
