@@ -5,7 +5,7 @@
  * Chip 等“无状态展示”用 @Prop（父级重算即刷新）；Snackbar 持有 2 秒自动消失的
  * 定时器，故用 @Link 自持状态（页面只需 this.snack = '...'）。 */
 
-import { cPrimary, cSub, cWeak, cText, cChip, cBorder, cBg, rBadge, rElem, sp1, sp2, sp3, sp4, sp8, tBody, tLabel, tSub } from './uiTokens';
+import { cPrimary, cSub, cWeak, cText, cChip, cBorder, cBg, rBadge, rElem, rBtn, sp1, sp3, sp4, sp5, sp2, tBody, tLabel, tSub } from './uiTokens';
 
 /* 选择胶囊：单选一组的选项（未选 cChip 底 + cSub 字；选中 cPrimary 底 + 白字）。
  * 用法：Chip({ label: 'virtio', active: this.iface === 'virtio', onTap: () => this.iface = 'virtio' })
@@ -23,9 +23,11 @@ export struct Chip {
     Text(this.label)
       .fontSize(tBody)
       .fontColor(this.active ? Color.White : cSub)
-      .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+      /* 可交互胶囊：与按钮/输入框同圆角档(rBtn)，触控高度够 40vp 档；
+       * 不可点的信息徽标（各页 tSub + 8/4 padding）比本组件小一档 */
+      .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
       .backgroundColor(this.active ? cPrimary : cChip)
-      .borderRadius(rBadge)
+      .borderRadius(rBtn)
       .onClick(() => this.onTap())
   }
 }
@@ -36,12 +38,12 @@ export struct SecHead {
   @Prop label: string = '';
 
   build() {
-    Row({ space: sp8 }) {
+    Row({ space: sp2 }) {
       Text(this.label).fontSize(tLabel).fontColor(cSub)
       Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
     }
     .width('100%')
-    .margin({ top: sp2, bottom: sp1 })
+    .margin({ top: sp3, bottom: sp1 })
   }
 }
 
@@ -54,7 +56,7 @@ export struct FoldHead {
   onToggle: () => void = () => {};
 
   build() {
-    Row({ space: sp8 }) {
+    Row({ space: sp2 }) {
       Text() {
         Span(this.label).fontColor(cSub)
         Span(this.collapsed ? ' ▸ 展开' : ' ▾ 收起').fontColor(cWeak).fontSize(tSub)
@@ -63,7 +65,7 @@ export struct FoldHead {
       Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
     }
     .width('100%')
-    .margin({ top: sp2, bottom: sp1 })
+    .margin({ top: sp3, bottom: sp1 })
     .onClick(() => this.onToggle())
   }
 }
@@ -99,9 +101,9 @@ export struct Snackbar {
       Row() {
         Text(this.msg).fontSize(tBody).fontColor(cBg)
       }
-      .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
+      .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
       .backgroundColor(cText).borderRadius(rElem)
-      .position({ right: sp4, bottom: sp4 })
+      .position({ right: sp5, bottom: sp5 })
     }
   }
 }

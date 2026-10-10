@@ -11,7 +11,7 @@ import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import napiModule from 'libentry.so';
-import { rElem, sp1, sp8, cKbPanel, cKbKey, cKbBorder, cKbHandle, cKbPressed } from './uiTokens';
+import { rElem, sp1, sp2, cKbPanel, cKbKey, cKbBorder, cKbHandle, cKbPressed } from './uiTokens';
 
 const DOMAIN = 0x0002;
 const TAG = 'KbdOverlay';
@@ -268,7 +268,7 @@ export struct VirtualKeyboard {
           }, (row: KbKey[], idx: number) => idx.toString())
         }
         .width(this.scrW > 0 ? Math.min(this.scrW * 0.94, 860) : 640)
-        .padding({ left: sp8, right: sp8, top: 2, bottom: sp8 })
+        .padding({ left: sp2, right: sp2, top: 2, bottom: sp2 })
         /* 半透明面板：压低不透明度让 VM 画面透出来（键帽同理） */
         .backgroundColor(cKbPanel)
         .borderRadius(12)

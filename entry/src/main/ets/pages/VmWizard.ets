@@ -18,7 +18,7 @@ import { PortForwardEditor } from '../lib/PortForwardEditor';
 import {
   cPrimary, cSub, cWeak, cText, cBorder, cDanger, cBg, cBlock, cChip, cCard,
   tPage, tCard, tBody, tSub, tLabel, tMono,
-  sp1, sp2, sp3, sp4, sp8, spCard, bw, rElem, rBtn, rBadge, btnH, btnSh, btnPadX,
+  sp1, sp2, sp3, sp4, sp5, bw, rElem, rBtn, rBadge, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
@@ -558,13 +558,13 @@ export struct VmWizard {
         .onClick(() => this.step = i)
       }, (s: string) => s)
     }
-    .width('100%').padding({ left: sp4, right: sp4 })
+    .width('100%').padding({ left: sp5, right: sp5 })
   }
 
   @Builder
   stepArch() {
-    Column({ space: spCard }) {
-      Row({ space: sp2 }) {
+    Column({ space: sp3 }) {
+      Row({ space: sp3 }) {
         ForEach(ARCH_OPTIONS, (a: VmArch) => {
           Column() {
             Text(this.archLabel(a)).fontSize(tCard).fontWeight(FontWeight.Medium)
@@ -577,7 +577,7 @@ export struct VmWizard {
             if (a === 'riscv64') { Text('RISC-V').fontSize(tSub).fontColor(this.arch === a ? Color.White : cWeak) }
           }
           .layoutWeight(1)
-          .padding(spCard)
+          .padding(sp3)
           .backgroundColor(this.arch === a ? cPrimary : cCard)
           .borderRadius(rElem)
           .onClick(() => {
@@ -590,14 +590,14 @@ export struct VmWizard {
       .width('100%')
     }
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
+    .padding({ left: sp5, right: sp5, top: sp4, bottom: sp4 })
   }
 
   @Builder
   stepBoard() {
-    Column({ space: spCard }) {
+    Column({ space: sp3 }) {
       SecHead({ label: '机器类型' })
-      Row({ space: sp2 }) {
+      Row({ space: sp3 }) {
         ForEach(this.boards(), (b: string) => {
           Column() {
             Text(b).fontSize(tCard).fontWeight(FontWeight.Medium)
@@ -605,7 +605,7 @@ export struct VmWizard {
             Text(this.boardName(b)).fontSize(tSub).fontColor(this.board === b ? Color.White : cWeak)
           }
           .layoutWeight(1)
-          .padding(spCard)
+          .padding(sp3)
           .backgroundColor(this.board === b ? cPrimary : cCard)
           .borderRadius(rElem)
           .onClick(() => {
@@ -625,7 +625,7 @@ export struct VmWizard {
           ForEach(['std', 'cirrus', 'vmware', 'virtio'], (g: string) => {
             Row() {
               Chip({ label: g, active: this.vga === g, onTap: () => { this.vga = g as VgaType; } })
-            }.margin({ right: sp2, bottom: sp2 })
+            }.margin({ right: sp3, bottom: sp3 })
           }, (g: string) => g)
         }
         .width('100%')
@@ -643,11 +643,11 @@ export struct VmWizard {
         Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
           Row() {
             Chip({ label: '自动', active: this.cpuModel.trim().length === 0, onTap: () => { this.cpuModel = ''; } })
-          }.margin({ right: sp2, bottom: sp2 })
+          }.margin({ right: sp3, bottom: sp3 })
           ForEach(this.cpuPresets(), (m: string) => {
             Row() {
               Chip({ label: m, active: this.cpuModel.trim() === m, onTap: () => { this.cpuModel = m; } })
-            }.margin({ right: sp2, bottom: sp2 })
+            }.margin({ right: sp3, bottom: sp3 })
           }, (m: string) => m)
         }
         .width('100%')
@@ -664,12 +664,12 @@ export struct VmWizard {
 
     }
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
+    .padding({ left: sp5, right: sp5, top: sp4, bottom: sp4 })
   }
 
   @Builder
   stepCpuMem() {
-    Column({ space: spCard }) {
+    Column({ space: sp3 }) {
       SecHead({ label: '内存与核数' })
       Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
       Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
@@ -709,16 +709,16 @@ export struct VmWizard {
       this.stepErrorMsg()
     }
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
+    .padding({ left: sp5, right: sp5, top: sp4, bottom: sp4 })
   }
 
   @Builder
   stepMedia() {
-    Column({ space: spCard }) {
+    Column({ space: sp3 }) {
       /* 系统盘必配（无开关）：新建空白盘 或 导入现有镜像（创建时复制进 vms/）。
        * 来源/分配方式用分段胶囊（与概览 chips 同款），不用 Radio——圆点+对勾太嘈杂 */
       SecHead({ label: '系统盘' })
-      Row({ space: sp2 }) {
+      Row({ space: sp3 }) {
         Chip({ label: '新建空白盘', active: this.diskSource === 'new', onTap: () => { this.diskSource = 'new'; } })
         Chip({ label: '导入现有镜像', active: this.diskSource === 'import', onTap: () => { this.diskSource = 'import'; } })
       }
@@ -727,7 +727,7 @@ export struct VmWizard {
         Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
           min: 0, max: DISK_SIZES.length - 1, step: 1 })
           .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           Chip({ label: '动态分配', active: this.diskAlloc === 'dynamic', onTap: () => { this.diskAlloc = 'dynamic'; } })
           Chip({ label: '固定大小', active: this.diskAlloc === 'fixed', onTap: () => { this.diskAlloc = 'fixed'; } })
           Text('动态：用到多少占多少；固定：创建即占满')
@@ -735,9 +735,9 @@ export struct VmWizard {
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
       } else {
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           Button('选择镜像').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cPrimary)
             .onClick(() => this.pickImportDisk())
           Text(this.importDiskSrc.length > 0
@@ -753,7 +753,7 @@ export struct VmWizard {
        * 不认；ide 是 XP/Win7 开箱即认的兼容路径。切到无关架构时该选择不会被装配
        * （fitDiskIface 收敛为 virtio）。 */
       if (this.arch === 'x86_64' || this.arch === 'i386') {
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           Text('磁盘接口').fontSize(tSub).fontColor(cSub)
           Chip({ label: 'virtio', active: this.diskIface === 'virtio', onTap: () => { this.diskIface = 'virtio'; } })
           Chip({ label: 'ide（Windows）', active: this.diskIface === 'ide', onTap: () => { this.diskIface = 'ide'; } })
@@ -762,16 +762,16 @@ export struct VmWizard {
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .width('100%')
-        .margin({ top: sp2 })
+        .margin({ top: sp3 })
       }
 
       /* 直接内核引导：默认折叠的高级组；选了 kernel 即绕过固件引导（-kernel） */
       FoldHead({ label: '内核引导', collapsed: this.kernelCollapsed, onToggle: () => { this.kernelCollapsed = !this.kernelCollapsed; } })
 
       if (!this.kernelCollapsed) {
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           Button('选择内核').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cPrimary)
             .onClick(() => this.pickKernel())
           Text(this.kernelSrc.length > 0 ? this.baseName(this.kernelSrc) : '未选择（vmlinuz/bzImage/Image…）')
@@ -779,14 +779,14 @@ export struct VmWizard {
             .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.kernelSrc.length > 0) {
             Button('清除').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cDanger)
               .onClick(() => { this.kernelSrc = ''; })
           }
         }
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           Button('选择 initrd').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cPrimary)
             .onClick(() => this.pickInitrd())
           Text(this.initrdSrc.length > 0 ? this.baseName(this.initrdSrc) : '可选（initramfs/initrd.img…）')
@@ -794,7 +794,7 @@ export struct VmWizard {
             .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.initrdSrc.length > 0) {
             Button('清除').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cDanger)
               .onClick(() => { this.initrdSrc = ''; })
           }
@@ -814,12 +814,12 @@ export struct VmWizard {
       /* 多 ISO 有序列表：第一张为启动盘候选（从光盘启动时）；每张一行可独立移除 */
       if (this.cdromPaths.length > 0) {
         ForEach(this.cdromPaths, (p: string, idx: number) => {
-          Row({ space: sp2 }) {
+          Row({ space: sp3 }) {
             Text(idx === 0 ? `${this.baseName(p)}（启动盘）` : this.baseName(p))
               .fontSize(tSub).fontColor(idx === 0 ? cPrimary : cSub).layoutWeight(1)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             Button('移除').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .onClick(() => this.removeIso(idx))
           }
           .width('100%')
@@ -827,14 +827,14 @@ export struct VmWizard {
       } else {
         Text('无').fontSize(tSub).fontColor(cSub).width('100%')
       }
-      Row({ space: sp2 }) {
+      Row({ space: sp3 }) {
         Button('添加 ISO').focusable(false).fontSize(tBody)
-          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent).fontColor(cPrimary)
           .onClick(() => this.pickLocalIso())
         Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.archLabel(this.arch)})`)
           .focusable(false).fontSize(tBody)
-          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .enabled(!this.ensureIsoLoading)
           .onClick(() => this.pickBuiltinIso())
       }
@@ -849,12 +849,12 @@ export struct VmWizard {
       this.stepErrorMsg()
     }
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
+    .padding({ left: sp5, right: sp5, top: sp4, bottom: sp4 })
   }
 
   @Builder
   stepNet() {
-    Column({ space: spCard }) {
+    Column({ space: sp3 }) {
       SecHead({ label: '网络' })
       Row() {
         Text('启用网络').fontSize(tLabel).layoutWeight(1)
@@ -876,12 +876,12 @@ export struct VmWizard {
       }
     }
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
+    .padding({ left: sp5, right: sp5, top: sp4, bottom: sp4 })
   }
 
   @Builder
   stepPreview() {
-    Column({ space: spCard }) {
+    Column({ space: sp3 }) {
       Text('名称').fontSize(tLabel).width(72)
       TextInput({ text: this.name, placeholder: '必填' })
         .fontSize(tBody)
@@ -902,14 +902,14 @@ export struct VmWizard {
         Text(buildArgs(this.assemble(newProfileId()), this.vmDataDir, sharedDir(this.filesDir)).join(' '))
           .fontSize(tMono)
           .fontColor(cText)
-          .padding(sp8)
+          .padding(sp2)
           .width('100%')
           .backgroundColor(cBlock)
           .borderRadius(rElem)
       }
     }
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
+    .padding({ left: sp5, right: sp5, top: sp4, bottom: sp4 })
   }
 
   private baseName(path: string): string {
@@ -920,9 +920,9 @@ export struct VmWizard {
   build() {
     Column() {
       Column() {
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
             Button('上一步').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent)
               .fontColor(this.step > 0 ? cPrimary : cWeak)
               .enabled(this.step > 0)
@@ -931,13 +931,13 @@ export struct VmWizard {
             Text('创建虚拟机').fontSize(tPage).fontWeight(FontWeight.Medium)
             Blank()
             Button('关闭').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent)
               .fontColor(cSub)
               .onClick(() => this.requestClose())
           }
           .width('100%')
-          .padding({ left: sp4, right: sp4, top: sp2, bottom: sp2 })
+          .padding({ left: sp5, right: sp5, top: sp3, bottom: sp3 })
 
           this.stepHeader()
 
@@ -979,7 +979,7 @@ export struct VmWizard {
             Blank()
           }
           .width('100%')
-          .padding({ left: sp4, right: sp4, top: sp2, bottom: sp2 })
+          .padding({ left: sp5, right: sp5, top: sp3, bottom: sp3 })
           .backgroundColor(cBg)
       }
       .width('100%')

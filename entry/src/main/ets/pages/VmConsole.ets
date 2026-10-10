@@ -17,7 +17,7 @@ import { prepareStart } from '../lib/tempSession';
 import { takePendingVmId, isPadOrPhone } from '../lib/vmwindows';
 import { VirtualKeyboard } from '../lib/VirtualKeyboard';
 import {
-  sp1, sp2, cCard, cText, cPrimary,
+  sp1, sp3, cCard, cText, cPrimary,
   cConsoleText, cConsoleAccent, cConsoleDanger, cConsoleLogText, cConsoleWarn,
   cConsolePanel, cConsolePanelStrong, cConsoleInputBg, cConsolePlaceholder,
   cConsoleBanner, cConsoleBtn, cConsoleScrim,
@@ -1656,24 +1656,24 @@ struct VmConsole {
         /* 判定只看 bootFailReason：它在熔断/失败时置位，就绪或「仍要启动」时清空。
          * 不在 build 里问 napi.vmRunning —— 那是同步 IPC 往返，每次重绘都打一次。 */
         if (this.bootFailReason.length > 0) {
-          Column({ space: sp2 }) {
+          Column({ space: sp3 }) {
             Text('上次启动失败').fontSize(PANEL_FS).fontColor(cConsoleWarn)
             Text(this.bootFailReason).fontSize(PANEL_FS).fontColor(cConsoleText).maxLines(2)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-            Row({ space: sp2 }) {
+            Row({ space: sp3 }) {
               Button('仍要启动').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H)
-                .padding({ left: sp2, right: sp2 })
+                .padding({ left: sp3, right: sp3 })
                 .fontColor(cConsoleText).backgroundColor(cConsoleBtn)
                 .onClick(() => { this.retryAnyway() })
               Button('看日志').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H)
-                .padding({ left: sp2, right: sp2 })
+                .padding({ left: sp3, right: sp3 })
                 .fontColor(cConsoleText).backgroundColor(Color.Transparent)
                 .onClick(() => { this.failStart('上次启动失败'); })
             }
           }
           .width('100%')
           .backgroundColor(cConsoleBanner)
-          .padding(sp2)
+          .padding(sp3)
           .alignItems(HorizontalAlign.Start)
         }
         /* 交互式串口 overlay（v4）：盖住画面，只读滚动区 + 键帽/输入行。
@@ -1685,7 +1685,7 @@ struct VmConsole {
                 .fontSize(this.serialFs)
                 .fontColor(cConsoleLogText)
                 .width('100%')
-                .padding({ left: sp2, right: sp2, top: sp2, bottom: sp2 })
+                .padding({ left: sp3, right: sp3, top: sp3, bottom: sp3 })
                 /* 长按选中复制（触摸场景 SELECTABLE_UNFOCUSABLE 即可；Ctrl+C
                  * 才需 SELECTABLE_FOCUSABLE）。数据刷新会重置选择，属预期 */
                 .copyOption(CopyOptions.LocalDevice)
@@ -1696,7 +1696,7 @@ struct VmConsole {
             .scrollBar(BarState.Auto)
             .width('100%')
 
-            Row({ space: sp2 }) {
+            Row({ space: sp3 }) {
               Text('Ctrl').fontSize(PANEL_FS).height(PANEL_BTN_H)
                 .padding({ left: sp1, right: sp1 })
                 .fontColor(this.ctrlOn ? cConsoleAccent : cConsoleText)
@@ -1722,10 +1722,10 @@ struct VmConsole {
             .width('100%')
             .height(PANEL_H)
             .backgroundColor(cConsolePanel)
-            .padding({ left: sp2, right: sp2 })
+            .padding({ left: sp3, right: sp3 })
             .alignItems(VerticalAlign.Center)
 
-            Row({ space: sp2 }) {
+            Row({ space: sp3 }) {
               TextInput({ text: this.serialInput, placeholder: '输入并回车发送（Ctrl 开时 ^C 生效）' })
                 .layoutWeight(1)
                 .fontSize(PANEL_FS)
@@ -1738,7 +1738,7 @@ struct VmConsole {
                 .placeholderFont({ size: PANEL_FS }) /* 不给就用默认字号，比同栏其他文字大一圈 */
                 .caretColor(cConsoleAccent)
                 .backgroundColor(cConsoleInputBg)
-                .padding({ left: sp2, right: sp2 })
+                .padding({ left: sp3, right: sp3 })
                 .id(SERIAL_INPUT_ID)
                 .onChange((v: string) => this.serialInput = v)
                 .onSubmit(() => this.sendAndRefocus())
@@ -1750,7 +1750,7 @@ struct VmConsole {
             .width('100%')
             .height(PANEL_H)
             .backgroundColor(cConsolePanel)
-            .padding({ left: sp2, right: sp2 })
+            .padding({ left: sp3, right: sp3 })
             .alignItems(VerticalAlign.Center)
           }
           .width('100%')
@@ -1760,7 +1760,7 @@ struct VmConsole {
         /* 手势速查（首次进入）：盖在一切之上，点任意处关闭 */
         if (this.showGestureHint) {
           Column() {
-            Column({ space: sp2 }) {
+            Column({ space: sp3 }) {
               Text('操作手势').fontSize(16).fontWeight(FontWeight.Medium).fontColor(cConsoleText)
               Text('触摸屏').fontSize(PANEL_FS).fontColor(cConsoleAccent)
               Text('单指点按＝左键，拖动＝移动光标；长按＝右键\n双指轻点＝右键；双指上下滑动＝滚轮')
@@ -1771,11 +1771,11 @@ struct VmConsole {
               Text('「输入」里可切换为触控板模式：滑动移光标，点按＝左键，\n长按＝按住左键拖动；滚轮方向与光标速度也在那里调')
                 .fontSize(PANEL_FS).fontColor(cConsoleText).textAlign(TextAlign.Center)
               Button('知道了').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H + 6)
-                .padding({ left: sp2 * 2, right: sp2 * 2 })
+                .padding({ left: sp3 * 2, right: sp3 * 2 })
                 .fontColor(cConsoleText).backgroundColor(cConsoleBtn)
                 .onClick(() => this.dismissGestureHint())
             }
-            .padding(sp2 * 3)
+            .padding(sp3 * 3)
             .backgroundColor(cConsolePanelStrong)
             .borderRadius(12)
             .alignItems(HorizontalAlign.Center)
@@ -1802,7 +1802,7 @@ struct VmConsole {
       /* 底部状态栏：运行状态 + 电源/远程控制（常驻，所有设备；
        * 沉浸全屏时整体隐藏，画面铺满整窗）。配色走主题双色板，跟随系统深浅 */
       if (!this.immersive) {
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           if (this.vmName.length > 0) {
             Text(this.vmName).fontSize(this.barFs).fontWeight(FontWeight.Medium).fontColor(cText)
               .maxLines(1)
@@ -1841,7 +1841,7 @@ struct VmConsole {
         .width('100%')
         .height(this.barH)
         .backgroundColor(cCard)
-        .padding({ left: sp2, right: sp2 })
+        .padding({ left: sp3, right: sp3 })
         .alignItems(VerticalAlign.Center)
       }
     }

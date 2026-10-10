@@ -20,8 +20,8 @@ import { Snackbar } from '../lib/uiWidgets';
 import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
   cCard, cBlock, cChip, cBorder, cConsoleScrim,
-  tCard, tLabel, tBody, tSub, tSubL, tMono,
-  sp1, sp2, sp3, sp4, sp5, sp8, rCard, rElem, rBadge, rBtn, btnH, btnSh, btnPadX, bw,
+  tCard, tLabel, tBody, tSub, tMono, iconFs,
+  sp1, sp2, sp3, sp4, sp5, sp6, rCard, rElem, rBadge, rBtn, btnH, btnSh, btnPadX, bw,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
@@ -662,12 +662,12 @@ export struct VmManage {
   /* 分区标题（与 VmWizard groupHeader 同款：灰字在左，细线延伸至右） */
   @Builder
   secHead(t: string) {
-    Row({ space: sp8 }) {
+    Row({ space: sp2 }) {
       Text(t).fontSize(tLabel).fontColor(cSub)
       Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
     }
     .width('100%')
-    .margin({ top: sp2, bottom: sp1 })
+    .margin({ top: sp3, bottom: sp1 })
   }
 
   @Builder
@@ -675,9 +675,9 @@ export struct VmManage {
     this.secHead('存储')
     Row() {
       Column({ space: sp1 }) {
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           Text(`系统盘 ${this.diskSummary()}`)
-            .fontSize(tSubL).fontColor(cSub).maxLines(1)
+            .fontSize(tSub).fontColor(cSub).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.bootDevice() === 'disk') {
             this.bootBadge()
@@ -687,9 +687,9 @@ export struct VmManage {
             this.readonlyBadge()
           }
         }.width('100%')
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           Text(`光盘 ${this.cdromName()}`)
-            .fontSize(tSubL).fontColor(cSub).maxLines(1)
+            .fontSize(tSub).fontColor(cSub).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.bootDevice() === 'cdrom') {
             this.bootBadge()
@@ -697,9 +697,9 @@ export struct VmManage {
         }.width('100%')
         /* 数据盘（v5）：一行一张 + 只读徽标 */
         ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
-          Row({ space: sp2 }) {
+          Row({ space: sp3 }) {
             Text(`数据盘${idx + 1}`)
-              .fontSize(tSubL).fontColor(cSub).maxLines(1)
+              .fontSize(tSub).fontColor(cSub).maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
             if (d.readonly) {
               this.readonlyBadge()
@@ -708,10 +708,10 @@ export struct VmManage {
         }, (d: VmDisk) => d.path)
       }.alignItems(HorizontalAlign.Start).layoutWeight(1)
       Button('存储管理').focusable(false).fontSize(tBody)
-        .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+        .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
         .backgroundColor(Color.Transparent).fontColor(cPrimary)
         .onClick(() => this.openStorage())
-    }.width('100%').padding({ top: sp1, bottom: sp2 }).alignItems(VerticalAlign.Center)
+    }.width('100%').padding({ top: sp1, bottom: sp3 }).alignItems(VerticalAlign.Center)
   }
 
   @Builder
@@ -719,18 +719,18 @@ export struct VmManage {
     this.secHead('快照')
     Column() {
       if (!this.canSnapshot()) {
-        Text(this.snapStatus()).fontSize(tSubL).fontColor(cWeak).padding({ top: sp1, bottom: sp2 })
+        Text(this.snapStatus()).fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp3 })
       } else if (!this.snapCreateMode) {
         Row() {
           Button('创建快照').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cPrimary)
             .onClick(() => { this.snapCreateMode = true; this.snapNameText = ''; })
           Blank()
-        }.width('100%').padding({ top: sp1, bottom: sp2 })
+        }.width('100%').padding({ top: sp1, bottom: sp3 })
       }
       if (this.snapCreateMode && this.canSnapshot()) {
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tBody)
             .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
             .onChange((v: string) => this.snapNameText = v)
@@ -739,10 +739,10 @@ export struct VmManage {
             .backgroundColor(cPrimary).fontColor(Color.White)
             .onClick(() => this.doSnapshotCreate())
           Button('取消').focusable(false).fontSize(tSub)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cSub)
             .onClick(() => { this.snapCreateMode = false; this.snapNameText = ''; })
-        }.width('100%').margin({ top: sp2 })
+        }.width('100%').margin({ top: sp3 })
       }
 
       /* 时间线（历史快照 + 当前状态） */
@@ -750,27 +750,27 @@ export struct VmManage {
         ForEach(this.snapshots, (s: VmSnapshotEntry) => {
           Row() {
             Column().width(9).height(9).borderRadius(5).backgroundColor(cCard)
-              .border({ width: 2, color: cPrimary }).margin({ right: sp2 })
+              .border({ width: 2, color: cPrimary }).margin({ right: sp3 })
             Column({ space: 1 }) {
               Text(s.name).fontSize(tLabel)
               Text(this.dateStr(s.dateSec)).fontSize(tMono).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).layoutWeight(1)
             Button('恢复').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cPrimary)
               .onClick(() => this.doSnapshotApply(s))
             Button('删除').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cDanger)
               .onClick(() => this.doSnapshotDelete(s))
           }.width('100%').padding({ top: sp1, bottom: sp1 })
         }, (s: VmSnapshotEntry) => s.id + ':' + s.name)
         Row() {
-          Column().width(9).height(9).borderRadius(5).backgroundColor(cPrimary).margin({ right: sp2 })
+          Column().width(9).height(9).borderRadius(5).backgroundColor(cPrimary).margin({ right: sp3 })
           /* 只作时间线终点锚点（不是可操作的快照），不放时间戳避免误读为快照时间 */
           Text('当前状态').fontSize(tLabel)
         }.width('100%').padding({ top: sp1, bottom: sp1 })
-      }.width('100%').padding({ left: sp2 })
+      }.width('100%').padding({ left: sp3 })
     }.alignItems(HorizontalAlign.Start)
   }
 
@@ -781,8 +781,8 @@ export struct VmManage {
       Column({ space: 1 }) {
         Text(this.netEnabled ? '已启用' : '已关闭').fontSize(tLabel)
         Text(`端口转发 ${(this.profile && this.profile.net.portForwards.length > 0) ? this.profile.net.portForwards : '无'} · 9p 共享${(this.profile && this.profile.net.sharedFolder) ? '开' : '关'}`)
-          .fontSize(tSubL).fontColor(cSub)
-      }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp2 })
+          .fontSize(tSub).fontColor(cSub)
+      }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp3 })
     }.alignItems(HorizontalAlign.Start)
   }
 
@@ -795,10 +795,10 @@ export struct VmManage {
       Text() {
         Span('qemu 启动参数预览')
         Span(this.argsOpen ? ' ▾ 收起' : ' ▸ 展开').fontColor(cWeak)
-      }.fontSize(tSubL).fontColor(cSub)
+      }.fontSize(tSub).fontColor(cSub)
       Blank()
       Button('复制').focusable(false).fontSize(tBody)
-        .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+        .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
         .backgroundColor(Color.Transparent).fontColor(cPrimary)
         .onClick(() => this.copyArgs())
     }.width('100%').padding({ top: sp1, bottom: sp1 }).alignItems(VerticalAlign.Center)
@@ -807,7 +807,7 @@ export struct VmManage {
       Text(this.qemuArgsText())
         .fontSize(tMono)
         .fontColor(cText)
-        .padding(sp8)
+        .padding(sp2)
         .width('100%')
         .backgroundColor(cBlock)
         .borderRadius(rElem)
@@ -856,10 +856,10 @@ export struct VmManage {
     Stack() {
       Column() {
         /* 顶部行：返回 / 名称+运行徽标+arch / 进入·编辑·删除 */
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           if (!this.isWide) {
             Button('返回').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cPrimary)
               .onClick(() => this.navStack.pop())
           }
@@ -869,16 +869,16 @@ export struct VmManage {
                 .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               if (this.isRunningNow()) {
                 Text('运行中').fontSize(tSub).fontColor(cRunning).backgroundColor(cChip).borderRadius(rBadge)
-                  .padding({ left: sp1, right: sp1 })
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
             }.alignItems(VerticalAlign.Center)
-            Text(this.arch).fontSize(tSubL).fontColor(cSub)
+            Text(this.arch).fontSize(tSub).fontColor(cSub)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
           /* 操作图标钮：启动(play_fill) / 进入 console(arrow_up_left_and_arrow_down_right) /
            * 关机(power, 仅运行中) / 编辑(slider_vertical_3) / 更多(dot_grid_1x2) */
           Button() {
             SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.arrow_up_left_and_arrow_down_right') : $r('sys.symbol.play_fill'))
-              .fontSize(20)
+              .fontSize(iconFs)
               .fontColor([cPrimary])
           }
           .focusable(false)
@@ -889,7 +889,7 @@ export struct VmManage {
             /* 关机入口（仅运行中显示）：power 图标，点按弹出 关机/强制关机 两选项 */
             Button() {
               SymbolGlyph($r('sys.symbol.power'))
-                .fontSize(20)
+                .fontSize(iconFs)
                 .fontColor([cText])
             }
             .focusable(false)
@@ -902,7 +902,7 @@ export struct VmManage {
           }
           Button() {
             SymbolGlyph($r('sys.symbol.slider_vertical_3'))
-              .fontSize(20)
+              .fontSize(iconFs)
               .fontColor([cText])
           }
           .focusable(false)
@@ -913,7 +913,7 @@ export struct VmManage {
            * 顶部按钮，再加上启动/关机/编辑，一行塞了五种操作。 */
           Button() {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2'))
-              .fontSize(20)
+              .fontSize(iconFs)
               .fontColor([cText])
           }
           .focusable(false)
@@ -922,7 +922,7 @@ export struct VmManage {
           .bindMenu(this.vmOpsMenu)
         }
         .width('100%')
-        .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
+        .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
         .alignItems(VerticalAlign.Center)
 
         Scroll() {
@@ -952,13 +952,13 @@ export struct VmManage {
               .constraintSize({ maxWidth: '100%' })
               .backgroundColor(Color.Black)
               .borderRadius(rCard)
-              .margin({ top: sp1, bottom: sp2 })
+              .margin({ top: sp1, bottom: sp3 })
               .onClick(() => this.openConsole())
             } else {
               /* 无图（停机无缓存 / 运行中尚未出画）：同为黑屏形态 + 中央按钮，
                * 与有图态视觉一致——停机 play=启动，运行中 arrow=进入控制台 */
               Stack() {
-                Column({ space: sp2 }) {
+                Column({ space: sp3 }) {
                   if (this.isRunningNow()) {
                     Text('画面加载中…').fontSize(tSub).fontColor(cWeak)
                   }
@@ -979,52 +979,52 @@ export struct VmManage {
               .height(216)
               .backgroundColor(Color.Black)
               .borderRadius(rCard)
-              .margin({ top: sp1, bottom: sp2 })
+              .margin({ top: sp1, bottom: sp3 })
               .onClick(() => this.openConsole())
             }
 
             this.secHead('概览')
             /* 概览胶囊一排（内存/核/机型/固件；无 vga） */
-            Row({ space: sp2 }) {
+            Row({ space: sp3 }) {
               if (this.memLabel().length > 0) {
-                Text(this.memLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                Text(this.memLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
               if (this.cpuLabel().length > 0) {
-                Text(this.cpuLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                Text(this.cpuLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
               if (this.boardLabel().length > 0) {
-                Text(this.boardLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                Text(this.boardLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
               if (this.firmwareLabel().length > 0) {
-                Text(this.firmwareLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                Text(this.firmwareLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
               if (this.vgaLabel().length > 0) {
-                Text(this.vgaLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                Text(this.vgaLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
               if (this.enhanceLabel().length > 0) {
-                Text(this.enhanceLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                Text(this.enhanceLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
               if (this.audioLabel().length > 0) {
-                Text(this.audioLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                Text(this.audioLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
               if (this.gdbLabel().length > 0) {
-                Text(this.gdbLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                Text(this.gdbLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
               if (this.cpuFlagLabel().length > 0) {
-                Text(this.cpuFlagLabel()).fontSize(tSubL).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
+                Text(this.cpuFlagLabel()).fontSize(tSub).fontColor(cSub).backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
             }
             .width('100%')
-            .padding({ top: sp1, bottom: sp2 })
+            .padding({ top: sp1, bottom: sp3 })
 
             this.secStorage()
             this.secNet()
@@ -1032,7 +1032,7 @@ export struct VmManage {
             this.secAdvanced()
           }
           .width('100%')
-          .padding({ left: sp3, right: sp3, bottom: sp5 })
+          .padding({ left: sp4, right: sp4, bottom: sp6 })
         }
         .layoutWeight(1)
         .align(Alignment.Top)
@@ -1044,13 +1044,13 @@ export struct VmManage {
 
       /* v6：克隆进度（复制大磁盘时可见 stage + 百分比） */
       if (this.cloneStage.length > 0) {
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           Text(this.cloneStage + ' ' + this.clonePct + '%').fontSize(tSub).fontColor(cSub).layoutWeight(1)
           Progress({ value: this.clonePct, total: 100, type: ProgressType.Linear })
             .width(120).color(cPrimary)
         }
         .width('100%')
-        .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+        .padding({ left: sp4, right: sp4, top: sp1, bottom: sp1 })
         .backgroundColor(cCard)
       }
 

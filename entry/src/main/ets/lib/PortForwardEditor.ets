@@ -7,7 +7,7 @@
  * 历史档里手工改坏、解析不出 host:guest 的条目原样保留展示（红字 + 仅允许移除），
  * 不能让编辑器把用户的存量内容悄悄吃掉。 */
 
-import { cDanger, cSub, cWeak, sp2, tBody, tSub, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX } from './uiTokens';
+import { cDanger, cSub, cWeak, sp3, tBody, tSub, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX } from './uiTokens';
 import { forwardErrors } from './vmprofile';
 
 interface FwdRow {
@@ -97,12 +97,12 @@ export struct PortForwardEditor {
   }
 
   build() {
-    Column({ space: sp2 }) {
+    Column({ space: sp3 }) {
       if (this.rows.length === 0 && this.invalids.length === 0) {
         Text('暂无端口转发').fontSize(tSub).fontColor(cWeak).width('100%')
       }
       ForEach(this.rows, (r: FwdRow, idx: number) => {
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           TextInput({ text: r.host, placeholder: '宿主' })
             .type(InputType.Number)
             .width(84)
@@ -119,24 +119,24 @@ export struct PortForwardEditor {
           Text('→ 虚拟机').fontSize(tSub).fontColor(cWeak)
           Blank()
           Button('移除').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.removeRow(idx))
         }.width('100%')
       }, (r: FwdRow) => r.id.toString())
       ForEach(this.invalids, (s: string, idx: number) => {
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           Text(`「${s}」格式无效`).fontSize(tSub).fontColor(cDanger).layoutWeight(1)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           Button('移除').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.removeInvalid(idx))
         }.width('100%')
       }, (s: string, idx: number) => `inv${idx}:${s}`)
       Row() {
         Button('添加一行').focusable(false).fontSize(tBody)
-          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent).fontColor(cSub)
           .onClick(() => this.addRow())
         Blank()

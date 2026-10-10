@@ -26,7 +26,7 @@ import { pathExists } from '../lib/fsutil';
 import {
   cPrimary, cSub, cWeak, cText, cBorder, cBg, cChip, cSel, cSelBg,
   tPage, tCard, tBody, tSub, tLabel,
-  sp1, sp2, sp3, sp4, sp8, spCard, bw, rElem, rBtn, rBadge, btnH, btnPadX,
+  sp1, sp2, sp3, sp4, sp5, bw, rElem, rBtn, rBadge, btnH, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 import { Chip, SecHead } from '../lib/uiWidgets';
@@ -264,13 +264,13 @@ export struct VmTemplate {
         Blank()
       }
       .width('100%')
-      .padding({ left: sp4, right: sp4, top: sp2, bottom: sp2 })
+      .padding({ left: sp5, right: sp5, top: sp3, bottom: sp3 })
 
       Scroll() {
-        Column({ space: spCard }) {
+        Column({ space: sp3 }) {
           /* 模板卡片列表单选 */
           ForEach(TEMPLATES, (t: TplDef) => {
-            Row({ space: sp2 }) {
+            Row({ space: sp3 }) {
               Column({ space: sp1 }) {
                 Text(t.name).fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cText)
                 Text(t.desc).fontSize(tSub).fontColor(cWeak)
@@ -280,15 +280,15 @@ export struct VmTemplate {
               if (t.iso === 'builtin') {
                 Text('内置 ISO').fontSize(tSub).fontColor(cPrimary)
                   .backgroundColor(cChip).borderRadius(rBadge)
-                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+                  .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
               } else {
                 Text('自备镜像').fontSize(tSub).fontColor(cSub)
                   .backgroundColor(cChip).borderRadius(rBadge)
-                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+                  .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
               }
             }
             .width('100%')
-            .padding(spCard)
+            .padding(sp3)
             .backgroundColor(this.tplId === t.id ? cSelBg : cBg)
             .border({ width: bw, color: this.tplId === t.id ? cSel : cBorder })
             .borderRadius(rElem)
@@ -312,7 +312,7 @@ export struct VmTemplate {
                     this.refreshDerived();
                   },
                 })
-              }.margin({ right: sp2, bottom: sp2 })
+              }.margin({ right: sp3, bottom: sp3 })
             }, (a: VmArch) => a)
           }
           .width('100%')
@@ -332,7 +332,7 @@ export struct VmTemplate {
             ForEach(DISK_SIZES, (g: number) => {
               Row() {
                 Chip({ label: `${g}G`, active: this.diskGB === g, onTap: () => { this.diskGB = g; } })
-              }.margin({ right: sp2, bottom: sp2 })
+              }.margin({ right: sp3, bottom: sp3 })
             }, (g: number) => String(g))
           }
           .width('100%')
@@ -345,7 +345,7 @@ export struct VmTemplate {
               : `创建后自动下载 Alpine 镜像（约 ${alpineSizeFor(this.arch)}MB，国内镜像站）`)
               .fontSize(tSub).fontColor(cWeak).width('100%')
           } else {
-            Row({ space: sp2 }) {
+            Row({ space: sp3 }) {
               Button('选择 ISO').focusable(false).fontSize(tBody)
                 .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
                 .backgroundColor(Color.Transparent).fontColor(cPrimary)
@@ -375,12 +375,12 @@ export struct VmTemplate {
             .fontSize(tSub).fontColor(cWeak).width('100%')
         }
         .alignItems(HorizontalAlign.Start)
-        .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
+        .padding({ left: sp5, right: sp5, top: sp4, bottom: sp4 })
       }
       .layoutWeight(1)
       .align(Alignment.Top)
 
-      Row({ space: sp3 }) {
+      Row({ space: sp4 }) {
         Blank()
         /* 取消随时可点：未落盘直接关模态；下载中取消则档案保留（同下载失败语义） */
         Button('取消').focusable(false).fontSize(tBody)
@@ -397,7 +397,7 @@ export struct VmTemplate {
         Blank()
       }
       .width('100%')
-      .padding({ left: sp4, right: sp4, top: sp2, bottom: sp2 })
+      .padding({ left: sp5, right: sp5, top: sp3, bottom: sp3 })
       .backgroundColor(cBg)
     }
     .width('100%')

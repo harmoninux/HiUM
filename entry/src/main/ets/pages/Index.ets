@@ -11,7 +11,7 @@ import { VmStorage } from './VmStorage';
 import { VmWizard } from './VmWizard';
 import { VmTemplate } from './VmTemplate';
 import { VmProfile } from '../lib/vmprofile';
-import { tBody, tSub, tCard, cSub, cWeak, cPrimary, cCard, cBorder, scrim, rCard, bw, sp2, spCard, rBtn, btnH, btnPadX } from '../lib/uiTokens';
+import { tBody, tSub, tCard, cSub, cWeak, cPrimary, cCard, cBorder, scrim, rCard, bw, sp3, rBtn, btnH, btnPadX } from '../lib/uiTokens';
 
 @Entry
 @Component
@@ -38,7 +38,7 @@ struct Index {
         VmEdit({ profile: param as VmProfile })
       } else if (name === 'idle') {
         /* 未选中任何虚拟机时的内容区占位：居中引导，避免右侧留白 */
-        Column({ space: spCard }) {
+        Column({ space: sp3 }) {
           Text('🖥').fontSize(56)
           Text('未选择虚拟机')
             .fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cSub)

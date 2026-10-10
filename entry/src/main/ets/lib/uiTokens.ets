@@ -19,23 +19,21 @@ export const cChip     = $r('app.color.c_chip'); /* chips 底 */
 export const cSel      = $r('app.color.c_sel'); /* 选中描边/浅底 */
 export const cSelBg    = $r('app.color.c_sel_bg'); /* 选中浅底 */
 
-/* ---- 字号 (size / weight) ---- */
-export const tPage  = 18; /* 页面/窗口标题 700 */
-export const tCard  = 14; /* 卡片/行标题 600 */
-export const tLabel = 14; /* 设置行标签 400 */
-export const tBody  = 14; /* 正文/按钮 400 */
-export const tSub   = 12; /* 次级说明 400 */
-export const tSubL  = 13; /* 次级信息大档（tSub 与 tBody 之间的档位）：详情页主体信息 */
-export const tMono  = 12; /* mono 小字：状态/指纹/日期/步骤圆点 */
+/* ---- 字号 (size / weight)：4 档等差，正文对齐系统默认 16fp ---- */
+export const tPage  = 20; /* 页面/窗口标题，600~700 */
+export const tCard  = 16; /* 卡片/行标题，500~600 */
+export const tLabel = 16; /* 设置行标签 400 */
+export const tBody  = 16; /* 正文/按钮 400 */
+export const tSub   = 14; /* 次级说明/副标题/徽标 400 */
+export const tMono  = 13; /* mono 小字：状态/指纹/日期/步骤圆点 */
 
-/* ---- 间距 ---- */
-export const sp1 = 6;
-export const sp2 = 10;
-export const sp3 = 16;
-export const sp4 = 22;
-export const sp5 = 32;
-export const sp8 = 8;      /* 组头/卡片行间隙 + 紧凑块内边距（介于 sp1 与 sp2 之间的档） */
-export const spCard = 12;  /* 卡/设置行内边距与卡内沟（历史约定 12，介于 sp2 与 sp3 之间） */
+/* ---- 间距：4 的倍数纯档，按档取用不许自造数值 ---- */
+export const sp1 = 4;
+export const sp2 = 8;
+export const sp3 = 12;
+export const sp4 = 16;
+export const sp5 = 24;
+export const sp6 = 32;
 
 /* ---- 圆角 / 边框 ---- */
 export const rCard = 10;  /* 卡/按钮 */
@@ -45,12 +43,13 @@ export const bw = 1;
 
 /* ---- 按钮尺寸（对齐设计稿：小圆角矩形，而非系统默认胶囊） ---- */
 export const rBtn = 8;    /* 按钮外圆角 */
-export const btnH = 40;   /* 主/标准按钮高 */
+export const btnH = 40;   /* 主/标准按钮高（图标按钮容器同高） */
 export const btnSh = 32;  /* 小/文字式动作按钮高 */
 export const btnPadX = 16;/* 按钮水平内边距 */
+export const iconFs = 22; /* 图标按钮内 SymbolGlyph 字号（容器 btnH；截图卡等语境特例除外） */
 
 /* ---- 文本输入框（统一外观，不再依赖系统默认高度/圆角/底色） ---- */
-export const inpH = 44;      /* 标准输入框高 */
+export const inpH = 40;      /* 标准输入框高（与 btnH 对齐，同排不错位） */
 export const inpBg = cBlock; /* 输入框底，浅灰块 */
 export const inpRadius = 8;  /* 输入框圆角 */
 export const inpPadX = 16;   /* 输入框左右内边距 */

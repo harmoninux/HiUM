@@ -19,8 +19,8 @@ import {
 import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
   cBg, cCard, cBorder, cChip, cSel, cSelBg,
-  tPage, tCard, tLabel, tBody, tSub, tSubL,
-  sp1, sp2, sp3, sp4, sp5, rCard, rElem, rBadge, bw, btnH, btnPadX,
+  tPage, tCard, tLabel, tBody, tSub, iconFs,
+  sp1, sp2, sp3, sp4, sp5, sp6, rCard, rElem, rBadge, bw, btnH, btnPadX,
 } from '../lib/uiTokens';
 
 /* 磁盘信息（侧栏显示虚拟大小；diskInfo 返回 qemu-img info JSON 串） */
@@ -245,18 +245,19 @@ export struct VmList {
   /* 空态：无 VM 时居中提示 + 两个创建入口 */
   @Builder
   emptySide() {
-    Column({ space: sp3 }) {
+    Column({ space: sp4 }) {
       Text('🖥').fontSize(44)
       Text('还没有虚拟机')
-        .fontSize(tLabel)
+        .fontSize(tCard)
+        .fontWeight(FontWeight.Medium)
         .fontColor(cSub)
       Text('点下方按钮创建你的第一台虚拟机')
         .fontSize(tSub)
         .fontColor(cWeak)
-      Row({ space: sp2 }) {
+      Row({ space: sp3 }) {
         Button() {
           SymbolGlyph($r('sys.symbol.plus'))
-            .fontSize(20)
+            .fontSize(iconFs)
             .fontColor([cPrimary])
         }
         .focusable(false)
@@ -273,11 +274,11 @@ export struct VmList {
   /* 侧栏紧凑行：名称(运行/缺媒体徽标) + 规格行（点行进详情，长按出菜单） */
   @Builder
   sideRow(p: VmProfile) {
-    Row({ space: sp2 }) {
+    Row({ space: sp3 }) {
       Column({ space: sp1 }) {
         Row({ space: sp1 }) {
           Text(p.name)
-            .fontSize(tSubL)
+            .fontSize(tCard)
             .fontWeight(FontWeight.Medium)
             .fontColor(cText)
             .maxLines(1)
@@ -289,7 +290,7 @@ export struct VmList {
               .fontColor(cRunning)
               .backgroundColor(cChip)
               .borderRadius(rBadge)
-              .padding({ left: sp1, right: sp1 })
+              .padding({ left: sp2, right: sp2 })
           }
           if (this.mediaIssue(p).length > 0) {
             Text('文件缺失')
@@ -297,7 +298,7 @@ export struct VmList {
               .fontColor(cWarn)
               .backgroundColor(cChip)
               .borderRadius(rBadge)
-              .padding({ left: sp1, right: sp1 })
+              .padding({ left: sp2, right: sp2 })
           }
         }
         .width('100%')
@@ -314,7 +315,7 @@ export struct VmList {
 
     }
     .width('100%')
-    .padding(sp3)
+    .padding(sp4)
     .backgroundColor(this.selectedId === p.id ? cSelBg : cCard)
     .border({ width: bw, color: this.selectedId === p.id ? cSel : cBorder })
     .borderRadius(rCard)
@@ -329,7 +330,7 @@ export struct VmList {
         Text('虚拟机').fontSize(tPage).fontWeight(FontWeight.Bold).layoutWeight(1)
         Button() {
           SymbolGlyph($r('sys.symbol.plus'))
-            .fontSize(20)
+            .fontSize(iconFs)
             .fontColor([cPrimary])
         }
         .focusable(false)
@@ -338,14 +339,14 @@ export struct VmList {
         .bindMenu(this.newVmMenu)
       }
       .width('100%')
-      .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
+      .padding({ left: sp5, right: sp5, top: sp4, bottom: sp4 })
 
-      Row({ space: sp2 }) {
+      Row({ space: sp3 }) {
         Text(`● ${this.runningCount()} 运行中`).fontSize(tSub).fontColor(cRunning)
         Text(`${this.profiles.length - this.runningCount()} 已停止`).fontSize(tSub).fontColor(cSub)
       }
       .width('100%')
-      .padding({ left: sp4, right: sp4, top: sp1, bottom: sp2 })
+      .padding({ left: sp5, right: sp5, top: sp1, bottom: sp3 })
 
       if (!this.firmwareReady) {
         /* 构建期产物缺失的自检提示（正常打包必然存在；出现即说明包不完整，
@@ -353,7 +354,7 @@ export struct VmList {
         Text('应用资源缺失，请重新安装应用')
           .fontSize(tSub)
           .fontColor(cDanger)
-          .padding(sp4)
+          .padding(sp5)
       }
 
       if (this.profiles.length === 0) {
@@ -370,7 +371,7 @@ export struct VmList {
            * key 后 vmListVersion 一变即全量重建行，任何字段改动都不会漏显示 */
         }
         .layoutWeight(1)
-        .padding({ left: sp3, right: sp3, bottom: sp2 })
+        .padding({ left: sp4, right: sp4, bottom: sp3 })
       }
     }
     .width('100%')

@@ -17,7 +17,7 @@ import {
   cPrimary, cDanger, cRunning, cText, cSub, cWeak,
   cCard, cBlock, cBorder,
   tCard, tLabel, tBody, tSub,
-  sp1, sp2, sp3, sp5, sp8, rElem, rBtn, btnH, btnSh, btnPadX,
+  sp1, sp3, sp4, sp6, sp2, rElem, rBtn, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 import { Chip, SecHead, Snackbar } from '../lib/uiWidgets';
@@ -538,10 +538,10 @@ export struct VmStorage {
   secSystemDisk() {
     SecHead({ label: '系统盘' })
     if (!this.diskPath) {
-      Row({ space: sp2 }) {
+      Row({ space: sp3 }) {
         Text('系统盘缺失').fontSize(tSub).fontColor(cWeak).layoutWeight(1).padding({ top: sp1, bottom: sp1 })
         Button('重建系统盘').focusable(false).fontSize(tBody)
-          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent).fontColor(cDanger)
           .onClick(() => this.confirmRebuild())
       }.width('100%')
@@ -558,27 +558,27 @@ export struct VmStorage {
           Row().width((Math.min(100, (this.diskActualGB / Math.max(0.1, this.diskVirtualGB)) * 100)).toString() + '%')
             .height(6).backgroundColor(cPrimary).borderRadius(rElem)
         }.width('100%').margin({ top: sp1, bottom: sp1 })
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           Button('扩容').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cSub)
             .onClick(() => {
               this.newGBText = this.diskVirtualGB > 0 ? String(Math.ceil(this.diskVirtualGB)) : '';
               this.expandMode = !this.expandMode;
             })
           Button('重建系统盘').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.confirmRebuild())
           if (this.canSnapshot()) {
             Button('创建快照').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cPrimary)
               .onClick(() => this.snapCreateMode = !this.snapCreateMode)
           }
         }
         if (this.snapCreateMode) {
-          Row({ space: sp2 }) {
+          Row({ space: sp3 }) {
             TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tBody)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
               .onChange((v: string) => this.snapNameText = v)
@@ -587,13 +587,13 @@ export struct VmStorage {
               .backgroundColor(cPrimary).fontColor(Color.White)
               .onClick(() => this.doSnapshotCreate())
             Button('取消').focusable(false).fontSize(tSub)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cSub)
               .onClick(() => this.snapCreateMode = false)
-          }.margin({ top: sp2 })
+          }.margin({ top: sp3 })
         }
         if (this.expandMode) {
-          Row({ space: sp2 }) {
+          Row({ space: sp3 }) {
             Text('新大小(GB)').fontSize(tSub).fontColor(cSub)
             TextInput({ text: this.newGBText }).type(InputType.Number).layoutWeight(1).fontSize(tBody)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
@@ -603,12 +603,12 @@ export struct VmStorage {
               .backgroundColor(cPrimary).fontColor(Color.White)
               .onClick(() => this.doExpand())
             Button('取消').focusable(false).fontSize(tSub)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cSub)
               .onClick(() => this.expandMode = false)
-          }.margin({ top: sp2 })
+          }.margin({ top: sp3 })
         }
-      }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp2 })
+      }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp3 })
     }
   }
 
@@ -617,10 +617,10 @@ export struct VmStorage {
   @Builder
   secSecondDisk() {
     SecHead({ label: '数据盘' })
-    Column({ space: sp2 }) {
+    Column({ space: sp3 }) {
       /* 逐行：名字 + 只读 Toggle + 扩容 + 移除 */
       ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           /* 文件名是应用生成的内部 id 命名，对用户无操作意义，显示序号即可 */
           Text(`数据盘${idx + 1}`)
             .fontSize(tSub).fontColor(cSub).layoutWeight(1).maxLines(1)
@@ -629,7 +629,7 @@ export struct VmStorage {
           Toggle({ type: ToggleType.Switch, isOn: d.readonly })
             .onChange((v: boolean) => this.doSecondReadonly(idx, v))
           Button('扩容').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .enabled(this.canSecondOp())
             .backgroundColor(Color.Transparent).fontColor(cSub)
             .onClick(() => {
@@ -638,7 +638,7 @@ export struct VmStorage {
               this.secondExpandIdx = idx;
             })
           Button('删除').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .enabled(this.canSecondOp())
             .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.doSecondRemove(idx))
@@ -652,10 +652,10 @@ export struct VmStorage {
 
       /* 增盘/扩容表单（secondMode 切换；newGBText 复用两者） */
       if (!this.secondMode) {
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           Blank()
           Button(this.canSecondOp() ? '添加数据盘' : '虚拟机运行中').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .enabled(this.canSecondOp())
             .backgroundColor(Color.Transparent).fontColor(cPrimary)
             .onClick(() => { this.secondMode = true; this.secondExpandIdx = -1 })
@@ -663,7 +663,7 @@ export struct VmStorage {
       } else {
         if (this.secondExpandIdx >= 0) {
           /* —— 扩容模式：目标=第 secondExpandIdx 张 —— */
-          Row({ space: sp2 }) {
+          Row({ space: sp3 }) {
             Text('新大小(GB)').fontSize(tSub).fontColor(cSub)
             TextInput({ text: this.secondNewGBText }).type(InputType.Number).layoutWeight(1).fontSize(tBody)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
@@ -673,13 +673,13 @@ export struct VmStorage {
               .backgroundColor(cPrimary).fontColor(Color.White)
               .onClick(() => this.doSecondExpand(this.secondExpandIdx))
             Button('取消').focusable(false).fontSize(tSub)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cSub)
               .onClick(() => { this.secondMode = false; this.secondNewGBText = ''; this.secondExpandIdx = -1; })
           }.width('100%')
         } else {
           /* —— 添加模式：导入镜像 or 新建空白 —— */
-          Row({ space: sp2 }) {
+          Row({ space: sp3 }) {
             Text('导入镜像').fontSize(tBody)
               .fontColor(this.secondSrc.length > 0 ? cPrimary : cSub)
               .onClick(() => this.pickSecondSrc())
@@ -688,12 +688,12 @@ export struct VmStorage {
                 .fontSize(tSub).fontColor(cSub).layoutWeight(1).maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
               Button('清除').focusable(false).fontSize(tSub)
-                .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                 .backgroundColor(Color.Transparent).fontColor(cDanger)
                 .onClick(() => { this.secondSrc = ''; this.secondSrcMeta = ''; })
             }
           }.width('100%')
-          Row({ space: sp2 }) {
+          Row({ space: sp3 }) {
             Text('新大小(GB)').fontSize(tSub).fontColor(cSub)
             TextInput({ text: this.secondNewGBText, placeholder: '新建时填写（1-512）' })
               .layoutWeight(1).fontSize(tBody)
@@ -704,7 +704,7 @@ export struct VmStorage {
               .backgroundColor(cPrimary).fontColor(Color.White)
               .onClick(() => this.doSecondAdd())
             Button('取消').focusable(false).fontSize(tSub)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cSub)
               .onClick(() => { this.secondMode = false; this.secondSrc = ''; this.secondSrcMeta = ''; })
           }.width('100%')
@@ -713,7 +713,7 @@ export struct VmStorage {
             Toggle({ type: ToggleType.Switch, isOn: this.secondNewReadonly })
               .onChange((v: boolean) => this.secondNewReadonly = v)
           }.width('100%')
-          Row({ space: sp2 }) {
+          Row({ space: sp3 }) {
             Chip({ label: '动态分配', active: this.secondNewAlloc === 'dynamic', onTap: () => { this.secondNewAlloc = 'dynamic'; } })
             Chip({ label: '预分配', active: this.secondNewAlloc === 'fixed', onTap: () => { this.secondNewAlloc = 'fixed'; } })
             Text(this.secondNewAlloc === 'fixed' ? '创建即占满，写入更快' : '按需占用，用到多少占多少')
@@ -733,15 +733,15 @@ export struct VmStorage {
     Column() {
       if (this.cdromPaths.length > 0) {
         ForEach(this.cdromPaths, (p: string, idx: number) => {
-          Row({ space: sp2 }) {
+          Row({ space: sp3 }) {
             Text(idx === 0 ? `${this.baseName(p)}（启动盘）` : this.baseName(p))
               .fontSize(tSub).fontColor(idx === 0 ? cPrimary : cSub).layoutWeight(1)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             Button('移除').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cDanger)
               .onClick(() => this.removeIso(idx))
-          }.width('100%').padding({ top: sp1, bottom: sp2 })
+          }.width('100%').padding({ top: sp1, bottom: sp3 })
         }, (p: string, idx: number) => `${idx}:${p}`)
       } else {
         Column({ space: sp1 }) {
@@ -751,22 +751,22 @@ export struct VmStorage {
             .fontSize(tSub).fontColor(cWeak)
         }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp1 })
       }
-      Row({ space: sp2 }) {
+      Row({ space: sp3 }) {
         Button('选择文件').focusable(false).fontSize(tBody)
-          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent).fontColor(cPrimary)
           .border({ width: 1, color: cBorder, style: BorderStyle.Dashed })
           .onClick(() => this.pickLocalIso())
         Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
           .focusable(false).fontSize(tBody)
-          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .enabled(!this.ensureIsoLoading)
           .backgroundColor(Color.Transparent).fontColor(cPrimary)
           .onClick(() => this.pickBuiltinIso())
-      }.width('100%').padding({ top: sp1, bottom: sp2 })
+      }.width('100%').padding({ top: sp1, bottom: sp3 })
       if (this.cdromPaths.length > 0) {
         Text('从光盘启动时，使用第一张 ISO 引导')
-          .fontSize(tSub).fontColor(cWeak).width('100%').padding({ bottom: sp2 })
+          .fontSize(tSub).fontColor(cWeak).width('100%').padding({ bottom: sp3 })
       }
     }.alignItems(HorizontalAlign.Start).width('100%')
   }
@@ -775,7 +775,7 @@ export struct VmStorage {
     Stack() {
       Column() {
         /* 顶部行：存储 ·VM名 / arch + 关闭 */
-        Row({ space: sp2 }) {
+        Row({ space: sp3 }) {
           Column({ space: 1 }) {
             Text('存储 · ' + this.name).fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cText)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -785,7 +785,7 @@ export struct VmStorage {
             .onClick(() => { if (this.onClose) { this.onClose(); } })
         }
         .width('100%')
-        .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
+        .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
         .alignItems(VerticalAlign.Center)
 
         Scroll() {
@@ -795,7 +795,7 @@ export struct VmStorage {
             this.secCdrom()
           }
           .width('100%')
-          .padding({ left: sp3, right: sp3, bottom: sp5 })
+          .padding({ left: sp4, right: sp4, bottom: sp6 })
         }
         .layoutWeight(1)
         .align(Alignment.Top)

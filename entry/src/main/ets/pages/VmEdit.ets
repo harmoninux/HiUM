@@ -9,7 +9,7 @@ import { isoReadable } from '../lib/fsutil';
 import { pickIsoPath } from '../lib/isoPick';
 import { Chip, SecHead, FoldHead } from '../lib/uiWidgets';
 import { PortForwardEditor } from '../lib/PortForwardEditor';
-import { cPrimary, cDanger, cSub, cWeak, cBg, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp5, sp8, spCard } from '../lib/uiTokens';
+import { cPrimary, cDanger, cSub, cWeak, cBg, tPage, tLabel, tBody, tSub, tMono, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp4, sp6 } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -364,7 +364,7 @@ export struct VmEdit {
     Column() {
       Row() {
         Button('取消').focusable(false).fontSize(tBody)
-          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent)
           .fontColor(cPrimary)
           .onClick(() => this.requestCancel())
@@ -372,18 +372,18 @@ export struct VmEdit {
         Text('虚拟机配置').fontSize(tPage).fontWeight(FontWeight.Medium)
         Blank()
         Button('保存').focusable(false).fontSize(tBody)
-          .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+          .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent)
           .fontColor(cPrimary)
           .onClick(() => this.save())
       }
       .width('100%')
-      .padding({ left: sp8, right: sp8, top: sp8, bottom: sp8 })
+      .padding({ left: sp2, right: sp2, top: sp2, bottom: sp2 })
 
       /* 校验拦截提示（内联红字，常驻页头下方） */
       if (this.saveErrorMsg.length > 0) {
         Text(this.saveErrorMsg).fontSize(tSub).fontColor(cDanger).width('100%')
-          .padding({ left: sp3, right: sp3, bottom: sp2 })
+          .padding({ left: sp4, right: sp4, bottom: sp3 })
       }
 
       Scroll() {
@@ -410,13 +410,13 @@ export struct VmEdit {
               .textAlign(TextAlign.Start)
           }.padding({ top: sp1, bottom: sp1 })
 
-          Row({ space: 4 }) {
+          Row({ space: sp1 }) {
             Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
               .width(120)
             Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
               .onChange((v: number) => this.cpus = v)
               .layoutWeight(1)
-          }.alignItems(VerticalAlign.Center).padding({ top: spCard, bottom: spCard })
+          }.alignItems(VerticalAlign.Center).padding({ top: sp3, bottom: sp3 })
 
           Row() {
             Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
@@ -424,13 +424,13 @@ export struct VmEdit {
             Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
               .onChange((v: number) => this.memoryMB = v)
               .layoutWeight(1)
-          }.alignItems(VerticalAlign.Center).padding({ top: spCard, bottom: spCard })
+          }.alignItems(VerticalAlign.Center).padding({ top: sp3, bottom: sp3 })
 
           /* v4 显卡：x86 板卡可换；virt/raspi 固定（说明行） */
-          Row({ space: sp2 }) {
+          Row({ space: sp3 }) {
             Text('显卡').fontSize(tLabel).width(72)
             if (this.isX86Board()) {
-              Row({ space: sp2 }) {
+              Row({ space: sp3 }) {
                 ForEach(['std', 'cirrus', 'vmware', 'virtio'], (g: string) => {
                   Chip({ label: g, active: this.vga === g, onTap: () => { this.vga = g as VgaType; } })
                 }, (g: string) => g)
@@ -470,7 +470,7 @@ export struct VmEdit {
               .alignItems(HorizontalAlign.Start)
               .layoutWeight(1)
               Button('存储管理').focusable(false).fontSize(tBody)
-                .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                 .backgroundColor(Color.Transparent).fontColor(cPrimary)
                 .onClick(() => {
                   const p = this.profile;
@@ -480,7 +480,7 @@ export struct VmEdit {
                   }
                 })
             }
-          }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
+          }.alignItems(HorizontalAlign.Start).padding({ top: sp3, bottom: sp3 })
 
           /* v5：系统盘只读 + 数据盘列表（创建/导入/移除/扩容在存储弹窗） */
           Row() {
@@ -493,7 +493,7 @@ export struct VmEdit {
           /* 磁盘接口（仅 x86 板卡有 IDE 南桥）：切换只影响 -drive if= 的挂载方式，
            * 盘内容不动——Windows VM 若误建为 virtio，切到 ide 即可被安装程序识别。 */
           if (this.isX86Board()) {
-            Row({ space: sp2 }) {
+            Row({ space: sp3 }) {
               Text('磁盘接口').fontSize(tLabel).layoutWeight(1)
               Chip({ label: 'virtio', active: this.diskIface === 'virtio', onTap: () => { this.diskIface = 'virtio'; } })
               Chip({ label: 'ide（Windows）', active: this.diskIface === 'ide', onTap: () => { this.diskIface = 'ide'; } })
@@ -510,7 +510,7 @@ export struct VmEdit {
               Text(this.extraDisks.length === 0 ? '未配置' : `${this.extraDisks.length} 张`)
                 .fontSize(tSub).fontColor(cSub).layoutWeight(1)
               Button('存储管理').focusable(false).fontSize(tBody)
-                .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                 .backgroundColor(Color.Transparent).fontColor(cPrimary)
                 .onClick(() => {
                   const p = this.profile;
@@ -521,7 +521,7 @@ export struct VmEdit {
                 })
             }
             ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
-              Row({ space: sp2 }) {
+              Row({ space: sp3 }) {
                 Text(`数据盘${idx + 1}`)
                   .fontSize(tSub).fontColor(cSub).layoutWeight(1).maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -536,20 +536,20 @@ export struct VmEdit {
               }.width('100%').padding({ top: sp1, bottom: sp1 })
             }, (d: VmDisk) => d.path)
             Text('快照仅含系统盘，数据盘不参与').fontSize(tSub).fontColor(cWeak).width('100%')
-          }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: spCard, bottom: spCard })
+          }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp3, bottom: sp3 })
 
           Column({ space: sp1 }) {
             Text('光盘 ISO').fontSize(tLabel)
             if (this.cdromPaths.length > 0) {
               ForEach(this.cdromPaths, (p: string, idx: number) => {
-                Row({ space: sp2 }) {
+                Row({ space: sp3 }) {
                   Text(idx === 0 ? `${this.baseName(p)}（启动盘）` : this.baseName(p))
                     .fontSize(tSub)
                     .fontColor(idx === 0 ? cPrimary : cSub)
                     .layoutWeight(1)
                     .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   Button('移除').focusable(false).fontSize(tBody)
-                    .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                    .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                     .backgroundColor(Color.Transparent).fontColor(cDanger)
                     .onClick(() => this.removeIso(idx))
                 }
@@ -558,18 +558,18 @@ export struct VmEdit {
             } else {
               Text('无').fontSize(tSub).fontColor(cSub)
             }
-            Row({ space: sp2 }) {
+            Row({ space: sp3 }) {
               Button('选择文件').focusable(false).fontSize(tBody)
-                .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                 .backgroundColor(Color.Transparent).fontColor(cPrimary)
                 .onClick(() => this.pickLocalIso())
               Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
                 .focusable(false).fontSize(tBody)
-                .height(btnSh).borderRadius(rBtn).padding({ left: sp2, right: sp2 })
+                .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                 .enabled(!this.ensureIsoLoading)
                 .onClick(() => this.pickBuiltinIso())
             }
-          }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: spCard, bottom: spCard })
+          }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp3, bottom: sp3 })
 
           Row() {
             Text(this.hasKernel() ? '从光盘启动（内核引导时无效）' : '从光盘启动')
@@ -589,7 +589,7 @@ export struct VmEdit {
                 .fontSize(tBody)
                 .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.kernelAppend = v)
-            }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: spCard, bottom: spCard })
+            }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp3, bottom: sp3 })
           }
 
           /* —— 网络 —— */
@@ -605,7 +605,7 @@ export struct VmEdit {
             Column({ space: 4 }) {
               Text('端口映射').fontSize(tLabel)
               PortForwardEditor({ text: this.$portForwards })
-            }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
+            }.alignItems(HorizontalAlign.Start).padding({ top: sp3, bottom: sp3 })
             Column({ space: 4 }) {
               Row() {
                 Text('共享目录').fontSize(tLabel).layoutWeight(1)
@@ -613,12 +613,12 @@ export struct VmEdit {
                   .onChange((v: boolean) => this.sharedFolder = v)
               }.padding({ left: 0, right: 0 })
               Text('开启后虚拟机可读写设备的 Download 目录（在虚拟机内是 /shared）').fontSize(tSub).fontColor(cWeak)
-            }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
+            }.alignItems(HorizontalAlign.Start).padding({ top: sp3, bottom: sp3 })
             /* 网卡型号（仅 x86 板卡可切）：rtl8139 是 XP/Win7 唯一双 in-box 驱动的
              * 网卡，性能弱于 virtio；Linux 用 virtio。 */
             if (this.isX86Board()) {
               Column({ space: 4 }) {
-                Row({ space: sp2 }) {
+                Row({ space: sp3 }) {
                   Text('网卡型号').fontSize(tLabel).layoutWeight(1)
                   Chip({ label: 'virtio', active: this.netModel === 'virtio', onTap: () => { this.netModel = 'virtio'; } })
                   Chip({ label: 'rtl8139', active: this.netModel === 'rtl8139', onTap: () => { this.netModel = 'rtl8139'; } })
@@ -627,7 +627,7 @@ export struct VmEdit {
                   ? 'Windows 默认'
                   : 'Linux 默认；Windows 需装 virtio-win 驱动')
                   .fontSize(tSub).fontColor(cWeak).width('100%')
-              }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
+              }.alignItems(HorizontalAlign.Start).padding({ top: sp3, bottom: sp3 })
             }
           }
 
@@ -684,14 +684,14 @@ export struct VmEdit {
                 .fontSize(tBody)
                 .height(108).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                 .onChange((v: string) => this.extraArgs = v)
-            }.alignItems(HorizontalAlign.Start).padding({ top: spCard, bottom: spCard })
+            }.alignItems(HorizontalAlign.Start).padding({ top: sp3, bottom: sp3 })
           }
         }
         .width('100%')
         /* Column 默认水平居中：占满宽度的行看不出来，自适应宽度的说明文字
          * （追加到 -cpu 之后/gdb 用法/rtc 说明）会悬在中间，表单区一律左对齐 */
         .alignItems(HorizontalAlign.Start)
-        .padding({ left: sp3, right: sp3, bottom: sp5 })
+        .padding({ left: sp4, right: sp4, bottom: sp6 })
       }
       .layoutWeight(1)
       .align(Alignment.Top)
