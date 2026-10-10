@@ -90,17 +90,27 @@ export struct VmManage {
   @Consume('storageParam') storageParam: VmProfile | null; /* 当前打开的存储弹窗所属 VM */
   /* 截图卡片周期刷新：详情页不会被动感知 thumb 文件变化（inactive 期间收不到
    * vmListVersion，窗口切回也不触发 onShown——那只覆盖路由返回），运行期间由
-   * 本页自己的低频定时器主动采。aboutToDisappear 即停，不给后台留写入。 */
+   * 本页自己的定时器主动采。节奏自适应：无图（首帧未到）5s 快试——抓空不写盘
+   * 零成本，让首次出画 ≤5s 就上屏；有图后 30s 保更新（单张 ~3MB，控写盘量）。
+   * aboutToDisappear 即停，不给后台留写入。 */
   private thumbTimer: number = -1;
+  private lastThumbAt: number = 0;
 
   aboutToAppear(): void {
     this.refreshProfile();
-    /* 30s：抓帧上限 1024 后单张 ~3MB，周期再短写盘偏凶 */
     this.thumbTimer = setInterval(() => {
-      if (this.isRunningNow()) {
+      if (!this.isRunningNow()) {
+        return;
+      }
+      if (this.thumb === null) {
+        this.captureNow();
+        return;
+      }
+      if (Date.now() - this.lastThumbAt >= 30000) {
+        this.lastThumbAt = Date.now();
         this.captureNow();
       }
-    }, 30000);
+    }, 5000);
   }
 
   aboutToDisappear(): void {
@@ -251,6 +261,7 @@ export struct VmManage {
       if (shot === null || shot.width <= 0 || shot.height <= 0) {
         return;
       }
+      this.lastThumbAt = Date.now();
       this.loadThumb();
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'captureNow: %{public}s', JSON.stringify(e));

@@ -352,6 +352,7 @@ struct VmConsole {
      * vmListVersion 感知刷新，故 bump */
     this.captureThumb(true);
     this.stopReadyWatch();
+    this.stopThumbRetry();
     this.stopGeoWatch();
     napi.setQmpEventCallback(this.vmId, null);
     this.closeSerial();
@@ -596,6 +597,7 @@ struct VmConsole {
    * 的代价是让用户以为好 VM 坏了。 */
   private beginReadyWatch(): void {
     this.stopReadyWatch();
+    this.stopThumbRetry(); /* 新一轮启动，上一轮没抓到首帧的试抓作废 */
     this.readySeen = false;
     this.qmpAlive = false; /* 重新等待就绪，就绪后翻转（电源按钮随之启用） */
     this.paused = false;   /* 新一轮启动，暂停态归零（STOP 事件会重新置位） */
@@ -611,10 +613,11 @@ struct VmConsole {
         /* 起来了就把熔断标记销掉（用户已修好配置） */
         new VmStore(this.filesDir).clearBootFail(this.vmId);
         this.bootFailReason = '';
-        /* 拉一次光驱状态（介质菜单数据源）；首帧落定后留一张详情页缩略图。
-         * bump=true：抓帧晚于启动数秒，已打开的详情页不会自己知道文件变了 */
+        /* 拉一次光驱状态（介质菜单数据源）；起周期试抓——首帧「落定」不能等：
+         * 黑帧不落盘（见 qemu_child kScreenshot），慢引导 guest 的首张有效画面
+         * 可能晚就绪数十秒，3s 单次抓大概率扑空，之后详情页只能靠自己的慢轮询 */
         this.refreshCdSlots();
-        setTimeout(() => this.captureThumb(true), 3000);
+        this.beginThumbRetry();
         return;
       }
       if (!napi.vmRunning(this.vmId)) {
@@ -747,6 +750,7 @@ struct VmConsole {
         this.captureThumb(true);
         this.paused = false;
         this.stopReadyWatch();
+        this.stopThumbRetry();
         this.qmpAlive = false;
         this.vmListVersion++;
         this.closeSerial(); /* 串口随 VM 死亡断线，回画面视图 */
@@ -821,8 +825,27 @@ struct VmConsole {
       if (bump) {
         this.vmListVersion++;
       }
+      this.stopThumbRetry(); /* 首帧已到手，周期试抓使命完成 */
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'captureThumb: %{public}s', JSON.stringify(e));
+    }
+  }
+
+  /* ================= 首帧周期试抓 ================= */
+
+  private thumbRetryTimer: number = -1;
+
+  /* 就绪后每 3s 试抓一次直到首张有效画面落盘（黑帧/未出帧不写盘，空转零成本）。
+   * 让详情页在 guest 真正出画的 ≤3s 内就能拿到首图，而不是等它自己的慢轮询 */
+  private beginThumbRetry(): void {
+    this.stopThumbRetry();
+    this.thumbRetryTimer = setInterval(() => this.captureThumb(true), 3000);
+  }
+
+  private stopThumbRetry(): void {
+    if (this.thumbRetryTimer >= 0) {
+      clearInterval(this.thumbRetryTimer);
+      this.thumbRetryTimer = -1;
     }
   }
 
