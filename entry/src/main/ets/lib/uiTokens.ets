@@ -19,13 +19,16 @@ export const cChip     = $r('app.color.c_chip'); /* chips 底 */
 export const cSel      = $r('app.color.c_sel'); /* 选中描边/浅底 */
 export const cSelBg    = $r('app.color.c_sel_bg'); /* 选中浅底 */
 
-/* ---- 字号 (size / weight)：4 档等差，正文对齐系统默认 16fp ---- */
-export const tPage  = 20; /* 页面/窗口标题，600~700 */
+/* ---- 字号 (size / weight)：四档 20/16/14/12，主次分明的关键是「条目与说明分档」----
+ * 层级混用审计结论（2026-10）：信息行曾在 tLabel(16)/tSub(14) 间随机取用、
+ * 行内按钮曾在 tBody/tSub 间两档并存，落地后按下面角色对号入座，禁止借用。 */
+export const tPage  = 20; /* 页面/窗口标题，500（不加大字重，层级靠档位差） */
 export const tCard  = 16; /* 卡片/行标题，500~600 */
-export const tLabel = 16; /* 设置行标签 400 */
-export const tBody  = 16; /* 正文/按钮 400 */
-export const tSub   = 14; /* 次级说明/副标题/徽标 400 */
-export const tMono  = 13; /* mono 小字：状态/指纹/日期/步骤圆点 */
+export const tLabel = 16; /* 表单行标签（VmEdit 左列等） 400 */
+export const tBody  = 16; /* 正文/一切按钮/输入框文字 400 */
+export const tItem  = 14; /* 条目档：区块内信息行主文本（快照名/当前状态/已启用/盘信息行） */
+export const tSub   = 12; /* 元数据档：说明/规格/日期/chips/徽标 400（对齐系统 caption） */
+export const tMono  = 12; /* mono 小字：状态/指纹/步骤圆点 */
 
 /* ---- 间距：4 的倍数纯档，按档取用不许自造数值 ---- */
 export const sp1 = 4;

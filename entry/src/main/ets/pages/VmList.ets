@@ -327,7 +327,7 @@ export struct VmList {
     Stack() {
     Column() {
       Row() {
-        Text('虚拟机').fontSize(tPage).fontWeight(FontWeight.Bold).layoutWeight(1)
+        Text('虚拟机').fontSize(tPage).fontWeight(FontWeight.Medium).layoutWeight(1)
         Button() {
           SymbolGlyph($r('sys.symbol.plus'))
             .fontSize(iconFs)

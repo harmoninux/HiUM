@@ -20,7 +20,7 @@ import { Snackbar } from '../lib/uiWidgets';
 import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
   cCard, cBlock, cChip, cBorder, cConsoleScrim,
-  tCard, tLabel, tBody, tSub, tMono, iconFs,
+  tCard, tLabel, tBody, tItem, tSub, tMono, iconFs,
   sp1, sp2, sp3, sp4, sp5, sp6, rCard, rElem, rBadge, rBtn, btnH, btnSh, btnPadX, bw,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
@@ -734,11 +734,11 @@ export struct VmManage {
           TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tBody)
             .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
             .onChange((v: string) => this.snapNameText = v)
-          Button('创建').focusable(false).fontSize(tSub)
+          Button('创建').focusable(false).fontSize(tBody)
             .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
             .backgroundColor(cPrimary).fontColor(Color.White)
             .onClick(() => this.doSnapshotCreate())
-          Button('取消').focusable(false).fontSize(tSub)
+          Button('取消').focusable(false).fontSize(tBody)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cSub)
             .onClick(() => { this.snapCreateMode = false; this.snapNameText = ''; })
@@ -752,7 +752,7 @@ export struct VmManage {
             Column().width(9).height(9).borderRadius(5).backgroundColor(cCard)
               .border({ width: 2, color: cPrimary }).margin({ right: sp3 })
             Column({ space: 1 }) {
-              Text(s.name).fontSize(tLabel)
+              Text(s.name).fontSize(tItem)
               Text(this.dateStr(s.dateSec)).fontSize(tMono).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).layoutWeight(1)
             Button('恢复').focusable(false).fontSize(tBody)
@@ -768,7 +768,7 @@ export struct VmManage {
         Row() {
           Column().width(9).height(9).borderRadius(5).backgroundColor(cPrimary).margin({ right: sp3 })
           /* 只作时间线终点锚点（不是可操作的快照），不放时间戳避免误读为快照时间 */
-          Text('当前状态').fontSize(tLabel)
+          Text('当前状态').fontSize(tItem)
         }.width('100%').padding({ top: sp1, bottom: sp1 })
       }.width('100%').padding({ left: sp3 })
     }.alignItems(HorizontalAlign.Start)
@@ -779,7 +779,7 @@ export struct VmManage {
     this.secHead('网络')
     Column() {
       Column({ space: 1 }) {
-        Text(this.netEnabled ? '已启用' : '已关闭').fontSize(tLabel)
+        Text(this.netEnabled ? '已启用' : '已关闭').fontSize(tItem)
         Text(`端口转发 ${(this.profile && this.profile.net.portForwards.length > 0) ? this.profile.net.portForwards : '无'} · 9p 共享${(this.profile && this.profile.net.sharedFolder) ? '开' : '关'}`)
           .fontSize(tSub).fontColor(cSub)
       }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp3 })
