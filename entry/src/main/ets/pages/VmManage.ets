@@ -268,15 +268,18 @@ export struct VmManage {
     }
   }
 
-  /* 抓帧像素 → 显示 vp（物理 1:1，见 thumbPxW 注释） */
+  /* 显示宽度固定 256vp，高度按帧比例换算：帧像素跟 guest 分辨率/缓存新旧走
+   * （512 旧帧、800/1024/1280 宽 guest 各不同），直接 px/density 会让卡片忽大
+   * 忽小。256 对 1024 物理源是 0.875× 轻下采样（清晰），观感比 1:1 的 293vp 收敛 */
   private thumbVpW(): number {
-    const d = display.getDefaultDisplaySync().densityPixels;
-    return d > 0 ? this.thumbPxW / d : this.thumbPxW;
+    return 256;
   }
 
   private thumbVpH(): number {
-    const d = display.getDefaultDisplaySync().densityPixels;
-    return d > 0 ? this.thumbPxH / d : this.thumbPxH;
+    if (this.thumbPxW <= 0 || this.thumbPxH <= 0) {
+      return 144;
+    }
+    return 256 * this.thumbPxH / this.thumbPxW;
   }
 
   /* 编辑页/存储页保存后 vmListVersion +1：重新读取 profile */
@@ -954,8 +957,8 @@ export struct VmManage {
                 Text(this.isRunningNow() ? '画面加载中…' : '启动后这里显示画面截图，点此进入控制台')
                   .fontSize(tSub).fontColor(cWeak)
               }
-              .width(292)
-              .height(164)
+              .width(256)
+              .height(144)
               .backgroundColor(cCard)
               .border({ width: bw, color: cBorder, style: BorderStyle.Dashed })
               .borderRadius(rCard)
