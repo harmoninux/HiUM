@@ -723,15 +723,6 @@ export struct VmManage {
     Column() {
       if (!this.canSnapshot()) {
         Text(this.snapStatus()).fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp3 })
-      } else if (!this.snapCreateMode) {
-        Row() {
-          /* 区块级操作入口与「存储管理」同位：右端（Blank 先占位把按钮推右） */
-          Blank()
-          Button('创建快照').focusable(false).fontSize(tBody)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
-            .backgroundColor(Color.Transparent).fontColor(cPrimary)
-            .onClick(() => { this.snapCreateMode = true; this.snapNameText = ''; })
-        }.width('100%').padding({ top: sp1, bottom: sp3 })
       }
       if (this.snapCreateMode && this.canSnapshot()) {
         Row({ space: sp3 }) {
@@ -772,7 +763,14 @@ export struct VmManage {
         Row() {
           Column().width(9).height(9).borderRadius(5).backgroundColor(cPrimary).margin({ right: sp3 })
           /* 只作时间线终点锚点（不是可操作的快照），不放时间戳避免误读为快照时间 */
-          Text('当前状态').fontSize(tItem)
+          Text('当前状态').fontSize(tItem).layoutWeight(1)
+          /* 区块级操作入口与历史快照行的 恢复/删除 同位：行右端 */
+          if (this.canSnapshot() && !this.snapCreateMode) {
+            Button('创建快照').focusable(false).fontSize(tBody)
+              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+              .backgroundColor(Color.Transparent).fontColor(cPrimary)
+              .onClick(() => { this.snapCreateMode = true; this.snapNameText = ''; })
+          }
         }.width('100%').padding({ top: sp1, bottom: sp1 })
       }.width('100%').padding({ left: sp3 })
     }.alignItems(HorizontalAlign.Start)

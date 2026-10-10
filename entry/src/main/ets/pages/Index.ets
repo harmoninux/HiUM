@@ -79,10 +79,6 @@ struct Index {
     this.vmListVersion++;
   }
 
-  private closeStorage(): void {
-    this.showStorage = false;
-  }
-
   @Builder
   wizardCover() {
     VmWizard({ onClose: () => this.closeWizard() })
@@ -165,25 +161,12 @@ struct Index {
     this.editParam = null;
   }
 
-  /* 存储弹窗：与工坊同款的全窗口遮罩 + 居中卡片，铺满主界面（侧栏+内容一起压暗）。 */
+  /* 存储弹窗：bindSheet 半模态承载（首个原生化试点，替代自绘遮罩卡）——系统蒙层/
+   * 圆角/动效/关闭钮，点遮罩/下拉/back 均可关，onWillDisappear 复位开关。
+   * 绑在 Navigation（常驻上树）满足 sheet 宿主节点挂载要求。 */
   @Builder
-  storageOverlay() {
-    Stack() {
-      Column().width('100%').height('100%').backgroundColor(scrim)
-        .onClick(() => this.closeStorage())
-      Column() {
-        VmStorage({ profile: this.storageParam, onClose: () => this.closeStorage() })
-      }
-      .width('88%').constraintSize({ maxWidth: 640 })
-      .height(540)
-      .backgroundColor(cCard)
-      .border({ width: bw, color: cBorder })
-      .borderRadius(rCard)
-      .clip(true) /* 裁掉子组件(直角背景)超出圆角的部分 */
-      .onClick(() => { /* 吃掉卡片区点击，避免透传遮罩误关 */ })
-    }
-    .width('100%').height('100%')
-    .alignContent(Alignment.Center)
+  storageSheetBuilder() {
+    VmStorage({ profile: this.storageParam })
   }
 
   build() {
@@ -195,6 +178,15 @@ struct Index {
       .navBarWidth(300)
       .navDestination(this.pageMap)
       .hideTitleBar(true)
+      .bindSheet(this.showStorage, this.storageSheetBuilder(), {
+        title: { title: '存储', subtitle: this.storageParam ? this.storageParam.name : '' },
+        preferType: SheetType.CENTER,
+        height: 540,
+        width: 640,
+        onWillDisappear: () => {
+          this.showStorage = false;
+        },
+      })
 
       if (this.showWizard) {
         this.wizardOverlay()
@@ -204,9 +196,6 @@ struct Index {
       }
       if (this.showEdit) {
         this.editOverlay()
-      }
-      if (this.showStorage) {
-        this.storageOverlay()
       }
     }
     .width('100%')

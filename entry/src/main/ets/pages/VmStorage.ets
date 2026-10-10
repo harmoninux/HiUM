@@ -1,6 +1,6 @@
 // 单台虚拟机的「存储」弹窗（per-VM 虚拟盘管理）：系统盘 扩容/重建 + 光盘 ISO 引用。
 // 系统盘是这台 VM 自己的资产，维护操作只发生在 per-VM 弹窗；跨 VM 集中总览已弃用。
-// 由 VmManage（详情）顶部「存储」按钮以内容弹窗（bindContentCover）承载，onClose 关闭。
+// 由 Index 的 bindSheet 半模态承载（系统蒙层/圆角/动效/关闭链路），标题走 sheet title。
 // 快照依赖系统盘存在，但快照本身留在详情页（VmManage.secSnapshot），此处不做。
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
@@ -17,7 +17,7 @@ import {
   cPrimary, cDanger, cRunning, cText, cSub, cWeak,
   cCard, cBlock, cBorder,
   tCard, tLabel, tBody, tSub,
-  sp1, sp3, sp4, sp6, sp2, rElem, rBtn, btnH, btnSh, btnPadX,
+  sp1, sp3, sp4, sp5, sp6, sp2, rElem, rBtn, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 import { Chip, SecHead, Snackbar } from '../lib/uiWidgets';
@@ -33,8 +33,8 @@ const GB = 1024 * 1024 * 1024;
 
 @Component
 export struct VmStorage {
-  @Prop profile: VmProfile | null = null; /* 由 Index 全窗口弹窗传入（@Provide → @Prop） */
-  onClose: (() => void) | null = null; /* 关闭回调；宿主通过它把内容弹窗关掉 */
+  @Prop profile: VmProfile | null = null; /* 由 Index 半模态（bindSheet）传入（@Provide → @Prop） */
+  /* 标题/关闭由 sheet 系统提供（Index 侧 SheetOptions.title + showClose），本组件不再自绘卡头 */
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmListVersion') vmListVersion: number = 0;
 
@@ -653,7 +653,6 @@ export struct VmStorage {
       /* 增盘/扩容表单（secondMode 切换；newGBText 复用两者） */
       if (!this.secondMode) {
         Row({ space: sp3 }) {
-          Blank()
           Button(this.canSecondOp() ? '添加数据盘' : '虚拟机运行中').focusable(false).fontSize(tBody)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .enabled(this.canSecondOp())
@@ -774,20 +773,6 @@ export struct VmStorage {
   build() {
     Stack() {
       Column() {
-        /* 顶部行：存储 ·VM名 / arch + 关闭 */
-        Row({ space: sp3 }) {
-          Column({ space: 1 }) {
-            Text('存储 · ' + this.name).fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cText)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(this.arch).fontSize(tSub).fontColor(cSub)
-          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          Button('×').backgroundColor(Color.Transparent).fontColor(cWeak)
-            .onClick(() => { if (this.onClose) { this.onClose(); } })
-        }
-        .width('100%')
-        .padding({ left: sp4, right: sp4, top: sp3, bottom: sp3 })
-        .alignItems(VerticalAlign.Center)
-
         Scroll() {
           Column() {
             this.secSystemDisk()
@@ -795,7 +780,7 @@ export struct VmStorage {
             this.secCdrom()
           }
           .width('100%')
-          .padding({ left: sp4, right: sp4, bottom: sp6 })
+          .padding({ left: sp5, right: sp5, top: sp1, bottom: sp6 })
         }
         .layoutWeight(1)
         .align(Alignment.Top)
@@ -803,7 +788,6 @@ export struct VmStorage {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor(cCard)
 
       Snackbar({ msg: this.$snack })
     }
