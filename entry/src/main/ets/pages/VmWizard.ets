@@ -39,7 +39,10 @@ const DISK_SUFFIXES: string[] = ['.qcow2', '.img', '.raw'];
 
 @Component
 export struct VmWizard {
-  onClose: (() => void) | null = null; /* 模态关闭回调（宿主 Stack 置 false）；非响应式，够用 */
+  onClose: (() => void) | null = null; /* 模态关闭回调（宿主置 showWizard=false）；非响应式，够用 */
+  /* sheet 系统关闭（✕/遮罩/back）的拦截桥：Index.shouldDismiss 不直接放行，改为递增本值，
+   * 由 requestClose 决定是否真关（有已填内容先弹「放弃创建？」） */
+  @Prop @Watch('onCloseReqChanged') closeReq: number = 0;
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmDataDir') vmDataDir: string = '';
   @StorageLink('vmListVersion') vmListVersion: number = 0;
@@ -131,6 +134,12 @@ export struct VmWizard {
   }
 
   /* 关闭：有已填写内容时先确认，防误触丢向导 */
+  private onCloseReqChanged(): void {
+    if (this.closeReq > 0) {
+      this.requestClose();
+    }
+  }
+
   private requestClose(): void {
     if (!this.copying && this.formSig() !== this.baseline) {
       AlertDialog.show({
@@ -927,14 +936,6 @@ export struct VmWizard {
               .fontColor(this.step > 0 ? cPrimary : cWeak)
               .enabled(this.step > 0)
               .onClick(() => { if (this.step > 0) { this.step--; } })
-            Blank()
-            Text('创建虚拟机').fontSize(tPage).fontWeight(FontWeight.Medium)
-            Blank()
-            Button('关闭').focusable(false).fontSize(tBody)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
-              .backgroundColor(Color.Transparent)
-              .fontColor(cSub)
-              .onClick(() => this.requestClose())
           }
           .width('100%')
           .padding({ left: sp5, right: sp5, top: sp3, bottom: sp3 })

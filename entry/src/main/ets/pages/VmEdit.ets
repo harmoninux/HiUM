@@ -26,6 +26,9 @@ const GB = 1024 * 1024 * 1024;
 export struct VmEdit {
   @Prop profile: VmProfile | null = null; /* 由 Index 模态传入（@Prop 深拷贝，就地编辑） */
   onClose: (() => void) | null = null; /* 关闭回调；宿主（Index.closeEdit）通过它关掉弹窗 */
+  /* sheet 系统关闭（✕/遮罩/back）的拦截桥：Index.shouldDismiss 不直接放行，改为递增本值，
+   * 由 requestCancel 决定是否真关（有未保存改动先弹「放弃修改？」） */
+  @Prop @Watch('onCloseReqChanged') closeReq: number = 0;
   @Consume('showStorage') showStorage: boolean; /* 存储弹窗全窗口开关（存储 Tab 内打开，盖在本弹窗上） */
   @Consume('storageParam') storageParam: VmProfile | null;
   @StorageLink('vmDataDir') vmDataDir: string = '';
@@ -119,6 +122,12 @@ export struct VmEdit {
   }
 
   /* 取消：有未保存改动时先确认，防误触丢配置 */
+  private onCloseReqChanged(): void {
+    if (this.closeReq > 0) {
+      this.requestCancel();
+    }
+  }
+
   private requestCancel(): void {
     if (this.formSig() !== this.baseline) {
       AlertDialog.show({
@@ -392,22 +401,10 @@ export struct VmEdit {
 
   build() {
     Column() {
-      /* 卡头：VM 名 + ✕（与底部「取消」同走未保存确认） */
-      Row() {
-        Text('虚拟机配置 · ' + this.titleName())
-          .fontSize(tCard).fontWeight(FontWeight.Medium).layoutWeight(1)
-          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text('✕').fontSize(tBody).fontColor(cSub)
-          .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-          .onClick(() => this.requestCancel())
-      }
-      .width('100%')
-      .padding({ left: sp4, right: sp2, top: sp3, bottom: sp1 })
-
-      /* 校验拦截提示（内联红字，常驻卡头下方，任何 Tab 都看得见） */
+      /* 标题/关闭由 sheet 系统提供；校验拦截提示（内联红字）常驻内容顶部，任何 Tab 都看得见 */
       if (this.saveErrorMsg.length > 0) {
         Text(this.saveErrorMsg).fontSize(tSub).fontColor(cDanger).width('100%')
-          .padding({ left: sp4, right: sp4, bottom: sp2 })
+          .padding({ left: sp4, right: sp4, top: sp2, bottom: sp2 })
       }
 
       Row() {

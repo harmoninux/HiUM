@@ -258,14 +258,6 @@ export struct VmTemplate {
 
   build() {
     Column() {
-      Row() {
-        Blank()
-        Text('模板创建').fontSize(tPage).fontWeight(FontWeight.Medium)
-        Blank()
-      }
-      .width('100%')
-      .padding({ left: sp5, right: sp5, top: sp3, bottom: sp3 })
-
       Scroll() {
         Column({ space: sp3 }) {
           /* 模板卡片列表单选 */

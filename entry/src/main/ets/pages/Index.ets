@@ -24,6 +24,8 @@ struct Index {
   @Provide('storageParam') storageParam: VmProfile | null = null;
   @Provide('showEdit') showEdit: boolean = false;
   @Provide('editParam') editParam: VmProfile | null = null;
+  @State wizardCloseReq: number = 0; /* sheet 拦截桥（见下方 sheet 宿主注释） */
+  @State editCloseReq: number = 0;
   @StorageLink('vmListVersion') vmListVersion: number = 0;
   /* 详情页重新显示的信号。编辑页压栈期间 VmManage 处于 inactive —— 官方文档明确
    * 「非栈顶 NavDestination 不响应状态变量变化、不触发 @Watch 回调」，而 pop 回来
@@ -79,81 +81,24 @@ struct Index {
     this.vmListVersion++;
   }
 
+  /* —— 四个模态统一 bindSheet 半模态承载（原生化：系统蒙层/圆角/动效/关闭链路）——
+   * 宿主为 build Stack 内的常驻占位节点（sheet 要求宿主已挂载上树）。
+   * 向导/编辑有未保存内容确认：shouldDismiss 不直接放行，递增 closeReq 由组件内
+   * requestClose/requestCancel 走「放弃？」确认后经 onClose 真关；存储/模板无确认直接关。 */
+
   @Builder
-  wizardCover() {
-    VmWizard({ onClose: () => this.closeWizard() })
+  wizardSheetBuilder() {
+    VmWizard({ onClose: () => this.closeWizard(), closeReq: this.wizardCloseReq })
   }
 
-  /* 工坊弹窗：遮罩(压暗主界面) + 居中卡片。bindContentCover 自带遮罩在本 SDK 不渲染，
-   * 故用 ArkUI Stack 在底下铺一层半透明黑（与存储弹窗同款，保证两模态一致）。
-   * 点遮罩关闭；卡片自身吃掉点击、不穿透。 */
   @Builder
-  wizardOverlay() {
-    Stack() {
-      Column().width('100%').height('100%').backgroundColor(scrim)
-        .onClick(() => this.closeWizard())
-      Column() { this.wizardCover() }
-        .width('88%').constraintSize({ maxWidth: 640 })
-        .height(500)
-        .backgroundColor(cCard)
-        .border({ width: bw, color: cBorder })
-        .borderRadius(rCard)
-        .clip(true) /* 裁掉子组件(直角背景)超出圆角的部分 */
-        .onClick(() => { /* 吃掉卡片区点击，避免透传遮罩误关 */ })
-    }
-    .width('100%').height('100%')
-    .alignContent(Alignment.Center)
-  }
-
-  /* 模板创建弹窗：与工坊同款的全窗口遮罩 + 居中卡片（独立流程，见 docs/vm-template-creation.md）。 */
-  @Builder
-  templateCover() {
+  templateSheetBuilder() {
     VmTemplate({ onClose: () => this.closeTemplate() })
   }
 
   @Builder
-  templateOverlay() {
-    Stack() {
-      Column().width('100%').height('100%').backgroundColor(scrim)
-        .onClick(() => this.closeTemplate())
-      Column() { this.templateCover() }
-        .width('88%').constraintSize({ maxWidth: 640 })
-        .height(500)
-        .backgroundColor(cCard)
-        .border({ width: bw, color: cBorder })
-        .borderRadius(rCard)
-        .clip(true) /* 裁掉子组件(直角背景)超出圆角的部分 */
-        .onClick(() => { /* 吃掉卡片区点击，避免透传遮罩误关 */ })
-    }
-    .width('100%').height('100%')
-    .alignContent(Alignment.Center)
-  }
-
-  /* 编辑弹窗：与工坊/存储同款的全窗口遮罩 + 居中卡。编辑页从 Navigation 压栈迁来：
-   * 单页长表单四类字段混排、保存钮在页尾，弹窗 + 左侧 Tab 每类聚焦。
-   * 本 overlay 渲染在 storageOverlay 之前——编辑「存储」Tab 内可打开存储弹窗，
-   * 后渲染者在上层，存储弹窗盖住编辑弹窗。 */
-  @Builder
-  editCover() {
-    VmEdit({ profile: this.editParam, onClose: () => this.closeEdit() })
-  }
-
-  @Builder
-  editOverlay() {
-    Stack() {
-      Column().width('100%').height('100%').backgroundColor(scrim)
-        .onClick(() => this.closeEdit())
-      Column() { this.editCover() }
-        .width('88%').constraintSize({ maxWidth: 680 })
-        .height(540)
-        .backgroundColor(cCard)
-        .border({ width: bw, color: cBorder })
-        .borderRadius(rCard)
-        .clip(true)
-        .onClick(() => { /* 吃掉卡片区点击，避免透传遮罩误关 */ })
-    }
-    .width('100%').height('100%')
-    .alignContent(Alignment.Center)
+  editSheetBuilder() {
+    VmEdit({ profile: this.editParam, closeReq: this.editCloseReq, onClose: () => this.closeEdit() })
   }
 
   private closeEdit(): void {
@@ -188,15 +133,45 @@ struct Index {
         },
       })
 
-      if (this.showWizard) {
-        this.wizardOverlay()
-      }
-      if (this.showTemplate) {
-        this.templateOverlay()
-      }
-      if (this.showEdit) {
-        this.editOverlay()
-      }
+      /* sheet 宿主：常驻上树的 1×1 占位节点（sheet 要求宿主已挂载；hitTest 穿透不影响布局）。
+       * 向导/编辑 shouldDismiss 拦截（不 dismiss）转 closeReq 桥，由组件内确认后真关；
+       * 模板无确认直接关。 */
+      Column().width(1).height(1).hitTestBehavior(HitTestMode.None)
+        .bindSheet(this.showWizard, this.wizardSheetBuilder(), {
+          title: { title: '创建虚拟机' },
+          preferType: SheetType.CENTER,
+          height: 500,
+          width: 640,
+          shouldDismiss: (_d: SheetDismiss) => {
+            this.wizardCloseReq++;
+          },
+          onWillDisappear: () => {
+            this.showWizard = false;
+          },
+        })
+      Column().width(1).height(1).hitTestBehavior(HitTestMode.None)
+        .bindSheet(this.showTemplate, this.templateSheetBuilder(), {
+          title: { title: '模板创建' },
+          preferType: SheetType.CENTER,
+          height: 500,
+          width: 640,
+          onWillDisappear: () => {
+            this.showTemplate = false;
+          },
+        })
+      Column().width(1).height(1).hitTestBehavior(HitTestMode.None)
+        .bindSheet(this.showEdit, this.editSheetBuilder(), {
+          title: { title: '虚拟机配置', subtitle: this.editParam ? this.editParam.name : '' },
+          preferType: SheetType.CENTER,
+          height: 540,
+          width: 680,
+          shouldDismiss: (_d: SheetDismiss) => {
+            this.editCloseReq++;
+          },
+          onWillDisappear: () => {
+            this.showEdit = false;
+          },
+        })
     }
     .width('100%')
     .height('100%')
