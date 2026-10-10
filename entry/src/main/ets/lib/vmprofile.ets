@@ -39,7 +39,8 @@ export interface VmMachine {
   firmware: VmFirmware; /* 固件：seabios(BIOS) / ovmf(UEFI，暂需 OVMF 文件) */
   cpuModel: string;     /* '' = 自动（arm64/arm/loongarch64 给 max） */
   serialInteractive: boolean;   /* 串口走 socket 交互（默认 true）；false=落盘 file 日志 */
-  cpuFlags: string;             /* v6：-cpu <模型>,<flags> 的 flags 部分，如 "+sse4a,-avx2"；''=无 */
+  cpuFlags: string;             /* -cpu <模型>,<flags> 的 flags 部分；不暴露 UI（要求懂
+                                 * qemu flag 名），新建恒 ''，手改 JSON 仍生效 */
   rtcLocal: boolean;            /* v6：-rtc base=localtime（guest RTC 随宿主时区） */
 }
 
@@ -118,8 +119,9 @@ export function builtinIsoFor(arch: VmArch): string {
 export interface VmRuntime {
   memoryMB: number;
   cpus: number;
-  mttcg: boolean;   /* TCG 多线程 */
-  tbSize: number;
+  mttcg: boolean;   /* TCG 多线程；不暴露 UI（qemu 对支持的 target 自动多线程），恒 true */
+  tbSize: number;   /* -tb-size（MB）；不暴露 UI，新建恒 1024（qemu 默认档）。二者档位
+                     * 字段均保留：旧档原值不破坏，手改 JSON 仍生效 */
   rng: boolean;     /* virtio-rng-pci 熵源（Linux guest 自带驱动；raspi 无 PCI 构建期忽略） */
   balloon: boolean; /* virtio-balloon-pci 内存回收（同上） */
   audio: boolean;   /* v6：声音——-audiodev driver=ohos + 板卡对应声卡（raspi 无模拟声卡，构建期忽略） */
@@ -136,7 +138,8 @@ export interface VmDisk {
   path: string;
   readonly: boolean;
   iface: DiskIface;
-  cache?: DiskCache; /* undefined = default（写缓存策略跟随 qemu 默认） */
+  cache?: DiskCache; /* undefined = default（写缓存策略跟随 qemu 默认）；'unsafe' 不暴露
+                     * UI（崩溃时可能损坏磁盘），手改 JSON 仍生效 */
 }
 
 /* 介质层：全部磁盘数组化（v5）；disks[0] = 系统盘（启动/快照/临时会话对象），

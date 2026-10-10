@@ -40,8 +40,6 @@ export struct VmEdit {
   @State netEnabled: boolean = true;
   @State portForwards: string = '';
   @State sharedFolder: boolean = false;
-  @State mttcg: boolean = true;
-  @State tbSizeText: string = '1024';
   @State extraArgs: string = '';
   @State kernelAppend: string = ''; /* 内核参数（-append）；仅当 VM 已配 kernel 时展示可编辑 */
   /* v4：显卡/系统增强/只读与第二盘 */
@@ -50,15 +48,13 @@ export struct VmEdit {
   @State balloon: boolean = false;
   @State diskReadonly: boolean = false;
   @State diskIface: DiskIface = 'virtio'; /* 系统盘接口；数据盘继承它（存储弹窗创建时已定） */
-  @State diskUnsafeCache: boolean = false; /* 系统盘 cache=unsafe（安装期提速，见 VmDisk 注释） */
   @State netModel: NetModel = 'virtio';
   @State serialInteractive: boolean = true;
   @State extraDisks: VmDisk[] = []; /* 数据盘（disks[1..]，第 0 张为系统盘走 diskPath） */
-  /* v6：声音 / GDB 调试后端 / CPU 关联增强（flags+RTC 本地时区） */
+  /* v6：声音 / GDB 调试后端 / RTC 本地时区 */
   @State audio: boolean = true;
   @State gdbOn: boolean = false;
   @State gdbPortText: string = '1234';
-  @State cpuFlags: string = '';
   @State rtcLocal: boolean = false;
   @State showAdvanced: boolean = false;
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine ISO 下载中 */
@@ -88,8 +84,6 @@ export struct VmEdit {
     this.netEnabled = p.net.enabled;
     this.portForwards = p.net.portForwards;
     this.sharedFolder = p.net.sharedFolder;
-    this.mttcg = p.runtime.mttcg;
-    this.tbSizeText = String(p.runtime.tbSize);
     this.extraArgs = p.extraArgs;
     this.kernelAppend = p.media.kernelAppend;
     this.vga = p.machine.vga;
@@ -97,7 +91,6 @@ export struct VmEdit {
     this.balloon = p.runtime.balloon;
     this.diskReadonly = p.media.disks.length > 0 ? p.media.disks[0].readonly : false;
     this.diskIface = p.media.disks.length > 0 ? p.media.disks[0].iface : 'virtio';
-    this.diskUnsafeCache = p.media.disks.length > 0 && p.media.disks[0].cache === 'unsafe';
     this.netModel = p.net.model;
     this.serialInteractive = p.machine.serialInteractive;
     this.extraDisks = p.media.disks.slice(1);
@@ -105,7 +98,6 @@ export struct VmEdit {
     this.audio = p.runtime.audio;
     this.gdbOn = p.runtime.gdbPort > 0;
     this.gdbPortText = String(p.runtime.gdbPort > 0 ? p.runtime.gdbPort : 1234);
-    this.cpuFlags = p.machine.cpuFlags;
     this.rtcLocal = p.machine.rtcLocal;
     this.readDiskMeta();
     this.baseline = this.formSig();
@@ -117,10 +109,10 @@ export struct VmEdit {
       this.name, this.memoryMB, this.cpus, this.vga,
       this.cdromPaths, this.bootFromCdrom, this.kernelAppend,
       this.netEnabled, this.portForwards, this.sharedFolder, this.netModel,
-      this.mttcg, this.tbSizeText, this.rng, this.balloon, this.audio,
-      this.diskReadonly, this.diskIface, this.diskUnsafeCache,
+      this.rng, this.balloon, this.audio,
+      this.diskReadonly, this.diskIface,
       this.serialInteractive, this.gdbOn, this.gdbPortText,
-      this.cpuFlags, this.rtcLocal, this.extraArgs, this.extraDisks,
+      this.rtcLocal, this.extraArgs, this.extraDisks,
     ]);
   }
 
@@ -297,7 +289,6 @@ export struct VmEdit {
      * 本页的旧值回滚。磁盘段的盘路径/增删不归本页管，以磁盘最新档为准，
      * 本页只合并系统盘三个属性与数据盘只读开关（见 mergeDisks）。load 失败才回退副本。 */
     const base = new VmStore(this.filesDir).load(this.profile.id) ?? this.profile;
-    const tbSize = Number(this.tbSizeText);
     const p: VmProfile = {
       schemaVersion: SCHEMA_VERSION,
       id: base.id,
@@ -309,14 +300,14 @@ export struct VmEdit {
         firmware: base.machine.firmware,
         cpuModel: base.machine.cpuModel,
         serialInteractive: this.serialInteractive,
-        cpuFlags: this.cpuFlags.trim(),
+        cpuFlags: base.machine.cpuFlags,
         rtcLocal: this.rtcLocal,
       },
       runtime: {
         memoryMB: Math.round(this.memoryMB),
         cpus: Math.round(this.cpus),
-        mttcg: this.mttcg,
-        tbSize: Number.isInteger(tbSize) && tbSize > 0 ? tbSize : 1024,
+        mttcg: base.runtime.mttcg,
+        tbSize: base.runtime.tbSize,
         rng: this.rng,
         balloon: this.balloon,
         audio: this.audio,
@@ -355,7 +346,7 @@ export struct VmEdit {
         path: base.media.disks[0].path,
         readonly: this.diskReadonly,
         iface: this.diskIface,
-        cache: this.diskUnsafeCache ? 'unsafe' : undefined,
+        cache: base.media.disks[0].cache,
       }
       : { path: '', readonly: this.diskReadonly, iface: this.diskIface };
     const rest = base.media.disks.slice(1).map((d: VmDisk, i: number): VmDisk => {
@@ -509,17 +500,6 @@ export struct VmEdit {
               ? 'Windows 免装驱动即可识别'
               : '性能更好，Linux 首选；Windows 需另装驱动')
               .fontSize(tSub).fontColor(cWeak).width('100%')
-
-            /* cache=unsafe：老系统安装期提速开关（机理见 VmDisk.cache 注释） */
-            Row() {
-              Text('写入缓存').fontSize(tLabel).layoutWeight(1)
-              Toggle({ type: ToggleType.Switch, isOn: this.diskUnsafeCache })
-                .onChange((v: boolean) => this.diskUnsafeCache = v)
-            }.width('100%').padding({ top: sp1, bottom: sp1 })
-            Text(this.diskUnsafeCache
-              ? '虚拟机写入不再立即保存，安装系统期间明显提速；App 或设备崩溃时磁盘数据可能损坏，装完系统建议关闭'
-              : '默认：虚拟机的写入立即保存，速度稍慢但更可靠')
-              .fontSize(tSub).fontColor(cWeak).width('100%')
           }
 
           Column({ space: sp1 }) {
@@ -652,19 +632,6 @@ export struct VmEdit {
           /* —— 高级（折叠组头） —— */
           FoldHead({ label: '高级', collapsed: !this.showAdvanced, onToggle: () => { this.showAdvanced = !this.showAdvanced; } })
           if (this.showAdvanced) {
-            Row() {
-              Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)
-              Toggle({ type: ToggleType.Switch, isOn: this.mttcg })
-                .onChange((v: boolean) => this.mttcg = v)
-            }.padding({ top: sp1, bottom: sp1 })
-            Row() {
-              Text('翻译缓存 (tb-size)').fontSize(tLabel).width(120)
-              TextInput({ text: this.tbSizeText })
-                .layoutWeight(1)
-                .fontSize(tBody)
-                .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-                .onChange((v: string) => this.tbSizeText = v)
-            }.padding({ bottom: sp1 })
             /* v4 系统增强：RNG/balloon（raspi 无 PCI 禁用） */
             Row() {
               Text('随机数 (RNG)').fontSize(tLabel).layoutWeight(1)
@@ -697,18 +664,6 @@ export struct VmEdit {
               Text('在电脑上执行 gdb，连接 target remote :' + this.gdbPortText).fontSize(tSub).fontColor(cWeak)
                 .padding({ bottom: sp1 })
             }
-            /* v6：CPU 关联增强——flags 字符串与 CPU 模型合并（raspi 固定 CPU 禁用） */
-            Row() {
-              Text('CPU 特性 (flags)').fontSize(tLabel).width(120)
-              TextInput({ text: this.cpuFlags, placeholder: '如 +sse4a,-avx2' })
-                .layoutWeight(1)
-                .fontSize(tBody)
-                .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-                .enabled(!this.isRaspiBoard())
-                .onChange((v: string) => this.cpuFlags = v)
-            }.padding({ bottom: sp1 })
-            Text('为 CPU 追加指令集开关，用于排查兼容性问题；不确定请留空').fontSize(tSub).fontColor(cWeak)
-              .padding({ bottom: sp1 })
             Row() {
               Text('RTC 本地时区').fontSize(tLabel).layoutWeight(1)
               Toggle({ type: ToggleType.Switch, isOn: this.rtcLocal })

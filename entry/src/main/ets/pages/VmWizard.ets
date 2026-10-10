@@ -52,8 +52,6 @@ export struct VmWizard {
   @State cpuModel: string = '';
   @State memoryMB: number = 1024;
   @State cpus: number = 2;
-  @State mttcg: boolean = true;
-  @State tbSizeText: string = '1024';
   @State diskGB: number = 8;
   @State diskAlloc: string = 'dynamic';
   @State diskIface: DiskIface = 'virtio'; /* 系统盘接口；数据盘由存储弹窗继承它 */
@@ -77,7 +75,6 @@ export struct VmWizard {
   @State sharedFolder: boolean = false;
   @State name: string = '';
   @State cpuModelCollapsed: boolean = true; /* CPU 机型组默认折叠（步骤②） */
-  @State tcgCollapsed: boolean = true;      /* TCG 模拟组默认折叠（步骤③） */
   @State ensureIsoLoading: boolean = false; /* 内置 Alpine ISO 下载中 */
   @State isoPct: number = 0;
   /* v4：显卡（步骤②）；系统增强（步骤③）。数据盘不进向导（同 UTM：创建后经
@@ -96,8 +93,6 @@ export struct VmWizard {
     this.cpuModel = '';
     this.memoryMB = 1024;
     this.cpus = 2;
-    this.mttcg = true;
-    this.tbSizeText = '1024';
     this.diskGB = 8;
     this.diskAlloc = 'dynamic';
     this.diskIface = 'virtio';
@@ -116,7 +111,6 @@ export struct VmWizard {
     this.portForwards = '';
     this.sharedFolder = false;
     this.cpuModelCollapsed = true;
-    this.tcgCollapsed = true;
     this.rng = false;
     this.balloon = false;
     this.audio = true;
@@ -127,7 +121,7 @@ export struct VmWizard {
   private formSig(): string {
     return JSON.stringify([
       this.arch, this.board, this.vga, this.cpuModel,
-      this.memoryMB, this.cpus, this.mttcg, this.tbSizeText,
+      this.memoryMB, this.cpus,
       this.diskGB, this.diskAlloc, this.diskIface, this.diskSource, this.importDiskSrc,
       this.kernelSrc, this.initrdSrc, this.kernelAppend,
       this.cdromPaths, this.bootFromCdrom,
@@ -311,12 +305,6 @@ export struct VmWizard {
     if (step === 1) {
       return this.cpuModelError();
     }
-    if (step === 2) {
-      const tb = Number(this.tbSizeText);
-      if (!Number.isInteger(tb) || tb < 512 || tb > 8192) {
-        return `tb-size 需为 512-8192 的整数（MB），当前「${this.tbSizeText.trim()}」`;
-      }
-    }
     if (step === 3) {
       if (this.diskSource === 'import') {
         if (this.importDiskSrc.length === 0 || !isoReadable(this.importDiskSrc)) {
@@ -392,7 +380,6 @@ export struct VmWizard {
     const diskPath = this.diskSource === 'import'
       ? `${this.filesDir}/vms/${id}${this.importDiskExt()}`
       : `${this.filesDir}/vms/${id}.qcow2`;
-    const tbSize = Number(this.tbSizeText);
     const p: VmProfile = {
       schemaVersion: SCHEMA_VERSION,
       id: id,
@@ -404,14 +391,14 @@ export struct VmWizard {
         firmware: this.autoFirmware(),
         cpuModel: this.cpuModel.trim(),
         serialInteractive: true, /* 恒为交互串口（编辑页无切换入口；落盘日志模式仅手改 JSON 的旧档会出现） */
-        cpuFlags: '',   /* v6：CPU flags 仅编辑页可配 */
+        cpuFlags: '',   /* 不暴露配置（见 VmMachine.cpuFlags 注释） */
         rtcLocal: false, /* v6：RTC 默认 utc（qemu 出厂行为）；本地时区在编辑页 */
       },
       runtime: {
         memoryMB: Math.round(this.memoryMB),
         cpus: Math.round(this.cpus),
-        mttcg: this.mttcg,
-        tbSize: Number.isInteger(tbSize) && tbSize > 0 ? tbSize : 1024,
+        mttcg: true,  /* 不暴露配置（见 VmRuntime 注释） */
+        tbSize: 1024,
         rng: this.rng,
         balloon: this.balloon,
         audio: this.audio, /* v6：声音默认开；开关在编辑页高级区 */
@@ -718,26 +705,6 @@ export struct VmWizard {
       }.padding({ top: sp1, bottom: sp1 })
       Text('开启后虚拟机里的声音通过设备的扬声器/耳机播放')
         .fontSize(tSub).fontColor(cWeak).width('100%')
-
-      /* TCG 模拟组：默认折叠，点组头展开/收起 */
-      FoldHead({ label: 'TCG 模拟', collapsed: this.tcgCollapsed, onToggle: () => { this.tcgCollapsed = !this.tcgCollapsed; } })
-
-      if (!this.tcgCollapsed) {
-        Row() {
-          Text('TCG 多线程 (MTTCG)').fontSize(tLabel).layoutWeight(1)
-          Toggle({ type: ToggleType.Switch, isOn: this.mttcg })
-            .onChange((v: boolean) => this.mttcg = v)
-        }
-        Row() {
-          Text('翻译缓存 (tb-size)').fontSize(tLabel).width(120)
-          TextInput({ text: this.tbSizeText })
-            .layoutWeight(1)
-            .fontSize(tBody)
-            .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-            .onChange((v: string) => this.tbSizeText = v)
-        }
-        Text('有效范围 512-8192 MB（默认 1024）').fontSize(tSub).fontColor(cWeak)
-      }
 
       this.stepErrorMsg()
     }
