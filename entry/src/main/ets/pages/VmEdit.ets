@@ -448,6 +448,8 @@ export struct VmEdit {
               .enabled(!this.isRaspiBoard())
               .onChange((v: boolean) => this.audio = v)
           }.width('100%').padding({ top: sp1, bottom: sp1 })
+          Text('开启后虚拟机里的声音通过设备的扬声器/耳机播放').fontSize(tSub).fontColor(cWeak)
+            .width('100%')
 
           /* —— 存储 —— */
           SecHead({ label: '存储' })
@@ -639,12 +641,16 @@ export struct VmEdit {
                 .enabled(!this.isRaspiBoard())
                 .onChange((v: boolean) => this.rng = v)
             }.padding({ top: sp1, bottom: sp1 })
+            Text('给虚拟机提供随机数来源，可加快部分系统的启动；默认关闭即可').fontSize(tSub).fontColor(cWeak)
+              .padding({ bottom: sp1 })
             Row() {
               Text('内存回收 (Balloon)').fontSize(tLabel).layoutWeight(1)
               Toggle({ type: ToggleType.Switch, isOn: this.balloon })
                 .enabled(!this.isRaspiBoard())
                 .onChange((v: boolean) => this.balloon = v)
             }.padding({ top: sp1, bottom: sp1 })
+            Text('虚拟机空闲时归还部分内存给设备；一般无需开启').fontSize(tSub).fontColor(cWeak)
+              .padding({ bottom: sp1 })
             /* v6：GDB 调试后端（开机后可连 `gdb target remote :端口`）。仅编辑页提供，
              * 窗口底部引导文案提示用法 */
             Row() {
