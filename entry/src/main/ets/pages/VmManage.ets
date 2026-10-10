@@ -938,7 +938,8 @@ export struct VmManage {
                   .height(this.thumbVpH())
                   .constraintSize({ maxWidth: '100%', maxHeight: '100%' })
                 Button() {
-                  SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right'))
+                  /* 运行中=进入控制台（全屏符）；停机=启动（play），与占位态一致 */
+                  SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.arrow_up_left_and_arrow_down_right') : $r('sys.symbol.play_fill'))
                     .fontSize(18)
                     .fontColor([Color.White])
                 }
@@ -954,14 +955,29 @@ export struct VmManage {
               .margin({ top: sp1, bottom: sp2 })
               .onClick(() => this.openConsole())
             } else {
+              /* 无图（停机无缓存 / 运行中尚未出画）：同为黑屏形态 + 中央按钮，
+               * 与有图态视觉一致——停机 play=启动，运行中 arrow=进入控制台 */
               Stack() {
-                Text(this.isRunningNow() ? '画面加载中…' : '启动后这里显示画面截图，点此进入控制台')
-                  .fontSize(tSub).fontColor(cWeak)
+                Column({ space: sp2 }) {
+                  if (this.isRunningNow()) {
+                    Text('画面加载中…').fontSize(tSub).fontColor(cWeak)
+                  }
+                  Button() {
+                    SymbolGlyph(this.isRunningNow() ? $r('sys.symbol.arrow_up_left_and_arrow_down_right') : $r('sys.symbol.play_fill'))
+                      .fontSize(26)
+                      .fontColor([Color.White])
+                  }
+                  .focusable(false)
+                  .width(52).height(52)
+                  .backgroundColor(cConsoleScrim)
+                  .borderRadius(26)
+                  .onClick(() => this.openConsole())
+                }
+                .alignItems(HorizontalAlign.Center)
               }
               .width(384)
               .height(216)
-              .backgroundColor(cCard)
-              .border({ width: bw, color: cBorder, style: BorderStyle.Dashed })
+              .backgroundColor(Color.Black)
               .borderRadius(rCard)
               .margin({ top: sp1, bottom: sp2 })
               .onClick(() => this.openConsole())
