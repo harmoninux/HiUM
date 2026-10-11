@@ -17,7 +17,7 @@ import { prepareStart } from '../lib/tempSession';
 import { takePendingVmId, isPadOrPhone } from '../lib/vmwindows';
 import { VirtualKeyboard } from '../lib/VirtualKeyboard';
 import {
-  sp1, sp3, cCard, cText, cPrimary,
+  sp1, sp2, sp3, cCard, cText, cPrimary,
   cConsoleText, cConsoleAccent, cConsoleDanger, cConsoleLogText, cConsoleWarn,
   cConsolePanel, cConsolePanelStrong, cConsoleInputBg, cConsolePlaceholder,
   cConsoleBanner, cConsoleBtn, cConsoleScrim,
@@ -69,12 +69,10 @@ const TAG = 'QemuUI';
 /* 悬浮按钮（替代顶部工具条）：半透明圆钮，可拖拽移动，点击展开竖向操作面板。
  * 位置持久化到 preferences（键按 vmId 区分，跨窗口/重开记住落位）。
  * 尺寸/阈值参照 wineohos VirtualDesktop 的 EXIT_BTN_SIZE/EXIT_DRAG_THRESHOLD。 */
-/* 底部状态栏（仅状态栏用）：Pad/手机高密度屏，24/11 才有「细条」观感；
- * PC(2in1) 密度低，24/11 显得局促，保持 28/12 */
-const STATUS_H_PAD = 24;
+/* 顶部悬浮工具栏（仅工具栏用）：Pad/手机高密度屏，小字号才有「轻便浮层」观感；
+ * PC(2in1) 密度低，11 显得局促，保持 12 */
 const STATUS_BTN_H_PAD = 20;
 const STATUS_FS_PAD = 11;
-const STATUS_H_PC = 28;
 const STATUS_BTN_H_PC = 22;
 const STATUS_FS_PC = 12;
 /* 串口面板与黑底浮层（熔断横幅/手势速查）：不随状态栏收窄，维持原尺寸 */
@@ -149,9 +147,10 @@ struct VmConsole {
   @State scrollReverse: boolean = false;
   @State cursorSpeedIdx: number = 1;
   @State serialFs: number = SERIAL_FS_LIST[0]; /* 串口日志字号（全局偏好） */
-  @State showKbd: boolean = false;   /* 虚拟键盘显隐（底部状态栏开关，按 vmId 持久化） */
+  @State showKbd: boolean = false;   /* 虚拟键盘显隐（工具栏开关，按 vmId 持久化） */
   @State showGestureHint: boolean = false; /* 首次进入的手势速查（全局看过一次不再弹） */
-  @State immersive: boolean = false; /* 沉浸全屏态（最大化进入），沉浸时隐藏底部状态栏 */
+  @State immersive: boolean = false; /* 沉浸全屏态（最大化进入）：隐藏系统栏；页内浮层不占布局、常驻 */
+  @State barOpen: boolean = false;   /* 顶部悬浮工具栏展开态（默认收起，只有一枚小钮浮在画面） */
   /* v4 交互式串口：serialView=串口视图盖在画面上；文本/输入/Ctrl 修饰态均在页内 */
   @State serialView: boolean = false;
   @State serialText: string = '';
@@ -170,8 +169,7 @@ struct VmConsole {
    * 不能写熔断标记，否则每次正常关机都会让下次进入不自动启动。 */
   private userStopped: boolean = false;
   private xcController: VmXComponentController = new VmXComponentController();
-  /* 底部状态栏尺寸（Pad/手机 vs PC 两档，见 STATUS_*_PAD/PC 常量注释） */
-  private barH: number = isPadOrPhone() ? STATUS_H_PAD : STATUS_H_PC;
+  /* 顶部悬浮工具栏尺寸（Pad/手机 vs PC 两档，见 STATUS_*_PAD/PC 常量注释） */
   private barBtnH: number = isPadOrPhone() ? STATUS_BTN_H_PAD : STATUS_BTN_H_PC;
   private barFs: number = isPadOrPhone() ? STATUS_FS_PAD : STATUS_FS_PC;
   private immersiveMaximized: boolean = false;  /* 防递归：maximize() 自身也触发窗口状态回调 */
@@ -1589,8 +1587,10 @@ struct VmConsole {
   }
 
   build() {
-    Column() {
-      /* VM 画面区：XComponent + 虚拟键盘 overlay（键盘盖画面、不压底部状态栏） */
+    /* 根 = 顶部对齐的 Stack：画面全窗高 + 顶部居中悬浮层（开关钮/展开工具栏）。
+     * 浮层不占布局，沉浸（最大化）时画面依旧铺满 */
+    Stack({ alignContent: Alignment.Top }) {
+      /* VM 画面区：XComponent + 虚拟键盘 overlay（键盘盖画面、不压工具栏） */
       Stack() {
         XComponent({ type: XComponentType.SURFACE, controller: this.xcController })
           .width(this.fitW > 0 ? this.fitW : '100%')
@@ -1789,7 +1789,7 @@ struct VmConsole {
         }
       }
       .width('100%')
-      .layoutWeight(1)
+      .height('100%')
       /* letterbox 黑边由容器出（布局属性，同步）：XComponent 缩到 guest 比例居中，
        * 边框区域露容器黑底。resize 时布局与黑边同步走，画面比例恒定不跳 */
       .backgroundColor(Color.Black)
@@ -1799,51 +1799,68 @@ struct VmConsole {
         this.recomputeFit();
       })
 
-      /* 底部状态栏：运行状态 + 电源/远程控制（常驻，所有设备；
-       * 沉浸全屏时整体隐藏，画面铺满整窗）。配色走主题双色板，跟随系统深浅 */
-      if (!this.immersive) {
-        Row({ space: sp3 }) {
-          if (this.vmName.length > 0) {
-            Text(this.vmName).fontSize(this.barFs).fontWeight(FontWeight.Medium).fontColor(cText)
+      /* 顶部悬浮开关 + 半透明工具栏（替代原底部状态栏）：浮层不占布局，画面
+       * 全窗高。收起时画面上方居中一枚半透明圆钮；点击展开浮动工具栏（状态
+       * 文字 + 电源/介质/串口/输入/键盘），再点收起。恒深色配色走 console 专档 */
+      Column({ space: sp2 }) {
+        Button() {
+          SymbolGlyph(this.barOpen ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
+            .fontSize(18)
+            .fontColor([cConsoleText])
+        }
+        .focusable(false)
+        .width(this.barBtnH + 14)
+        .height(this.barBtnH + 14)
+        .backgroundColor(cConsolePanel)
+        .borderRadius((this.barBtnH + 14) / 2)
+        .onClick(() => { this.barOpen = !this.barOpen })
+
+        if (this.barOpen) {
+          Row({ space: sp3 }) {
+            if (this.vmName.length > 0) {
+              Text(this.vmName).fontSize(this.barFs).fontWeight(FontWeight.Medium).fontColor(cConsoleText)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .constraintSize({ maxWidth: isPadOrPhone() ? '30%' : '45%' })
+            }
+            Text(this.status).fontSize(this.barFs).fontColor(cConsoleText)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-              /* 按钮多了一排（介质/输入），状态栏宽度金贵：窄屏设备再收一档 */
-              .constraintSize({ maxWidth: isPadOrPhone() ? '26%' : '40%' })
-          }
-          Text(this.status).fontSize(this.barFs).fontColor(cText)
-            .layoutWeight(1).maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Button('电源').focusable(false).fontSize(this.barFs).height(this.barBtnH)
-            .padding({ left: sp1, right: sp1 })
-            .fontColor(cText).backgroundColor(Color.Transparent)
-            .bindMenu(this.powerMenu)
-          if (this.hasCds()) {
-            Button('介质').focusable(false).fontSize(this.barFs).height(this.barBtnH)
+              .constraintSize({ maxWidth: isPadOrPhone() ? '36%' : '42%' })
+            Button('电源').focusable(false).fontSize(this.barFs).height(this.barBtnH)
               .padding({ left: sp1, right: sp1 })
-              .fontColor(cText).backgroundColor(Color.Transparent)
-              .bindMenu(this.mediaMenu)
-          }
-          Button(this.serialView ? '屏幕' : '串口').focusable(false).fontSize(this.barFs).height(this.barBtnH)
-            .padding({ left: sp1, right: sp1 })
-            .fontColor(this.serialView ? cPrimary : cText).backgroundColor(Color.Transparent)
-            .onClick(() => { this.toggleSerialView() })
-          Button('输入').focusable(false).fontSize(this.barFs).height(this.barBtnH)
-            .padding({ left: sp1, right: sp1 })
-            .fontColor(this.inputMode === 1 ? cPrimary : cText).backgroundColor(Color.Transparent)
-            .bindMenu(this.inputMenu)
-          if (isPadOrPhone()) {
-            Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(this.barFs).height(this.barBtnH)
+              .fontColor(cConsoleText).backgroundColor(Color.Transparent)
+              .bindMenu(this.powerMenu)
+            if (this.hasCds()) {
+              Button('介质').focusable(false).fontSize(this.barFs).height(this.barBtnH)
+                .padding({ left: sp1, right: sp1 })
+                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
+                .bindMenu(this.mediaMenu)
+            }
+            Button(this.serialView ? '屏幕' : '串口').focusable(false).fontSize(this.barFs).height(this.barBtnH)
               .padding({ left: sp1, right: sp1 })
-              .fontColor(this.showKbd ? cPrimary : cText).backgroundColor(Color.Transparent)
-              .onClick(() => { this.toggleKbd() })
+              .fontColor(this.serialView ? cConsoleAccent : cConsoleText).backgroundColor(Color.Transparent)
+              .onClick(() => { this.toggleSerialView() })
+            Button('输入').focusable(false).fontSize(this.barFs).height(this.barBtnH)
+              .padding({ left: sp1, right: sp1 })
+              .fontColor(this.inputMode === 1 ? cConsoleAccent : cConsoleText).backgroundColor(Color.Transparent)
+              .bindMenu(this.inputMenu)
+            if (isPadOrPhone()) {
+              Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(this.barFs).height(this.barBtnH)
+                .padding({ left: sp1, right: sp1 })
+                .fontColor(this.showKbd ? cConsoleAccent : cConsoleText).backgroundColor(Color.Transparent)
+                .onClick(() => { this.toggleKbd() })
+            }
           }
+          .backgroundColor(cConsolePanel)
+          .borderRadius(12)
+          .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+          .constraintSize({ maxWidth: '92%' })
         }
-        .width('100%')
-        .height(this.barH)
-        .backgroundColor(cCard)
-        .padding({ left: sp3, right: sp3 })
-        .alignItems(VerticalAlign.Center)
       }
+      .alignItems(HorizontalAlign.Center)
+      .constraintSize({ maxWidth: '94%' })
+      .margin({ top: sp2 })
     }
     .width('100%')
     .height('100%')
