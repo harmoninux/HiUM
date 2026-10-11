@@ -2,6 +2,7 @@
  * 避免列表/渲染/点击路径因失效媒体崩溃。所有「读一下盘在不在」都应走这里。 */
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
+import taskpool from '@ohos.taskpool';
 
 export function pathExists(path: string): boolean {
   try {
@@ -122,51 +123,94 @@ export function readTail(path: string, maxBytes: number): string {
   }
 }
 
-/* 带进度的异步复制（导入磁盘镜像/内核到虚拟机目录）：4MB 分块，块间让出
- * 事件循环（UI 可刷新进度）；失败清理半成品并 resolve(false)。
- * 与 copyFile 语义不同：目标已存在照样覆盖（导入是显式动作，目标路径按新 id 生成不会撞）。 */
+/* ---- 子线程分块复制（taskpool）----
+ * 复制逻辑整体搬入 taskpool 子线程：主线程同步搬运 GB 级 qcow2 时会反复钉住 UI
+ *（克隆 6~9GB 系统盘实测整体卡死），子线程里连续 read/write 不再需要让出事件循环。
+ * @Concurrent 必须是顶层函数；本模块依赖仅 fileIo/util/taskpool（无 UI 装饰器），
+ * 子线程解析安全（子线程解析到 @Observed/AppStorage 等 UI 装饰器会抛异常，
+ * @Concurrent 所在模块必须避开 UI 依赖——官方 TaskPool 使用规范）。
+ * 进度只在整数百分比变化时经 sendData 回传（≤100 条消息），避免高频消息+宿主重绘。 */
+@Concurrent
+function copyFileTask(src: string, dst: string): boolean {
+  let total = 0;
+  try {
+    total = fs.statSync(src).size;
+  } catch {
+    return false;
+  }
+  let inFd: fs.File | null = null;
+  let outFd: fs.File | null = null;
+  try {
+    inFd = fs.openSync(src, fs.OpenMode.READ_ONLY);
+    outFd = fs.openSync(dst, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+  } catch {
+    if (inFd !== null) {
+      try { fs.closeSync(inFd); } catch { /* best effort */ }
+    }
+    if (outFd !== null) {
+      try { fs.closeSync(outFd); } catch { /* best effort */ }
+    }
+    return false;
+  }
+  const buf = new ArrayBuffer(4 * 1024 * 1024);
+  let done = 0;
+  let lastPct = 0;
+  try {
+    for (;;) {
+      const n = fs.readSync(inFd.fd, buf);
+      if (n <= 0) {
+        break;
+      }
+      /* 不传 options.offset（它是绝对文件位置，传 0 会每块都覆盖回首字节，
+       * >4MB 文件只剩首块）；缺省从当前 filePointer 写，天然顺序追加 */
+      fs.writeSync(outFd.fd, buf.slice(0, n));
+      done += n;
+      const pct = total > 0 ? Math.min(99, Math.floor(done * 100 / total)) : 0;
+      if (pct !== lastPct) {
+        lastPct = pct;
+        try {
+          taskpool.Task.sendData(pct);
+        } catch {
+          /* 宿主未注册回调：进度丢弃，不影响复制 */
+        }
+      }
+    }
+  } catch {
+    try { fs.closeSync(inFd); } catch { /* best effort */ }
+    try { fs.closeSync(outFd); } catch { /* best effort */ }
+    try { fs.unlinkSync(dst); } catch { /* 不留半成品 */ }
+    return false;
+  }
+  try { fs.closeSync(inFd); } catch { /* best effort */ }
+  try { fs.closeSync(outFd); } catch { /* best effort */ }
+  try {
+    taskpool.Task.sendData(100);
+  } catch {
+    /* 进度丢失不影响结果 */
+  }
+  return true;
+}
+
+/* 带进度的异步复制（导入磁盘镜像/克隆大盘）。执行在 taskpool 子线程（见 copyFileTask）。
+ * 失败清理半成品并 resolve(false)。与 copyFile 语义不同：目标已存在照样覆盖
+ *（导入/克隆是显式动作，目标路径按新 id 生成不会撞）。 */
 export function copyFileWithProgress(src: string, dst: string,
   onProgress: (pct: number) => void): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
-    let total = 0;
     try {
-      total = fs.statSync(src).size;
-    } catch {
-      resolve(false);
-      return;
-    }
-    let inFd: fs.File | null = null;
-    let outFd: fs.File | null = null;
-    try {
-      inFd = fs.openSync(src, fs.OpenMode.READ_ONLY);
-      outFd = fs.openSync(dst, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
-    } catch {
-      resolve(false);
-      return;
-    }
-    const buf = new ArrayBuffer(4 * 1024 * 1024);
-    let done = 0;
-    const step = (): void => {
-      try {
-        const n = fs.readSync(inFd!.fd, buf);
-        if (n > 0) {
-          fs.writeSync(outFd!.fd, buf.slice(0, n)); /* 同上：不传 offset，顺序追加 */
-          done += n;
-          onProgress(total > 0 ? Math.min(99, Math.round(done * 100 / total)) : 0);
-          setTimeout(step, 0); /* 让出事件循环，进度条/按钮态可刷新 */
-          return;
-        }
-        fs.closeSync(inFd!);
-        fs.closeSync(outFd!);
-        onProgress(100);
-        resolve(true);
-      } catch {
-        try { fs.closeSync(inFd!); } catch { /* best effort */ }
-        try { fs.closeSync(outFd!); } catch { /* best effort */ }
-        try { fs.unlinkSync(dst); } catch { /* 不留半成品 */ }
+      const task = new taskpool.Task(copyFileTask, src, dst);
+      task.onReceiveData((pct: number) => {
+        onProgress(pct);
+      });
+      taskpool.execute(task).then((r: Object) => {
+        resolve(r as boolean);
+      }).catch(() => {
+        /* 任务框架级失败（调度/序列化，任务体未跑或半途终止）：兜底清一次半成品 */
+        try { fs.unlinkSync(dst); } catch { /* 未创建即无事 */ }
         resolve(false);
-      }
-    };
-    step();
+      });
+    } catch {
+      resolve(false);
+    }
   });
 }
