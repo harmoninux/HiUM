@@ -19,7 +19,7 @@ import {
 import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
   cBg, cCard, cBorder, cChip, cSel, cSelBg,
-  tPage, tCard, tLabel, tBody, tSub, iconFs,
+  tPage, tCard, tLabel, tBody, tItem, tSub, iconFs,
   sp1, sp2, sp3, sp4, sp5, sp6, rCard, rElem, rBadge, bw, btnH, btnPadX,
 } from '../lib/uiTokens';
 
