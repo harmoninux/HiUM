@@ -372,7 +372,7 @@ struct VmConsole {
       /* 已在后台运行（上次关窗只是摘窗）：重新挂窗，接管 QMP。
        * 仍走一遍就绪轮询——「子进程活着」不等于「qemu 起来了」（可能是上次卡死的
        * 残留），没就绪时它会在 T 后翻成「疑似卡死」。 */
-      this.status = '运行中';
+      this.status = ''; /* 运行态不显示文字（画面即证明）；工具栏只承载瞬态/异常消息 */
       napi.qmpConnect(this.vmId, qmpSockPath(this.profile, this.vmDataDir));
       this.beginReadyWatch();
       return;
@@ -607,7 +607,7 @@ struct VmConsole {
         this.stopReadyWatch();
         this.readySeen = true;
         this.qmpAlive = true;
-        this.status = '运行中';
+        this.status = ''; /* 运行态不显示文字（画面即证明）；工具栏只承载瞬态/异常消息 */
         /* 起来了就把熔断标记销掉（用户已修好配置） */
         new VmStore(this.filesDir).clearBootFail(this.vmId);
         this.bootFailReason = '';
@@ -733,13 +733,13 @@ struct VmConsole {
         break;
       case 'RESUME':
         this.paused = false;
-        this.status = '运行中';
+        this.status = ''; /* 运行态不显示文字（画面即证明）；工具栏只承载瞬态/异常消息 */
         break;
       case 'RESET':
         /* 复位是瞬时事件，复位完就是普通的运行中；标「复位」既像"卡在复位"，
          * 又会一直挂到下一个状态事件才被覆盖 */
         this.paused = false;
-        this.status = '运行中';
+        this.status = ''; /* 运行态不显示文字（画面即证明）；工具栏只承载瞬态/异常消息 */
         break;
       case 'SHUTDOWN':
       case 'QMP_DISCONNECT':
@@ -1821,12 +1821,8 @@ struct VmConsole {
               Text(this.vmName).fontSize(this.barFs).fontWeight(FontWeight.Medium).fontColor(cConsoleText)
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .constraintSize({ maxWidth: isPadOrPhone() ? '30%' : '45%' })
+                .constraintSize({ maxWidth: isPadOrPhone() ? '40%' : '60%' })
             }
-            Text(this.status).fontSize(this.barFs).fontColor(cConsoleText)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .constraintSize({ maxWidth: isPadOrPhone() ? '36%' : '42%' })
             Button('电源').focusable(false).fontSize(this.barFs).height(this.barBtnH)
               .padding({ left: sp1, right: sp1 })
               .fontColor(cConsoleText).backgroundColor(Color.Transparent)
