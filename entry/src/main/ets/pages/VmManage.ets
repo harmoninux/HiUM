@@ -704,7 +704,7 @@ export struct VmManage {
   secStorage() {
     SecHead({ label: '存储' })
     Row() {
-      Column({ space: sp1 }) {
+      Column({ space: sp2 }) {
         Row({ space: sp3 }) {
           Text(`系统盘 ${this.diskSummary()}`)
             .fontSize(tSub).fontColor(cSub).maxLines(1)
@@ -747,7 +747,7 @@ export struct VmManage {
   @Builder
   secSnapshot() {
     SecHead({ label: '快照' })
-    Column({ space: sp2 }) {
+    Column({ space: sp3 }) {
       if (!this.canSnapshot()) {
         Text(this.snapStatus()).fontSize(tSub).fontColor(cWeak)
       }
@@ -768,12 +768,12 @@ export struct VmManage {
       }
 
       /* 时间线（历史快照 + 当前状态） */
-      Column() {
+      Column({ space: sp2 }) {
         ForEach(this.snapshots, (s: VmSnapshotEntry) => {
           Row() {
             Column().width(9).height(9).borderRadius(5).backgroundColor(cCard)
               .border({ width: 2, color: cPrimary }).margin({ right: sp3 })
-            Column({ space: 1 }) {
+            Column({ space: sp1 }) {
               Text(s.name).fontSize(tItem)
               Text(this.dateStr(s.dateSec)).fontSize(tMono).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).layoutWeight(1)
@@ -805,7 +805,7 @@ export struct VmManage {
   secNet() {
     SecHead({ label: '网络' })
     Column() {
-      Column({ space: 1 }) {
+      Column({ space: sp1 }) {
         Text(this.netEnabled ? '已启用' : '已关闭').fontSize(tItem)
         Text(`端口转发 ${(this.profile && this.profile.net.portForwards.length > 0) ? this.profile.net.portForwards : '无'} · 9p 共享${(this.profile && this.profile.net.sharedFolder) ? '开' : '关'}`)
           .fontSize(tSub).fontColor(cSub)
@@ -889,7 +889,7 @@ export struct VmManage {
               .backgroundColor(Color.Transparent).fontColor(cPrimary)
               .onClick(() => this.navStack.pop())
           }
-          Column({ space: 1 }) {
+          Column({ space: sp1 }) {
             Row({ space: sp1 }) {
               Text(this.name).fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cText)
                 .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })

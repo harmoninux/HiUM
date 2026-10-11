@@ -7,7 +7,7 @@
  * 历史档里手工改坏、解析不出 host:guest 的条目原样保留展示（红字 + 仅允许移除），
  * 不能让编辑器把用户的存量内容悄悄吃掉。 */
 
-import { cDanger, cSub, cWeak, sp3, tBody, tItem, tSub, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX } from './uiTokens';
+import { cDanger, cSub, cWeak, sp2, sp3, tBody, tItem, tSub, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX } from './uiTokens';
 import { forwardErrors } from './vmprofile';
 
 interface FwdRow {
@@ -97,7 +97,7 @@ export struct PortForwardEditor {
   }
 
   build() {
-    Column({ space: sp3 }) {
+    Column({ space: sp2 }) {
       if (this.rows.length === 0 && this.invalids.length === 0) {
         Text('暂无端口转发').fontSize(tSub).fontColor(cWeak).width('100%')
       }

@@ -430,7 +430,7 @@ export struct VmEdit {
         /* 右侧内容：一次只渲染当前 Tab。行距节奏收归本容器统一（space sp2），
          * 行内不再自带上下 padding——否则各行 4/12 随机叠加出行距 8~24 乱跳 */
         Scroll() {
-          Column({ space: sp2 }) {
+          Column({ space: sp3 }) {
             if (this.tabIdx === 0) {
               /* —— 基础 —— */
               Row() {
@@ -478,7 +478,7 @@ export struct VmEdit {
               Column({ space: sp1 }) {
                 Row() {
                   Text('系统盘').fontSize(tLabel).width(72)
-                  Column({ space: 2 }) {
+                  Column({ space: sp1 }) {
                     Text(this.baseName(this.diskPath))
                       .fontSize(tItem)
                       .fontColor(cText)
@@ -503,7 +503,7 @@ export struct VmEdit {
                 }
               }.alignItems(HorizontalAlign.Start)
               /* v5：系统盘只读 + 数据盘列表（创建/导入/移除/扩容在存储弹窗） */
-              Column({ space: sp1 }) {
+              Column() {
                 Row() {
                   Text('系统盘只读').fontSize(tLabel).layoutWeight(1)
                   Toggle({ type: ToggleType.Switch, isOn: this.diskReadonly })
@@ -515,7 +515,7 @@ export struct VmEdit {
               /* 磁盘接口（仅 x86 板卡有 IDE 南桥）：切换只影响 -drive if= 的挂载方式，
                * 盘内容不动——Windows VM 若误建为 virtio，切到 ide 即可被安装程序识别。 */
               if (this.isX86Board()) {
-                Column({ space: sp1 }) {
+                Column() {
                   Row({ space: sp3 }) {
                     Text('磁盘接口').fontSize(tLabel).layoutWeight(1)
                     Chip({ label: 'virtio', active: this.diskIface === 'virtio', onTap: () => { this.diskIface = 'virtio'; } })
@@ -528,7 +528,7 @@ export struct VmEdit {
                 }
               }
 
-              Column({ space: sp1 }) {
+              Column() {
                 Row() {
                   Text('数据盘').fontSize(tLabel).width(72)
                   Text(this.extraDisks.length === 0 ? '未配置' : `${this.extraDisks.length} 张`)
@@ -611,7 +611,7 @@ export struct VmEdit {
                   Text('端口映射').fontSize(tLabel)
                   PortForwardEditor({ text: this.$portForwards })
                 }.alignItems(HorizontalAlign.Start)
-                Column({ space: sp1 }) {
+                Column() {
                   Row() {
                     Text('共享目录').fontSize(tLabel).layoutWeight(1)
                     Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
@@ -621,7 +621,7 @@ export struct VmEdit {
                 }.alignItems(HorizontalAlign.Start)                /* 网卡型号（仅 x86 板卡可切）：rtl8139 是 XP/Win7 唯一双 in-box 驱动的
                  * 网卡，性能弱于 virtio；Linux 用 virtio。 */
                 if (this.isX86Board()) {
-                  Column({ space: sp1 }) {
+                  Column() {
                     Row({ space: sp3 }) {
                       Text('网卡型号').fontSize(tLabel).layoutWeight(1)
                       Chip({ label: 'virtio', active: this.netModel === 'virtio', onTap: () => { this.netModel = 'virtio'; } })
@@ -636,7 +636,7 @@ export struct VmEdit {
             } else {
               /* —— 高级 —— */
               /* 声音（raspi 无模拟声卡禁用） */
-              Column({ space: sp1 }) {
+              Column() {
                 Row() {
                   Text('声音').fontSize(tLabel).layoutWeight(1)
                   Toggle({ type: ToggleType.Switch, isOn: this.audio })
@@ -648,7 +648,7 @@ export struct VmEdit {
               }
 
               /* v4 系统增强：RNG/balloon（raspi 无 PCI 禁用） */
-              Column({ space: sp1 }) {
+              Column() {
                 Row() {
                   Text('随机数 (RNG)').fontSize(tLabel).layoutWeight(1)
                   Toggle({ type: ToggleType.Switch, isOn: this.rng })
@@ -658,7 +658,7 @@ export struct VmEdit {
                 Text('给虚拟机提供随机数来源，可加快部分系统的启动；默认关闭即可').fontSize(tSub).fontColor(cWeak)
                   .width('100%')
               }
-              Column({ space: sp1 }) {
+              Column() {
                 Row() {
                   Text('内存回收 (Balloon)').fontSize(tLabel).layoutWeight(1)
                   Toggle({ type: ToggleType.Switch, isOn: this.balloon })
@@ -669,7 +669,7 @@ export struct VmEdit {
                   .width('100%')
               }
               /* v6：GDB 调试后端（开机后可连 `gdb target remote :端口`） */
-              Column({ space: sp1 }) {
+              Column() {
                 Row() {
                   Text('GDB 调试').fontSize(tLabel).layoutWeight(1)
                   Toggle({ type: ToggleType.Switch, isOn: this.gdbOn })
@@ -688,7 +688,7 @@ export struct VmEdit {
                     .width('100%')
                 }
               }
-              Column({ space: sp1 }) {
+              Column() {
                 Row() {
                   Text('RTC 本地时区').fontSize(tLabel).layoutWeight(1)
                   Toggle({ type: ToggleType.Switch, isOn: this.rtcLocal })
