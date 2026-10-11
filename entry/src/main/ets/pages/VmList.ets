@@ -4,13 +4,15 @@
 // console 为每台 VM 一个 VmConsoleAbility 独立窗口（specified 模式按 vmId 归并）。
 // 工坊为内嵌居中模态：Stack 遮罩浮层承载 VmWizard（showWizard 开关）。
 import { fileIo as fs } from '@kit.CoreFileKit';
+import { image } from '@kit.ImageKit';
 import { pathExists } from '../lib/fsutil';
+import { loadThumb } from '../lib/thumb';
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import napiModule from 'libentry.so';
 import {
-  VmProfile, VmStore, mainDiskPath,
+  VmProfile, VmStore, mainDiskPath, thumbPath,
 } from '../lib/vmprofile';
 import {
   initVmRegistry, refreshRunningMap, vmIsRunning,
@@ -18,7 +20,7 @@ import {
 } from '../lib/vmregistry';
 import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
-  cBg, cCard, cBorder, cChip, cSel, cSelBg,
+  cBg, cCard, cBorder, cChip, cSel, cSelBg, cBlock,
   tPage, tCard, tLabel, tBody, tItem, tSub, iconFs,
   sp1, sp2, sp3, sp4, sp5, sp6, rCard, rElem, rBadge, bw, btnH, btnPadX,
 } from '../lib/uiTokens';
@@ -44,6 +46,9 @@ export struct VmList {
   @Consume('showEdit') showEdit: boolean; /* 编辑弹窗开关（行长按菜单「编辑」用） */
   @Consume('editParam') editParam: VmProfile | null;
   @State selectedId: string = ''; /* 当前选中行（详情区正在展示的 VM） */
+  /* 行缩略图（vmId → PixelMap，VmConsole 抓帧缓存；加载完 bump thumbVer 触发重绘） */
+  private thumbs: Record<string, image.PixelMap> = {};
+  @State thumbVer: number = 0;
   private pollTimer: number = -1;
   private lifecycleCb: ((e: VmLifecycleEvent) => void) | null = null;
 
@@ -97,6 +102,42 @@ export struct VmList {
       next[p.id] = vmIsRunning(p.id);
     }
     this.runningIds = next;
+    /* 运行中的 VM 抓帧写缓存后才出现缩略图：每个轮询周期补齐缺图的行
+     *（已加载的只做一次 O(1) 判空，成本可忽略） */
+    this.loadThumbs();
+  }
+
+  /* 行缩略图加载/释放：缓存文件由 VmConsole 运行期抓帧写入（thumbPath）。
+   * 只在缺失时读文件；VM 从列表消失时释放其 PixelMap 防泄漏。 */
+  private loadThumbs(): void {
+    const next: Record<string, image.PixelMap> = {};
+    let changed = false;
+    for (const p of this.profiles) {
+      const cur = this.thumbs[p.id];
+      if (cur !== undefined) {
+        next[p.id] = cur;
+        continue;
+      }
+      const t = loadThumb(thumbPath(p.id, this.vmDataDir));
+      if (t !== null) {
+        next[p.id] = t.px;
+        changed = true;
+      }
+    }
+    for (const id of Object.keys(this.thumbs)) {
+      if (next[id] === undefined) {
+        try {
+          this.thumbs[id].release();
+        } catch {
+          /* best effort */
+        }
+        changed = true;
+      }
+    }
+    this.thumbs = next;
+    if (changed) {
+      this.thumbVer++;
+    }
   }
 
   private store(): VmStore {
@@ -150,7 +191,13 @@ export struct VmList {
     return bad.join('、');
   }
 
-  /* 卡片上的磁盘用量表述（无盘/读不到 → 空串） */
+  /* 规格数值化串：能整除取整、否则一位小数（2048MB→2G、1536MB→1.5G、16.0G→16G） */
+  private fmtNum(v: number, unit: string): string {
+    const r = Math.round(v * 10) / 10;
+    return (r === Math.floor(r) ? r.toString() : r.toFixed(1)) + unit;
+  }
+
+  /* 卡片上的磁盘容量表述（无盘/读不到 → 空串） */
   private diskUsed(p: VmProfile): string {
     if (mainDiskPath(p).length === 0) {
       return '';
@@ -159,7 +206,7 @@ export struct VmList {
     if (this.mediaIssue(p).indexOf('系统盘') >= 0) {
       return ' · 系统盘缺失';
     }
-    return ` · 磁盘${(bytes / 1024 / 1024 / 1024).toFixed(1)}G`;
+    return ' · ' + this.fmtNum(bytes / 1024 / 1024 / 1024, 'G');
   }
 
   /* 新建 → 机器工坊（模态浮层，手工向导新建即开箱） */
@@ -273,10 +320,22 @@ export struct VmList {
     .justifyContent(FlexAlign.Center)
   }
 
-  /* 侧栏紧凑行：名称(运行/缺媒体徽标) + 规格行（点行进详情，长按出菜单） */
+  /* 侧栏紧凑行：缩略图 + 名称(运行/缺媒体徽标) + 规格行（点行进详情，长按出菜单） */
   @Builder
   sideRow(p: VmProfile) {
     Row({ space: sp3 }) {
+      /* 画面缩略图：运行过即有缓存（VmConsole 抓帧）；无图灰块占位，同尺寸不跳 */
+      if (this.thumbs[p.id] !== undefined) {
+        Image(this.thumbs[p.id])
+          .width(72).height(44)
+          .objectFit(ImageFit.Cover)
+          .borderRadius(rElem)
+      } else {
+        Column()
+          .width(72).height(44)
+          .backgroundColor(cBlock)
+          .borderRadius(rElem)
+      }
       Column({ space: sp1 }) {
         Row({ space: sp1 }) {
           Text(p.name)
@@ -306,7 +365,7 @@ export struct VmList {
         .width('100%')
         .alignItems(VerticalAlign.Center)
 
-        Text(`${p.machine.arch} · ${p.runtime.memoryMB}MB · ${p.runtime.cpus}核` + this.diskUsed(p))
+        Text(`${p.machine.arch} · ${this.fmtNum(p.runtime.memoryMB / 1024, 'G')} · ${p.runtime.cpus}核` + this.diskUsed(p))
           .fontSize(tSub)
           .fontColor(cSub)
           .maxLines(1)

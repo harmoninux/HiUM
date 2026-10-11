@@ -17,6 +17,7 @@ import {
 } from '../lib/vmsnapshot';
 import { isTempSnapshot } from '../lib/tempSession';
 import { pathExists } from '../lib/fsutil';
+import { loadThumb } from '../lib/thumb';
 import { Snackbar, SecHead } from '../lib/uiWidgets';
 import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
@@ -223,35 +224,13 @@ export struct VmManage {
       }
       old = null;
     }
-    try {
-      const size = fs.statSync(path).size;
-      if (size < 16) {
-        return;
-      }
-      const buf = new ArrayBuffer(size);
-      const f = fs.openSync(path, fs.OpenMode.READ_ONLY);
-      const n = fs.readSync(f.fd, buf);
-      fs.closeSync(f);
-      const dv = new DataView(buf);
-      const w = dv.getUint32(0, true);
-      const h = dv.getUint32(4, true);
-      const need = 8 + w * h * 4;
-      if (w <= 0 || h <= 0 || need > n) {
-        return;
-      }
-      const opts: image.InitializationOptions = {
-        size: { width: w, height: h },
-        srcPixelFormat: image.PixelMapFormat.RGBA_8888,
-        pixelFormat: image.PixelMapFormat.RGBA_8888,
-        editable: false,
-      };
-      this.thumb = image.createPixelMapSync(buf.slice(8, need), opts);
-      this.thumbPxW = w;
-      this.thumbPxH = h;
-    } catch (e) {
-      hilog.warn(DOMAIN, TAG, 'loadThumb: %{public}s', JSON.stringify(e));
-      this.thumb = null;
+    const t = loadThumb(path);
+    if (t === null) {
+      return;
     }
+    this.thumb = t.px;
+    this.thumbPxW = t.w;
+    this.thumbPxH = t.h;
   }
 
   /* 详情页主动采集：VM 在跑但缓存缺失时，经同一 IPC 接口（captureScreen 按 vmId
