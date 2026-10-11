@@ -7,6 +7,7 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import { image } from '@kit.ImageKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
+import taskpool from '@ohos.taskpool';
 import napiModule from 'libentry.so';
 import { VmProfile, VmStore, VmDisk, buildArgs, sharedDir, qmpSockPath, mainDiskPath, thumbPath } from '../lib/vmprofile';
 import { vmIsRunning } from '../lib/vmregistry';
@@ -42,6 +43,14 @@ const napi = napiModule as DiskNapi;
 const GB = 1024 * 1024 * 1024;
 const DOMAIN = 0x0002;
 const TAG = 'QemuUI';
+
+/* qemu-img info 是同步 spawn（fork+waitpid），大镜像可达几十~几百 ms。跑在
+ * taskpool 线程避免阻塞列表→详情的切换动画；napi 模块在任务线程内独立加载实例，
+ * imgtool_run 每次都是全新子进程、无跨线程状态 */
+@Concurrent
+function diskInfoTask(path: string): string {
+  return (napiModule as DiskNapi).diskInfo(path);
+}
 
 @Component
 export struct VmManage {
@@ -184,8 +193,7 @@ export struct VmManage {
     this.cdromPaths = p.media.cdromPaths;
     this.bootFromCdrom = p.media.bootFromCdrom;
     this.netEnabled = p.net.enabled;
-    this.refreshDisk();
-    this.refreshSnapshot();
+    this.refreshDiskInfo();
     this.loadThumb();
   }
 
@@ -298,15 +306,31 @@ export struct VmManage {
     this.snack = msg;
   }
 
-  private refreshDisk(): void {
+  /* 磁盘信息与快照列表同源于一次 qemu-img info（taskpool 线程执行，不阻塞切换）。
+   * seq 防过期回调：用户快速切换 VM 时，慢的返回不得覆盖新 VM 的数据 */
+  private diskInfoSeq: number = 0;
+  private refreshDiskInfo(): void {
+    this.applyDiskInfo('');
+    this.applySnapshots('');
+    const path = this.diskPath;
+    if (!path) {
+      return;
+    }
+    const seq = ++this.diskInfoSeq;
+    taskpool.execute(new taskpool.Task(diskInfoTask, path)).then((raw: Object) => {
+      if (seq !== this.diskInfoSeq || !this.profile) {
+        return;
+      }
+      this.applyDiskInfo(raw as string);
+      this.applySnapshots(raw as string);
+    })
+  }
+
+  private applyDiskInfo(s: string): void {
     this.diskVirtualGB = 0;
     this.diskActualGB = 0;
     this.diskFmt = '?';
-    if (!this.diskPath) {
-      return;
-    }
-    const s = napi.diskInfo(this.diskPath);
-    if (s.length === 0) {
+    if (!this.diskPath || s.length === 0) {
       return;
     }
     try {
@@ -394,18 +418,32 @@ export struct VmManage {
     return '可用';
   }
 
-  private refreshSnapshot(): void {
+  private applySnapshots(raw: string): void {
     if (!this.canSnapshot()) {
       this.snapshots = [];
       return;
     }
-    /* 列表来自 qemu-img info --output=json 的 snapshots 数组（同 diskInfo 的原始 JSON）；
+    /* 列表来自 qemu-img info --output=json 的 snapshots 数组（与磁盘信息同一份 JSON）；
      * 临时会话的 `__temp__` 点是机制层产物，滤掉不打扰用户 */
-    this.snapshots = parseSnapshots(napi.diskInfo(this.diskPath))
+    this.snapshots = parseSnapshots(raw)
       .filter((s: VmSnapshotEntry) => !isTempSnapshot(s.name));
     if (this.snapshots.length > 0) {
       this.snapshots.sort((a, b) => b.dateSec - a.dateSec);
     }
+  }
+
+  private refreshSnapshot(): void {
+    const path = this.diskPath;
+    if (!path) {
+      return;
+    }
+    const seq = ++this.diskInfoSeq;
+    taskpool.execute(new taskpool.Task(diskInfoTask, path)).then((raw: Object) => {
+      if (seq !== this.diskInfoSeq || !this.profile) {
+        return;
+      }
+      this.applySnapshots(raw as string);
+    })
   }
 
   private doSnapshotApply(s: VmSnapshotEntry): void {
@@ -426,8 +464,7 @@ export struct VmManage {
             promptAction.showToast({ message: '恢复失败' });
             return;
           }
-          this.refreshDisk();
-          this.refreshSnapshot();
+          this.refreshDiskInfo();
           this.showSnack(`已恢复到「${s.name}」`);
         },
       },
