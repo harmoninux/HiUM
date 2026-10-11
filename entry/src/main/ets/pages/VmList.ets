@@ -280,7 +280,7 @@ export struct VmList {
       Column({ space: sp1 }) {
         Row({ space: sp1 }) {
           Text(p.name)
-            .fontSize(tCard)
+            .fontSize(tItem)
             .fontWeight(FontWeight.Medium)
             .fontColor(cText)
             .maxLines(1)
