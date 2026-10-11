@@ -5,7 +5,9 @@
 // 表单行布局：能贴右的贴右（设置行范式）——布尔 Switch 行与选项少的 Chip 行
 // （磁盘接口/网卡型号）标签撑满 + 控件贴右；选项多一行放不下的 Chip 行（架构/
 // 显卡）才用标签 72 列 + 控件从列位流动排列。
-// 行内按钮/Chip 字号跟随所在行（tItem），仅底部操作条与输入框用控件基准 tBody。
+// 按钮字号：与非按钮内容并排的行内按钮跟随所在行文字（tItem；与输入框并排则
+// tBody 跟输入框）；纯按钮行（选择文件/添加 ISO/添加数据盘等，区块级动作）与
+// 底部操作条一律 tBody。危险动作（移除/删除/清除）一律透明底 + cDanger。
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
@@ -586,12 +588,12 @@ export struct VmEdit {
                   Text('无').fontSize(tSub).fontColor(cSub)
                 }
                 Row({ space: sp3 }) {
-                  Button('选择文件').focusable(false).fontSize(tItem)
+                  Button('选择文件').focusable(false).fontSize(tBody)
                     .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                     .backgroundColor(Color.Transparent).fontColor(cPrimary)
                     .onClick(() => this.pickLocalIso())
                   Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
-                    .focusable(false).fontSize(tItem)
+                    .focusable(false).fontSize(tBody)
                     .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                     .enabled(!this.ensureIsoLoading)
                     .onClick(() => this.pickBuiltinIso())

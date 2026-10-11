@@ -751,13 +751,13 @@ export struct VmStorage {
         }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp1 })
       }
       Row({ space: sp3 }) {
-        Button('选择文件').focusable(false).fontSize(tItem)
+        Button('选择文件').focusable(false).fontSize(tBody)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent).fontColor(cPrimary)
           .border({ width: 1, color: cBorder, style: BorderStyle.Dashed })
           .onClick(() => this.pickLocalIso())
         Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
-          .focusable(false).fontSize(tItem)
+          .focusable(false).fontSize(tBody)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .enabled(!this.ensureIsoLoading)
           .backgroundColor(Color.Transparent).fontColor(cPrimary)

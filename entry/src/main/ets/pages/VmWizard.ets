@@ -739,10 +739,9 @@ export struct VmWizard {
         Row({ space: sp3 }) {
           Chip({ label: '动态分配', active: this.diskAlloc === 'dynamic', onTap: () => { this.diskAlloc = 'dynamic'; } })
           Chip({ label: '固定大小', active: this.diskAlloc === 'fixed', onTap: () => { this.diskAlloc = 'fixed'; } })
-          Text('动态：用到多少占多少；固定：创建即占满')
-            .fontSize(tSub).fontColor(cWeak).layoutWeight(1)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
+        Text('动态：用到多少占多少；固定：创建即占满')
+          .fontSize(tSub).fontColor(cWeak).width('100%')
       } else {
         Row({ space: sp3 }) {
           Button('选择镜像').focusable(false).fontSize(tItem)
@@ -829,6 +828,7 @@ export struct VmWizard {
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             Button('移除').focusable(false).fontSize(tItem)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+              .backgroundColor(Color.Transparent).fontColor(cDanger)
               .onClick(() => this.removeIso(idx))
           }
           .width('100%')
@@ -837,12 +837,12 @@ export struct VmWizard {
         Text('无').fontSize(tSub).fontColor(cSub).width('100%')
       }
       Row({ space: sp3 }) {
-        Button('添加 ISO').focusable(false).fontSize(tItem)
+        Button('添加 ISO').focusable(false).fontSize(tBody)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent).fontColor(cPrimary)
           .onClick(() => this.pickLocalIso())
         Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.archLabel(this.arch)})`)
-          .focusable(false).fontSize(tItem)
+          .focusable(false).fontSize(tBody)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .enabled(!this.ensureIsoLoading)
           .onClick(() => this.pickBuiltinIso())
