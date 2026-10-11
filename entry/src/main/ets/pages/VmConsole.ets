@@ -69,13 +69,12 @@ const TAG = 'QemuUI';
 /* 悬浮按钮（替代顶部工具条）：半透明圆钮，可拖拽移动，点击展开竖向操作面板。
  * 位置持久化到 preferences（键按 vmId 区分，跨窗口/重开记住落位）。
  * 尺寸/阈值参照 wineohos VirtualDesktop 的 EXIT_BTN_SIZE/EXIT_DRAG_THRESHOLD。 */
-/* 顶部悬浮工具栏（仅工具栏用）：Pad/手机高密度屏，小字号才有「轻便浮层」观感；
- * PC(2in1) 密度低，11 显得局促，保持 12 */
-const STATUS_BTN_H_PAD = 20;
-const STATUS_FS_PAD = 11;
-const STATUS_BTN_H_PC = 22;
-const STATUS_FS_PC = 12;
-/* 串口面板与黑底浮层（熔断横幅/手势速查）：不随状态栏收窄，维持原尺寸 */
+/* 顶部悬浮工具栏（仅工具栏用）：11/12 是「细条状态栏」语境的档——改成悬浮
+ * 浮层后该档显小，升到条目档 14/28（浮层与窗口形态（Pad/PC）无关，不再分档）。
+ * 串口面板/黑底浮层字号（PANEL_FS）不经工具栏，维持原值。 */
+const BAR_BTN_H = 28;
+const BAR_FS = 14;
+/* 串口面板与黑底浮层（熔断横幅/手势速查）：独立专档，不随工具栏档变化 */
 const PANEL_H = 32;
 const PANEL_BTN_H = 26;
 const PANEL_FS = 12;
@@ -170,9 +169,9 @@ struct VmConsole {
    * 不能写熔断标记，否则每次正常关机都会让下次进入不自动启动。 */
   private userStopped: boolean = false;
   private xcController: VmXComponentController = new VmXComponentController();
-  /* 顶部悬浮工具栏尺寸（Pad/手机 vs PC 两档，见 STATUS_*_PAD/PC 常量注释） */
-  private barBtnH: number = isPadOrPhone() ? STATUS_BTN_H_PAD : STATUS_BTN_H_PC;
-  private barFs: number = isPadOrPhone() ? STATUS_FS_PAD : STATUS_FS_PC;
+  /* 顶部悬浮工具栏尺寸（见 BAR_* 常量注释：浮层升档后不分 Pad/PC） */
+  private barBtnH: number = BAR_BTN_H;
+  private barFs: number = BAR_FS;
   private immersiveMaximized: boolean = false;  /* 防递归：maximize() 自身也触发窗口状态回调 */
   private areaW: number = 0;
   private areaH: number = 0;
@@ -1799,14 +1798,14 @@ struct VmConsole {
         Row({ space: sp2 }) {
           Button() {
             SymbolGlyph(this.barOpen ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
-              .fontSize(18)
+              .fontSize(20)
               .fontColor([cConsoleText])
           }
           .focusable(false)
-          .width(this.barBtnH + 14)
-          .height(this.barBtnH + 14)
+          .width(this.barBtnH + 8)
+          .height(this.barBtnH + 8)
           .backgroundColor(cConsolePanel)
-          .borderRadius((this.barBtnH + 14) / 2)
+          .borderRadius((this.barBtnH + 8) / 2)
           .onClick(() => { this.barOpen = !this.barOpen })
           if (this.status.length > 0) {
             Text(this.status).fontSize(this.barFs).fontColor(cConsoleText)
