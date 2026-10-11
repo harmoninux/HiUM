@@ -723,7 +723,7 @@ export struct VmEdit {
           /* Column 默认水平居中：占满宽度的行看不出来，自适应宽度的说明文字
            * 会悬在中间，表单区一律左对齐 */
           .alignItems(HorizontalAlign.Start)
-          .padding({ left: sp5, right: sp5, top: sp4, bottom: sp4 })
+          .padding({ left: sp5, right: sp5, top: sp2, bottom: sp2 })
         }
         .layoutWeight(1)
         .align(Alignment.Top)
