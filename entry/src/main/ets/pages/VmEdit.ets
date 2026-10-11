@@ -11,7 +11,7 @@ import { isoReadable } from '../lib/fsutil';
 import { pickIsoPath } from '../lib/isoPick';
 import { Chip } from '../lib/uiWidgets';
 import { PortForwardEditor } from '../lib/PortForwardEditor';
-import { cPrimary, cDanger, cSub, cWeak, cBg, cCard, cBorder, cText, tCard, tLabel, tBody, tItem, tSub, tMono, rBtn, bw, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp4, sp6 } from '../lib/uiTokens';
+import { cPrimary, cDanger, cSub, cWeak, cBg, cCard, cBorder, cText, tCard, tLabel, tBody, tItem, tSub, tMono, rBtn, bw, btnSh, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp4, sp5, sp6 } from '../lib/uiTokens';
 
 interface DiskNapi {
   createDisk: (path: string, sizeMB: number, alloc: string) => number;
@@ -404,7 +404,7 @@ export struct VmEdit {
       /* 标题/关闭由 sheet 系统提供；校验拦截提示（内联红字）常驻内容顶部，任何 Tab 都看得见 */
       if (this.saveErrorMsg.length > 0) {
         Text(this.saveErrorMsg).fontSize(tSub).fontColor(cDanger).width('100%')
-          .padding({ left: sp4, right: sp4, top: sp2, bottom: sp2 })
+          .padding({ left: sp5, right: sp5, top: sp2, bottom: sp2 })
       }
 
       Row() {
@@ -720,7 +720,7 @@ export struct VmEdit {
           /* Column 默认水平居中：占满宽度的行看不出来，自适应宽度的说明文字
            * 会悬在中间，表单区一律左对齐 */
           .alignItems(HorizontalAlign.Start)
-          .padding({ left: sp4, right: sp4, bottom: sp6 })
+          .padding({ left: sp5, right: sp5, bottom: sp6 })
         }
         .layoutWeight(1)
         .align(Alignment.Top)
@@ -744,7 +744,7 @@ export struct VmEdit {
           .onClick(() => this.save())
       }
       .width('100%')
-      .padding({ left: sp4, right: sp4, top: sp2, bottom: sp3 })
+      .padding({ left: sp5, right: sp5, top: sp2, bottom: sp3 })
       .border({ width: { top: bw }, color: { top: cBorder } })
     }
     .width('100%')

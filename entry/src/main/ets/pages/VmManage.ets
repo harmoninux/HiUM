@@ -16,11 +16,11 @@ import {
 } from '../lib/vmsnapshot';
 import { isTempSnapshot } from '../lib/tempSession';
 import { pathExists } from '../lib/fsutil';
-import { Snackbar } from '../lib/uiWidgets';
+import { Snackbar, SecHead } from '../lib/uiWidgets';
 import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
-  cCard, cBlock, cChip, cBorder, cConsoleScrim,
-  tCard, tLabel, tBody, tItem, tSub, tMono, iconFs,
+  cCard, cBlock, cChip, cConsoleScrim,
+  tCard, tBody, tItem, tSub, tMono, iconFs,
   sp1, sp2, sp3, sp4, sp5, sp6, rCard, rElem, rBadge, rBtn, btnH, btnSh, btnPadX, bw,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
@@ -419,6 +419,7 @@ export struct VmManage {
       primaryButton: { value: '取消', action: () => {} },
       secondaryButton: {
         value: '恢复',
+        fontColor: cDanger,
         action: () => {
           const ret = snapshotApply(this.diskPath, s.name);
           if (ret !== 0) {
@@ -655,27 +656,16 @@ export struct VmManage {
   readonlyBadge() {
     Text('只读')
       .fontSize(tSub).fontColor(cWarn)
-      .padding({ left: sp1, right: sp1 })
+      .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
       .borderRadius(rBadge)
       .backgroundColor(cChip)
   }
 
   /* ================= 分区 ================= */
 
-  /* 分区标题（与 VmWizard groupHeader 同款：灰字在左，细线延伸至右） */
-  @Builder
-  secHead(t: string) {
-    Row({ space: sp2 }) {
-      Text(t).fontSize(tLabel).fontColor(cSub)
-      Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
-    }
-    .width('100%')
-    .margin({ top: sp3, bottom: sp1 })
-  }
-
   @Builder
   secStorage() {
-    this.secHead('存储')
+    SecHead({ label: '存储' })
     Row() {
       Column({ space: sp1 }) {
         Row({ space: sp3 }) {
@@ -719,7 +709,7 @@ export struct VmManage {
 
   @Builder
   secSnapshot() {
-    this.secHead('快照')
+    SecHead({ label: '快照' })
     Column() {
       if (!this.canSnapshot()) {
         Text(this.snapStatus()).fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp3 })
@@ -778,7 +768,7 @@ export struct VmManage {
 
   @Builder
   secNet() {
-    this.secHead('网络')
+    SecHead({ label: '网络' })
     Column() {
       Column({ space: 1 }) {
         Text(this.netEnabled ? '已启用' : '已关闭').fontSize(tItem)
@@ -790,7 +780,7 @@ export struct VmManage {
 
   @Builder
   secAdvanced() {
-    this.secHead('高级')
+    SecHead({ label: '高级' })
     /* 标题行点击折叠/展开；复制按钮独立于折叠态（收起时也允许复制）。
      * Blank 会吃掉标题行左侧的空隙点击，把 onClick 挂在整行兜底 */
     Row() {
@@ -985,7 +975,7 @@ export struct VmManage {
               .onClick(() => this.openConsole())
             }
 
-            this.secHead('概览')
+            SecHead({ label: '概览' })
             /* 概览胶囊一排（内存/核/机型/固件；无 vga） */
             Row({ space: sp3 }) {
               if (this.memLabel().length > 0) {

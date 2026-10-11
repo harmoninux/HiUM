@@ -5,7 +5,7 @@
  * Chip 等“无状态展示”用 @Prop（父级重算即刷新）；Snackbar 持有 2 秒自动消失的
  * 定时器，故用 @Link 自持状态（页面只需 this.snack = '...'）。 */
 
-import { cPrimary, cSub, cWeak, cText, cChip, cBorder, cBg, rBadge, rElem, rBtn, sp1, sp3, sp4, sp5, sp2, tBody, tLabel, tSub } from './uiTokens';
+import { cPrimary, cSub, cWeak, cText, cChip, cBorder, cBg, rBadge, rElem, rBtn, sp1, sp3, sp4, sp5, sp2, tBody, tCard, tSub } from './uiTokens';
 
 /* 选择胶囊：单选一组的选项（未选 cChip 底 + cSub 字；选中 cPrimary 底 + 白字）。
  * 用法：Chip({ label: 'virtio', active: this.iface === 'virtio', onTap: () => this.iface = 'virtio' })
@@ -39,7 +39,7 @@ export struct SecHead {
 
   build() {
     Row({ space: sp2 }) {
-      Text(this.label).fontSize(tLabel).fontColor(cSub)
+      Text(this.label).fontSize(tCard).fontColor(cSub)
       Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
     }
     .width('100%')
@@ -61,7 +61,7 @@ export struct FoldHead {
         Span(this.label).fontColor(cSub)
         Span(this.collapsed ? ' ▸ 展开' : ' ▾ 收起').fontColor(cWeak).fontSize(tSub)
       }
-      .fontSize(tLabel)
+      .fontSize(tCard)
       Divider().strokeWidth(1).color(cBorder).layoutWeight(1)
     }
     .width('100%')

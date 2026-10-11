@@ -272,11 +272,11 @@ export struct VmTemplate {
               if (t.iso === 'builtin') {
                 Text('内置 ISO').fontSize(tSub).fontColor(cPrimary)
                   .backgroundColor(cChip).borderRadius(rBadge)
-                  .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               } else {
                 Text('自备镜像').fontSize(tSub).fontColor(cSub)
                   .backgroundColor(cChip).borderRadius(rBadge)
-                  .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
+                  .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               }
             }
             .width('100%')

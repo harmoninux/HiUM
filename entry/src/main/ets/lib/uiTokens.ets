@@ -23,9 +23,11 @@ export const cSelBg    = $r('app.color.c_sel_bg'); /* 选中浅底 */
  * 层级混用审计结论（2026-10）：信息行曾在 tLabel(16)/tSub(14) 间随机取用、
  * 行内按钮曾在 tBody/tSub 间两档并存，落地后按下面角色对号入座，禁止借用。 */
 export const tPage  = 20; /* 页面/窗口标题，500（不加大字重，层级靠档位差） */
-export const tCard  = 16; /* 卡片/行标题，500~600 */
-export const tLabel = 16; /* 表单行标签（VmEdit 左列等） 400 */
-export const tBody  = 16; /* 正文/一切按钮/输入框文字 400 */
+export const tCard  = 16; /* 卡片/分组标题（SecHead 等），500~600；层级高于字段名 */
+export const tLabel = 14; /* 表单字段名/标签（VmEdit 左列等）400——与 tItem 同值：字段名
+                           * 跨页同档（详情页信息行与编辑弹窗表单标签一致），否则从详情页
+                           * 打开编辑弹窗会有「字体突然变大」的跳变；对齐系统 Subtitle_S/Body_M */
+export const tBody  = 16; /* 正文/一切按钮/输入框文字 400（系统 textfield 基准 16fp） */
 export const tItem  = 14; /* 条目档：区块内信息行主文本（快照名/当前状态/已启用/盘信息行） */
 export const tSub   = 12; /* 元数据档：说明/规格/日期/chips/徽标 400（对齐系统 caption） */
 export const tMono  = 12; /* mono 小字：状态/指纹/步骤圆点 */
