@@ -444,7 +444,7 @@ export struct VmEdit {
               Row() {
                 Text('架构').fontSize(tLabel).width(72)
                 Text(this.arch)
-                  .fontSize(tBody)
+                  .fontSize(tItem)
                   .fontColor(cSub)
                   .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).layoutWeight(1)
                   .padding({ left: inpPadX, right: inpPadX })

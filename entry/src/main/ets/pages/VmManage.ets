@@ -747,16 +747,17 @@ export struct VmManage {
   @Builder
   secSnapshot() {
     SecHead({ label: '快照' })
-    Column() {
+    Column({ space: sp2 }) {
       if (!this.canSnapshot()) {
-        Text(this.snapStatus()).fontSize(tSub).fontColor(cWeak)      }
+        Text(this.snapStatus()).fontSize(tSub).fontColor(cWeak)
+      }
       if (this.snapCreateMode && this.canSnapshot()) {
         Row({ space: sp3 }) {
           TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tItem)
             .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
             .onChange((v: string) => this.snapNameText = v)
           Button('创建').focusable(false).fontSize(tItem)
-            .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
+            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(cPrimary).fontColor(Color.White)
             .onClick(() => this.doSnapshotCreate())
           Button('取消').focusable(false).fontSize(tItem)
