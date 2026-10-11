@@ -41,7 +41,7 @@ struct Index {
       } else if (name === 'idle') {
         /* 未选中任何虚拟机时的内容区占位：居中引导，避免右侧留白 */
         Column({ space: sp3 }) {
-          Text('🖥').fontSize(56)
+          Text('🖥').fontSize(48)
           Text('未选择虚拟机')
             .fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cSub)
           Text('从列表中选择一台虚拟机，查看详情 / 启动 / 存储')
@@ -140,7 +140,7 @@ struct Index {
         .bindSheet(this.showWizard, this.wizardSheetBuilder(), {
           title: { title: '创建虚拟机' },
           preferType: SheetType.CENTER,
-          height: 500,
+          height: 540,
           width: 640,
           shouldDismiss: (_d: SheetDismiss) => {
             this.wizardCloseReq++;
@@ -153,7 +153,7 @@ struct Index {
         .bindSheet(this.showTemplate, this.templateSheetBuilder(), {
           title: { title: '模板创建' },
           preferType: SheetType.CENTER,
-          height: 500,
+          height: 540,
           width: 640,
           onWillDisappear: () => {
             this.showTemplate = false;
@@ -164,7 +164,7 @@ struct Index {
           title: { title: '虚拟机配置', subtitle: this.editParam ? this.editParam.name : '' },
           preferType: SheetType.CENTER,
           height: 540,
-          width: 680,
+          width: 640,
           shouldDismiss: (_d: SheetDismiss) => {
             this.editCloseReq++;
           },

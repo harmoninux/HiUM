@@ -248,7 +248,7 @@ export struct VmList {
   @Builder
   emptySide() {
     Column({ space: sp4 }) {
-      Text('🖥').fontSize(44)
+      Text('🖥').fontSize(48)
       Text('还没有虚拟机')
         .fontSize(tCard)
         .fontWeight(FontWeight.Medium)
