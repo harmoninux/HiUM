@@ -515,7 +515,7 @@ export struct VmEdit {
               /* 磁盘接口（仅 x86 板卡有 IDE 南桥）：切换只影响 -drive if= 的挂载方式，
                * 盘内容不动——Windows VM 若误建为 virtio，切到 ide 即可被安装程序识别。 */
               if (this.isX86Board()) {
-                Column() {
+                Column({ space: sp1 }) {
                   Row({ space: sp3 }) {
                     Text('磁盘接口').fontSize(tLabel).layoutWeight(1)
                     Chip({ label: 'virtio', active: this.diskIface === 'virtio', onTap: () => { this.diskIface = 'virtio'; } })
@@ -621,7 +621,7 @@ export struct VmEdit {
                 }.alignItems(HorizontalAlign.Start)                /* 网卡型号（仅 x86 板卡可切）：rtl8139 是 XP/Win7 唯一双 in-box 驱动的
                  * 网卡，性能弱于 virtio；Linux 用 virtio。 */
                 if (this.isX86Board()) {
-                  Column() {
+                  Column({ space: sp1 }) {
                     Row({ space: sp3 }) {
                       Text('网卡型号').fontSize(tLabel).layoutWeight(1)
                       Chip({ label: 'virtio', active: this.netModel === 'virtio', onTap: () => { this.netModel = 'virtio'; } })

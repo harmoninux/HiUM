@@ -606,7 +606,7 @@ export struct VmWizard {
   stepBoard() {
     Column({ space: sp3 }) {
       SecHead({ label: '机器类型' })
-      Column() {
+      Column({ space: sp1 }) {
         Row({ space: sp3 }) {
           ForEach(this.boards(), (b: string) => {
             Column() {
@@ -631,7 +631,7 @@ export struct VmWizard {
       /* —— v4 显卡（x86 板卡可换；virt 固定 virtio-gpu；raspi 板载） —— */
       SecHead({ label: '显卡' })
       if (this.isX86Board()) {
-        Column() {
+        Column({ space: sp1 }) {
           Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
             ForEach(['std', 'cirrus', 'vmware', 'virtio'], (g: string) => {
               Row() {
@@ -664,7 +664,7 @@ export struct VmWizard {
         }
         .width('100%')
 
-        Column() {
+        Column({ space: sp1 }) {
           TextInput({ text: this.cpuModel, placeholder: '自定义（预设外的机型）' })
             .fontSize(tItem)
             .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
@@ -746,7 +746,7 @@ export struct VmWizard {
         Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
           min: 0, max: DISK_SIZES.length - 1, step: 1 })
           .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
-        Column() {
+        Column({ space: sp1 }) {
           Row({ space: sp3 }) {
             Chip({ label: '动态分配', active: this.diskAlloc === 'dynamic', onTap: () => { this.diskAlloc = 'dynamic'; } })
             Chip({ label: '固定大小', active: this.diskAlloc === 'fixed', onTap: () => { this.diskAlloc = 'fixed'; } })
@@ -821,7 +821,7 @@ export struct VmWizard {
               .onClick(() => { this.initrdSrc = ''; })
           }
         }
-        Column() {
+        Column({ space: sp1 }) {
           TextInput({ text: this.kernelAppend, placeholder: '内核参数（可选），如 console=tty0 console=ttyS0 root=/dev/vda' })
             .fontSize(tItem)
             .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
