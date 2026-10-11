@@ -749,8 +749,7 @@ export struct VmManage {
     SecHead({ label: '快照' })
     Column() {
       if (!this.canSnapshot()) {
-        Text(this.snapStatus()).fontSize(tSub).fontColor(cWeak).padding({ top: sp1, bottom: sp3 })
-      }
+        Text(this.snapStatus()).fontSize(tSub).fontColor(cWeak)      }
       if (this.snapCreateMode && this.canSnapshot()) {
         Row({ space: sp3 }) {
           TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tItem)
@@ -785,8 +784,7 @@ export struct VmManage {
               .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cDanger)
               .onClick(() => this.doSnapshotDelete(s))
-          }.width('100%').padding({ top: sp1, bottom: sp1 })
-        }, (s: VmSnapshotEntry) => s.id + ':' + s.name)
+          }.width('100%')        }, (s: VmSnapshotEntry) => s.id + ':' + s.name)
         Row() {
           Column().width(9).height(9).borderRadius(5).backgroundColor(cPrimary).margin({ right: sp3 })
           /* 只作时间线终点锚点（不是可操作的快照），不放时间戳避免误读为快照时间 */
@@ -798,8 +796,7 @@ export struct VmManage {
               .backgroundColor(Color.Transparent).fontColor(cPrimary)
               .onClick(() => { this.snapCreateMode = true; this.snapNameText = ''; })
           }
-        }.width('100%').padding({ top: sp1, bottom: sp1 })
-      }.width('100%').padding({ left: sp3 })
+        }.width('100%')      }.width('100%').padding({ left: sp3 })
     }.alignItems(HorizontalAlign.Start)
   }
 
@@ -811,8 +808,7 @@ export struct VmManage {
         Text(this.netEnabled ? '已启用' : '已关闭').fontSize(tItem)
         Text(`端口转发 ${(this.profile && this.profile.net.portForwards.length > 0) ? this.profile.net.portForwards : '无'} · 9p 共享${(this.profile && this.profile.net.sharedFolder) ? '开' : '关'}`)
           .fontSize(tSub).fontColor(cSub)
-      }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp3 })
-    }.alignItems(HorizontalAlign.Start)
+      }.alignItems(HorizontalAlign.Start).width('100%')    }.alignItems(HorizontalAlign.Start)
   }
 
   @Builder
@@ -955,7 +951,7 @@ export struct VmManage {
         .alignItems(VerticalAlign.Center)
 
         Scroll() {
-          Column() {
+          Column({ space: sp2 }) {
             /* 画面卡：截图即启动/进入按钮（UTM 详情页范式）。黑框直接贴合图片
              * （抓帧 1024 物理像素 ÷ 密度 ≈ 293vp，1:1 清晰），通栏卡必然左右
              * 大片黑边。无图占位取同尺寸（16:9 典型帧），出图不跳。整卡可点进
@@ -1053,8 +1049,7 @@ export struct VmManage {
               }
             }
             .width('100%')
-            .padding({ top: sp1, bottom: sp3 })
-
+            
             this.secStorage()
             this.secNet()
             this.secSnapshot()

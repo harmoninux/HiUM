@@ -539,7 +539,7 @@ export struct VmStorage {
     SecHead({ label: '系统盘' })
     if (!this.diskPath) {
       Row({ space: sp3 }) {
-        Text('系统盘缺失').fontSize(tSub).fontColor(cWarn).layoutWeight(1).padding({ top: sp1, bottom: sp1 })
+        Text('系统盘缺失').fontSize(tSub).fontColor(cWarn).layoutWeight(1)
         Button('重建系统盘').focusable(false).fontSize(tItem)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent).fontColor(cDanger)
@@ -608,8 +608,7 @@ export struct VmStorage {
               .onClick(() => this.expandMode = false)
           }.margin({ top: sp3 })
         }
-      }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp3 })
-    }
+      }.alignItems(HorizontalAlign.Start).width('100%')    }
   }
 
   /* 数据盘（v5）：列表逐行 只读/扩容/移除 + 底部「添加数据盘」表单（新建/导入）。
@@ -617,7 +616,7 @@ export struct VmStorage {
   @Builder
   secSecondDisk() {
     SecHead({ label: '数据盘' })
-    Column({ space: sp3 }) {
+    Column({ space: sp2 }) {
       /* 逐行：名字 + 只读 Toggle + 扩容 + 移除 */
       ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
         Row({ space: sp3 }) {
@@ -642,8 +641,7 @@ export struct VmStorage {
             .enabled(this.canSecondOp())
             .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.doSecondRemove(idx))
-        }.width('100%').padding({ top: sp1, bottom: sp1 })
-      }, (d: VmDisk) => d.path)
+        }.width('100%')      }, (d: VmDisk) => d.path)
 
       if (this.extraDisks.length === 0) {
         Text('还没有数据盘。可在下方新建空白盘或导入现有镜像。')
@@ -740,16 +738,13 @@ export struct VmStorage {
               .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cDanger)
               .onClick(() => this.removeIso(idx))
-          }.width('100%').padding({ top: sp1, bottom: sp3 })
-        }, (p: string, idx: number) => `${idx}:${p}`)
+          }.width('100%')        }, (p: string, idx: number) => `${idx}:${p}`)
       } else {
         Column({ space: sp1 }) {
           Text('未引用光盘').fontSize(tSub).fontColor(cWeak)
-            .padding({ top: sp1, bottom: sp1 })
-          Text('选择本地 ISO 或内置 Alpine')
+                      Text('选择本地 ISO 或内置 Alpine')
             .fontSize(tSub).fontColor(cWeak)
-        }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp1 })
-      }
+        }.alignItems(HorizontalAlign.Start).width('100%')      }
       Row({ space: sp3 }) {
         Button('选择文件').focusable(false).fontSize(tItem)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
@@ -762,10 +757,10 @@ export struct VmStorage {
           .enabled(!this.ensureIsoLoading)
           .backgroundColor(Color.Transparent).fontColor(cPrimary)
           .onClick(() => this.pickBuiltinIso())
-      }.width('100%').padding({ top: sp1, bottom: sp3 })
+      }.width('100%')
       if (this.cdromPaths.length > 0) {
         Text('从光盘启动时，使用第一张 ISO 引导')
-          .fontSize(tSub).fontColor(cWeak).width('100%').padding({ bottom: sp3 })
+          .fontSize(tSub).fontColor(cWeak).width('100%')
       }
     }.alignItems(HorizontalAlign.Start).width('100%')
   }
@@ -774,13 +769,13 @@ export struct VmStorage {
     Stack() {
       Column() {
         Scroll() {
-          Column() {
+          Column({ space: sp2 }) {
             this.secSystemDisk()
             this.secSecondDisk()
             this.secCdrom()
           }
           .width('100%')
-          .padding({ left: sp5, right: sp5, top: sp1, bottom: sp6 })
+          .padding({ left: sp5, right: sp5, top: sp2, bottom: sp4 })
         }
         .layoutWeight(1)
         .align(Alignment.Top)
