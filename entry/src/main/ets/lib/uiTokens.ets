@@ -44,6 +44,7 @@ export const sp6 = 32;
 export const rCard = 10;  /* 卡/按钮 */
 export const rElem = 8;   /* 小元素 */
 export const rBadge = 4;  /* 徽标 */
+export const rConsole = 6; /* console 串口面板内元素圆角（日志区/键帽/输入框，设计稿 6） */
 export const bw = 1;
 
 /* ---- 按钮尺寸（对齐设计稿：小圆角矩形，而非系统默认胶囊） ---- */
@@ -81,6 +82,12 @@ export const cConsolePlaceholder = '#ff9aa4b2'; /* 串口输入框占位/光标�
 export const cConsoleBanner = '#e6601b1b';    /* 启动失败横幅底 */
 export const cConsoleBtn = '#40ffffff';       /* 深色浮层上的浅色按钮底 */
 export const cConsoleScrim = 'rgba(0,0,0,0.55)'; /* 全屏遮罩（手势速查/截图卡按钮） */
+
+/* ---- 串口底栏面板（2026-10-11 按设计稿重做：面板推开画面、底部常驻，非半透明浮层）---- */
+export const cConsolePanelSolid = '#ff20242b'; /* 面板底（不透：底栏之下无画面可透） */
+export const cConsoleLogBg = '#ff171a20';      /* 日志区底（比面板再深一档） */
+export const cConsoleKey = '#1fffffff';        /* 键帽 chip 底（12% 白） */
+export const cConsolePrimary = '#ff0563ff';    /* 主色实心（发送钮底，白字 ≥4.5:1，固定深底蓝） */
 
 /* ---- 虚拟键盘浮动面板（恒深色底，同 console 专档理由；主色为固定亮蓝而非主题色） ---- */
 export const cKbPanel = '#4D000000';   /* 面板底（半透明黑，透出画面） */

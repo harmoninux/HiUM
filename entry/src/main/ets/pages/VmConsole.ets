@@ -21,6 +21,7 @@ import {
   cConsoleText, cConsoleAccent, cConsoleLogText, cConsoleWarn,
   cConsolePanel, cConsolePanelStrong, cConsoleInputBg, cConsolePlaceholder,
   cConsoleBanner, cConsoleBtn, cConsoleScrim,
+  cConsolePanelSolid, cConsoleLogBg, cConsoleKey, cConsolePrimary, rConsole,
 } from '../lib/uiTokens';
 
 /* 多 ISO 启动前的可读性过滤在 doStart 内做：把不可读盘从本次启动的 ISO 列表里剔除，
@@ -66,18 +67,21 @@ const napi: QemuNapi = napiModule as QemuNapi;
 const DOMAIN = 0x0002;
 const TAG = 'QemuUI';
 
-/* 悬浮按钮（替代顶部工具条）：半透明圆钮，可拖拽移动，点击展开竖向操作面板。
- * 位置持久化到 preferences（键按 vmId 区分，跨窗口/重开记住落位）。
- * 尺寸/阈值参照 wineohos VirtualDesktop 的 EXIT_BTN_SIZE/EXIT_DRAG_THRESHOLD。 */
-/* 顶部悬浮工具栏（仅工具栏用）：11/12 是「细条状态栏」语境的档——改成悬浮
- * 浮层后该档显小，升到条目档 14/28（浮层与窗口形态（Pad/PC）无关，不再分档）。
+/* 悬浮钮 + 工具栏（替代底部状态栏）：半透明圆钮浮在画面顶部，可拖拽移动
+ * （位置只在本次窗口会话内有效，不做持久化），点击展开/收起工具栏。 */
+/* 工具栏字号：11/12 是「细条状态栏」语境的档——改成悬浮浮层后该档显小，
+ * 升到条目档 14/28（浮层与窗口形态（Pad/PC）无关，不再分档）。
  * 串口面板/黑底浮层字号（PANEL_FS）不经工具栏，维持原值。 */
 const BAR_BTN_H = 28;
 const BAR_FS = 14;
+/* 钮拖拽判定阈值（vp）：位移超过视为拖动，否则算点击（展开/收起工具栏） */
+const BAR_DRAG_THRESHOLD = 5;
 /* 串口面板与黑底浮层（熔断横幅/手势速查）：独立专档，不随工具栏档变化 */
 const PANEL_H = 32;
 const PANEL_BTN_H = 26;
 const PANEL_FS = 12;
+/* 串口日志区固定高（设计稿：约 5~6 行 12 号字的等宽行） */
+const SERIAL_LOG_H = 110;
 const FAB_PREF = 'vmconsole_fab'; /* console 偏好文件名（虚拟键盘显隐 / 输入设置 / 串口字号共用） */
 /* 串口输入框的组件 id：发送后要把焦点交还给它（见 sendAndRefocus） */
 const SERIAL_INPUT_ID = 'hium-serial-input';
@@ -150,8 +154,14 @@ struct VmConsole {
   @State showKbd: boolean = false;   /* 虚拟键盘显隐（工具栏开关，按 vmId 持久化） */
   @State showGestureHint: boolean = false; /* 首次进入的手势速查（全局看过一次不再弹） */
   @State immersive: boolean = false; /* 沉浸全屏态（最大化进入）：隐藏系统栏；页内浮层不占布局、常驻 */
-  @State barOpen: boolean = false;   /* 顶部悬浮工具栏展开态（默认收起，只有一枚小钮浮在画面） */
-  /* v4 交互式串口：serialView=串口视图盖在画面上；文本/输入/Ctrl 修饰态均在页内 */
+  @State barOpen: boolean = false;   /* 悬浮工具栏展开态（默认收起，只有一枚小钮浮在画面） */
+  /* 悬浮钮位置：以屏幕顶部中点为原点的偏移（默认 0/0 = 顶部居中；拖动只改
+   * 偏移，窗口缩放/最大化后自动跟随——居中是动态约束而非一次性落位） */
+  @State barOffX: number = 0;
+  @State barOffY: number = 0;
+  @State toolbarW: number = 0; /* 工具栏实测宽高（以钮为中心定位；0 = 尚未测出） */
+  @State toolbarH: number = 0;
+  /* v4 交互式串口：serialView=串口底栏面板打开（画面压上部）；文本/输入/Ctrl 修饰态均在页内 */
   @State serialView: boolean = false;
   @State serialText: string = '';
   @State serialInput: string = '';
@@ -186,8 +196,11 @@ struct VmConsole {
   @State fbH: number = 0;
   @State fitW: number = 0;
   @State fitH: number = 0;
-  private containerW: number = 0;
-  private containerH: number = 0;
+  /* 画面容器尺寸。必须 @State：浮层 opacity/position 的更新依赖它——V1 的
+   * 属性更新只在「该属性读取过的 @State」变化时重跑，普通字段改了不触发
+   * 任何属性重算，浮层会永远停在首帧的「透明」状态（实测踩过） */
+  @State containerW: number = 0;
+  @State containerH: number = 0;
   private geoTimer: number = -1;
   /* buffer 几何的权威源：系统在自由窗口拖拽期间会向 surface 发「铺满窗口内容区」
    * 的 onSurfaceChanged（比例偏离组件），渲染层若照单全收，buffer 就被做成异形、
@@ -230,6 +243,12 @@ struct VmConsole {
   private trackVY: number = 0;
   private glideTimer: number = -1;
   private serialScroller: Scroller = new Scroller();
+  /* 悬浮钮拖拽状态机（onTouch 驱动）：起点触摸坐标 + 起点钮位置 + 是否已判定拖动 */
+  private barStartX: number = 0;
+  private barStartY: number = 0;
+  private barStartOffX: number = 0; /* 手势起点的偏移（拖动 = 起点偏移 + 位移） */
+  private barStartOffY: number = 0;
+  private barMoved: boolean = false;
 
   private toSurfacePx(vp: number, vpSize: number, surfaceSize: number): number {
     if (vpSize <= 0 || surfaceSize <= 0) {
@@ -1404,6 +1423,92 @@ struct VmConsole {
     }
   }
 
+  /* ================= 悬浮钮拖拽（onTouch；位置不持久化） ================= */
+
+  /* 钮位置求值：屏幕顶部中点 + 偏移（钮恒为 36 见方，不依赖浮层测量） */
+  private barPosX(): number {
+    return Math.max(0, (this.containerW - (this.barBtnH + 8)) / 2) + this.barOffX;
+  }
+
+  private barPosY(): number {
+    return sp2 + this.barOffY;
+  }
+
+  /* 偏移的边界钳制（钳偏移而非坐标——钮整体保持容器内） */
+  private clampBarOffX(ox: number): number {
+    const half = Math.max(0, (this.containerW - (this.barBtnH + 8)) / 2);
+    return Math.min(Math.max(-half, ox), half);
+  }
+
+  private clampBarOffY(oy: number): number {
+    const maxOy = Math.max(-sp2, this.containerH - (this.barBtnH + 8) - sp2);
+    return Math.min(Math.max(-sp2, oy), maxOy);
+  }
+
+  /* 容器尺寸变化（PC 窗口缩放/最大化/串口面板开合）：钮以「顶部中点 + 偏移」
+   * 自动重定位——未拖过 = 保持居中；拖过 = 相对屏幕中心的偏移保持；越界裁回 */
+  private syncBarPos(): void {
+    if (this.containerW <= 0) {
+      return;
+    }
+    const nx = this.clampBarOffX(this.barOffX);
+    const ny = this.clampBarOffY(this.barOffY);
+    if (nx !== this.barOffX) {
+      this.barOffX = nx;
+    }
+    if (ny !== this.barOffY) {
+      this.barOffY = ny;
+    }
+  }
+
+  /* 工具栏定位：水平以钮为中心（出界贴边）、垂直贴钮下方（底部放不下翻到
+   * 上方）。钮与工具栏是两组独立定位——展开/收起/气泡出入都不会挪动钮 */
+  private toolbarX(): number {
+    const btn = this.barBtnH + 8;
+    const x = this.barPosX() + btn / 2 - this.toolbarW / 2;
+    return Math.min(Math.max(0, x), Math.max(0, this.containerW - this.toolbarW));
+  }
+
+  private toolbarY(): number {
+    const below = this.barPosY() + (this.barBtnH + 8) + sp2;
+    if (this.toolbarH > 0 && below + this.toolbarH > this.containerH) {
+      return Math.max(0, this.barPosY() - sp2 - this.toolbarH);
+    }
+    return below;
+  }
+
+  /* 拖拽 + 点击判定：位移 > BAR_DRAG_THRESHOLD → 拖动（改偏移）；否则点击 → 展开/收起 */
+  private onBarTouch(ev: TouchEvent): void {
+    if (ev.type === TouchType.Down) {
+      const t = ev.touches[0];
+      if (t) {
+        this.barStartX = t.windowX;
+        this.barStartY = t.windowY;
+      }
+      this.barStartOffX = this.barOffX;
+      this.barStartOffY = this.barOffY;
+      this.barMoved = false;
+    } else if (ev.type === TouchType.Move) {
+      const t = ev.touches[0];
+      if (t) {
+        if (!this.barMoved &&
+          (Math.abs(t.windowX - this.barStartX) > BAR_DRAG_THRESHOLD ||
+            Math.abs(t.windowY - this.barStartY) > BAR_DRAG_THRESHOLD)) {
+          this.barMoved = true;
+        }
+        if (this.barMoved) {
+          this.barOffX = this.clampBarOffX(this.barStartOffX + (t.windowX - this.barStartX));
+          this.barOffY = this.clampBarOffY(this.barStartOffY + (t.windowY - this.barStartY));
+        }
+      }
+    } else if (ev.type === TouchType.Up || ev.type === TouchType.Cancel) {
+      if (!this.barMoved) {
+        this.barOpen = !this.barOpen;
+      }
+      this.barMoved = false;
+    }
+  }
+
   private actReset(): void {
     this.qmp('send-key',
       '{"keys":[{"type":"qcode","data":"ctrl"},' +
@@ -1412,6 +1517,85 @@ struct VmConsole {
   }
 
   /* ================= 交互式串口（v4）：画面 ↔ 串口视图 ================= */
+
+  /* 键帽 chip（Ctrl/Esc/Enter/清屏/字号共用）：圆角浅底方块；
+   * active 用于 Ctrl 修饰态高亮（同工具栏按钮的强调语义） */
+  @Builder
+  serialKey(label: string, active: boolean, action: () => void) {
+    Text(label)
+      .fontSize(PANEL_FS)
+      .height(PANEL_BTN_H)
+      .padding({ left: sp3, right: sp3 })
+      .fontColor(active ? cConsoleAccent : cConsoleText)
+      .backgroundColor(cConsoleKey)
+      .borderRadius(rConsole)
+      .onClick(action)
+  }
+
+  /* 串口底栏面板（样式按设计稿）：日志区（更深底 + 等宽）+ 键帽/输入行。
+   * 面板推开画面而非覆盖——串口调试常要同时看画面。 */
+  @Builder
+  serialPanel() {
+    Column({ space: sp2 }) {
+      Scroll(this.serialScroller) {
+        Text(this.serialText)
+          .fontSize(this.serialFs)
+          .fontFamily('monospace') /* 等宽（系统无此族名时回退默认，不影响功能） */
+          .fontColor(cConsoleLogText)
+          .width('100%')
+          .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
+          /* 长按选中复制（触摸场景 SELECTABLE_UNFOCUSABLE 即可；Ctrl+C
+           * 才需 SELECTABLE_FOCUSABLE）。数据刷新会重置选择，属预期 */
+          .copyOption(CopyOptions.LocalDevice)
+          .textSelectable(TextSelectableMode.SELECTABLE_UNFOCUSABLE)
+      }
+      .width('100%')
+      .height(SERIAL_LOG_H)
+      .align(Alignment.TopStart)
+      .scrollBar(BarState.Auto)
+      .backgroundColor(cConsoleLogBg)
+      .borderRadius(rConsole)
+      .clip(true) /* 圆角裁剪滚动内容 */
+
+      Row({ space: sp2 }) {
+        this.serialKey('Ctrl', this.ctrlOn, (): void => { this.ctrlOn = !this.ctrlOn })
+        this.serialKey('Esc', false, (): void => { this.serialSendByte(0x1b) })
+        this.serialKey('Enter', false, (): void => { this.serialSendByte(0x0d) })
+        this.serialKey('清屏', false, (): void => { this.serialText = '' })
+        this.serialKey(`字号 ${this.serialFs}`, false, (): void => { this.cycleSerialFs() })
+        TextInput({ text: this.serialInput, placeholder: '输入并回车发送（Ctrl 开时 ^C 生效）' })
+          .layoutWeight(1)
+          .fontSize(PANEL_FS)
+          .fontFamily('monospace')
+          .height(PANEL_H)
+          .fontColor(cConsoleText)
+          /* placeholder/光标必须显式给色：不设就跟随系统主题，深色主题下是深色，
+           * 落在深色面板（+ 底下 VM 常是黑屏）上等于隐形（实测踩过） */
+          .placeholderColor(cConsolePlaceholder)
+          .placeholderFont({ size: PANEL_FS }) /* 不给就用默认字号，比同栏其他文字大一圈 */
+          .caretColor(cConsoleAccent)
+          .backgroundColor(cConsoleInputBg)
+          .borderRadius(rConsole)
+          .padding({ left: sp3, right: sp3 })
+          .id(SERIAL_INPUT_ID)
+          .onChange((v: string) => this.serialInput = v)
+          .onSubmit(() => this.sendAndRefocus())
+        Text('发送')
+          .fontSize(PANEL_FS)
+          .height(PANEL_BTN_H)
+          .padding({ left: sp3, right: sp3 })
+          .fontColor(Color.White)
+          .backgroundColor(cConsolePrimary)
+          .borderRadius(rConsole)
+          .onClick(() => this.sendAndRefocus())
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+    }
+    .width('100%')
+    .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
+    .backgroundColor(cConsolePanelSolid)
+  }
 
   /* 打开串口视图：先回放本 VM 的落盘日志尾部（chardev logfile，跨启动累积；
    * 与实时流是同一条数据流，直接续上不插标记），再连 socket（qemu
@@ -1579,234 +1763,167 @@ struct VmConsole {
   }
 
   build() {
-    /* 根 = 顶部对齐的 Stack：画面全窗高 + 顶部居中悬浮层（开关钮/展开工具栏）。
-     * 浮层不占布局，沉浸（最大化）时画面依旧铺满 */
-    Stack({ alignContent: Alignment.Top }) {
-      /* VM 画面区：XComponent + 虚拟键盘 overlay（键盘盖画面、不压工具栏） */
-      Stack() {
-        XComponent({ type: XComponentType.SURFACE, controller: this.xcController })
-          .width(this.fitW > 0 ? this.fitW : '100%')
-          .height(this.fitH > 0 ? this.fitH : '100%')
-          .backgroundColor(Color.Black)
-          .onAreaChange((oldArea: Area, newArea: Area) => {
-            this.areaW = newArea.width as number;
-            this.areaH = newArea.height as number;
-            this.syncBufferGeometry();
-          })
-          .onTouch((event: TouchEvent) => this.handleTouch(event))
-          /* 鼠标**未按下**的移动不产生 TouchEvent（touch 需要接触），只走 onMouse 的
-           * MouseAction.Move；不挂它的话 guest 光标只有点击时才瞬移过去、移动完全不
-           * 跟随。MouseEvent.x/y 与 TouchObject.x/y 同为「响应组件的组件坐标系」vp，
-           * 故直接复用 sendPtrMedia。 */
-          .onMouse((event: MouseEvent) => {
-            if (event.action === MouseAction.Move) {
-              /* 触摸状态机活跃时 touch 通道已在发移动，mouse 再发就是双发 */
-              if (this.singleDown || this.twoFinger || this.touchButtons !== 0) {
+    /* 根 = 左上角对齐的 Stack：纵向内容（画面区 + 串口面板）+ 绝对定位的
+     * 悬浮钮/工具栏浮层（不占布局，沉浸（最大化）时画面依旧铺满） */
+    Stack({ alignContent: Alignment.TopStart }) {
+      /* 纵向 = 画面区 + 串口底栏面板：面板打开时画面压到上部（推开而非覆盖，
+       * 串口调试常要同时看画面）；其后的悬浮钮/工具栏是 Stack 浮层，不占布局 */
+      Column() {
+        /* VM 画面区：XComponent + 虚拟键盘/熔断横幅/手势速查 overlay */
+        Stack() {
+          XComponent({ type: XComponentType.SURFACE, controller: this.xcController })
+            .width(this.fitW > 0 ? this.fitW : '100%')
+            .height(this.fitH > 0 ? this.fitH : '100%')
+            .backgroundColor(Color.Black)
+            .onAreaChange((oldArea: Area, newArea: Area) => {
+              this.areaW = newArea.width as number;
+              this.areaH = newArea.height as number;
+              this.syncBufferGeometry();
+            })
+            .onTouch((event: TouchEvent) => this.handleTouch(event))
+            /* 鼠标**未按下**的移动不产生 TouchEvent（touch 需要接触），只走 onMouse 的
+             * MouseAction.Move；不挂它的话 guest 光标只有点击时才瞬移过去、移动完全不
+             * 跟随。MouseEvent.x/y 与 TouchObject.x/y 同为「响应组件的组件坐标系」vp，
+             * 故直接复用 sendPtrMedia。 */
+            .onMouse((event: MouseEvent) => {
+              if (event.action === MouseAction.Move) {
+                /* 触摸状态机活跃时 touch 通道已在发移动，mouse 再发就是双发 */
+                if (this.singleDown || this.twoFinger || this.touchButtons !== 0) {
+                  return;
+                }
+                /* 悬停移动事件比触摸密集得多（每秒可达上百次），坐标没变就不发 */
+                if (event.x !== this.lastX || event.y !== this.lastY) {
+                  this.sendPtrMedia(event.x, event.y, 0);
+                }
                 return;
               }
-              /* 悬停移动事件比触摸密集得多（每秒可达上百次），坐标没变就不发 */
-              if (event.x !== this.lastX || event.y !== this.lastY) {
-                this.sendPtrMedia(event.x, event.y, 0);
+              /* 触控板双指点击 / 物理鼠标的右键、中键：Press/Release 直通注入
+               * （触控板双指点击被系统转成鼠标右键，不产生 TouchEvent）。
+               * 左键不在这里处理——OHOS 对左键同时派发 mouse 与合成 touch，
+               * onTouch 状态机已管左键，此处再发会双发（wineohos 同款结论） */
+              if (event.action !== MouseAction.Press && event.action !== MouseAction.Release) {
+                return;
               }
-              return;
-            }
-            /* 触控板双指点击 / 物理鼠标的右键、中键：Press/Release 直通注入
-             * （触控板双指点击被系统转成鼠标右键，不产生 TouchEvent）。
-             * 左键不在这里处理——OHOS 对左键同时派发 mouse 与合成 touch，
-             * onTouch 状态机已管左键，此处再发会双发（wineohos 同款结论） */
-            if (event.action !== MouseAction.Press && event.action !== MouseAction.Release) {
-              return;
-            }
-            const btnMask = event.button === MouseButton.Right ? 0x02 :
-              event.button === MouseButton.Middle ? 0x04 : 0;
-            if (btnMask !== 0) {
-              this.sendPtrMedia(event.x, event.y,
-                event.action === MouseAction.Press ? btnMask : 0);
-            }
-          })
-          /* 触控板双指滑动 / 物理滚轮：系统转成轴事件，不产生 TouchEvent。
-           * 只有 vertical 可用——native 滚轮 ABI 无横向按钮。vert 为离散滚动
-           * 增量，限幅防异常大值一次灌几十格 */
-          .onAxisEvent((ev?: AxisEvent) => {
-            if (!ev) {
-              return;
-            }
-            const vert = ev.getVerticalAxisValue();
-            if (vert === 0) {
-              return;
-            }
-            const steps = Math.max(-3, Math.min(3, Math.round(vert)));
-            napi.scroll(this.vmId, 0, this.scrollReverse ? -steps : steps);
-          })
-        /* 虚拟键盘 overlay：盖在 VM 画面上。面板空白处透传给画面，
-         * 键帽/把手消费触摸（见 VirtualKeyboard 组件 hitTest 说明） */
-        if (isPadOrPhone() && this.showKbd) {
-          VirtualKeyboard({ vmId: this.vmId, showKbd: this.$showKbd })
-        }
-        /* 熔断横幅：上次启动失败且本次没有自动启动 —— 把原因和「仍要启动」摆出来。
-         * 不自动重试是因为跑飞的 qemu 会满速灌盘且不退（详见 enterVm 注释）。 */
-        /* 判定只看 bootFailReason：它在熔断/失败时置位，就绪或「仍要启动」时清空。
-         * 不在 build 里问 napi.vmRunning —— 那是同步 IPC 往返，每次重绘都打一次。 */
-        if (this.bootFailReason.length > 0) {
-          Column({ space: sp3 }) {
-            Text('上次启动失败').fontSize(PANEL_FS).fontColor(cConsoleWarn)
-            Text(this.bootFailReason).fontSize(PANEL_FS).fontColor(cConsoleText).maxLines(2)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-            Row({ space: sp3 }) {
-              Button('仍要启动').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H)
-                .padding({ left: sp3, right: sp3 })
-                .fontColor(cConsoleText).backgroundColor(cConsoleBtn)
-                .onClick(() => { this.retryAnyway() })
-              Button('看日志').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H)
-                .padding({ left: sp3, right: sp3 })
-                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
-                .onClick(() => { this.failStart('上次启动失败'); })
-            }
+              const btnMask = event.button === MouseButton.Right ? 0x02 :
+                event.button === MouseButton.Middle ? 0x04 : 0;
+              if (btnMask !== 0) {
+                this.sendPtrMedia(event.x, event.y,
+                  event.action === MouseAction.Press ? btnMask : 0);
+              }
+            })
+            /* 触控板双指滑动 / 物理滚轮：系统转成轴事件，不产生 TouchEvent。
+             * 只有 vertical 可用——native 滚轮 ABI 无横向按钮。vert 为离散滚动
+             * 增量，限幅防异常大值一次灌几十格 */
+            .onAxisEvent((ev?: AxisEvent) => {
+              if (!ev) {
+                return;
+              }
+              const vert = ev.getVerticalAxisValue();
+              if (vert === 0) {
+                return;
+              }
+              const steps = Math.max(-3, Math.min(3, Math.round(vert)));
+              napi.scroll(this.vmId, 0, this.scrollReverse ? -steps : steps);
+            })
+          /* 虚拟键盘 overlay：盖在 VM 画面上。面板空白处透传给画面，
+           * 键帽/把手消费触摸（见 VirtualKeyboard 组件 hitTest 说明） */
+          if (isPadOrPhone() && this.showKbd) {
+            VirtualKeyboard({ vmId: this.vmId, showKbd: this.$showKbd })
           }
-          .width('100%')
-          .backgroundColor(cConsoleBanner)
-          .padding(sp3)
-          .alignItems(HorizontalAlign.Start)
-        }
-        /* 交互式串口 overlay（v4）：盖住画面，只读滚动区 + 键帽/输入行。
-         * 键帽发送原始字节：Ctrl=切换修饰、Esc=0x1b、Enter=0x0d */
-        if (this.serialView) {
-          Column() {
-            Scroll(this.serialScroller) {
-              Text(this.serialText)
-                .fontSize(this.serialFs)
-                .fontColor(cConsoleLogText)
-                .width('100%')
-                .padding({ left: sp3, right: sp3, top: sp3, bottom: sp3 })
-                /* 长按选中复制（触摸场景 SELECTABLE_UNFOCUSABLE 即可；Ctrl+C
-                 * 才需 SELECTABLE_FOCUSABLE）。数据刷新会重置选择，属预期 */
-                .copyOption(CopyOptions.LocalDevice)
-                .textSelectable(TextSelectableMode.SELECTABLE_UNFOCUSABLE)
-            }
-            .layoutWeight(1)
-            .align(Alignment.TopStart)
-            .scrollBar(BarState.Auto)
-            .width('100%')
-
-            Row({ space: sp3 }) {
-              Text('Ctrl').fontSize(PANEL_FS).height(PANEL_BTN_H)
-                .padding({ left: sp1, right: sp1 })
-                .fontColor(this.ctrlOn ? cConsoleAccent : cConsoleText)
-                .backgroundColor(Color.Transparent)
-                .onClick(() => { this.ctrlOn = !this.ctrlOn })
-              Text('Esc').fontSize(PANEL_FS).height(PANEL_BTN_H)
-                .padding({ left: sp1, right: sp1 })
-                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
-                .onClick(() => { this.serialSendByte(0x1b) })
-              Text('Enter').fontSize(PANEL_FS).height(PANEL_BTN_H)
-                .padding({ left: sp1, right: sp1 })
-                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
-                .onClick(() => { this.serialSendByte(0x0d) })
-              Text('清屏').fontSize(PANEL_FS).height(PANEL_BTN_H)
-                .padding({ left: sp1, right: sp1 })
-                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
-                .onClick(() => { this.serialText = '' })
-              Text(`字号 ${this.serialFs}`).fontSize(PANEL_FS).height(PANEL_BTN_H)
-                .padding({ left: sp1, right: sp1 })
-                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
-                .onClick(() => { this.cycleSerialFs() })
-            }
-            .width('100%')
-            .height(PANEL_H)
-            .backgroundColor(cConsolePanel)
-            .padding({ left: sp3, right: sp3 })
-            .alignItems(VerticalAlign.Center)
-
-            Row({ space: sp3 }) {
-              TextInput({ text: this.serialInput, placeholder: '输入并回车发送（Ctrl 开时 ^C 生效）' })
-                .layoutWeight(1)
-                .fontSize(PANEL_FS)
-                .height(PANEL_H)
-                .fontColor(cConsoleText)
-                /* placeholder/光标必须显式给色：不设就跟随系统主题，深色主题下是深色，
-                 * 落在深色面板（半透明 #20242b + 底下 VM 常是黑屏）上等于隐形（实测踩过）。
-                 * 背景也要与所在行分开：原来同为 #e620242b，看不出输入框边界。 */
-                .placeholderColor(cConsolePlaceholder)
-                .placeholderFont({ size: PANEL_FS }) /* 不给就用默认字号，比同栏其他文字大一圈 */
-                .caretColor(cConsoleAccent)
-                .backgroundColor(cConsoleInputBg)
-                .padding({ left: sp3, right: sp3 })
-                .id(SERIAL_INPUT_ID)
-                .onChange((v: string) => this.serialInput = v)
-                .onSubmit(() => this.sendAndRefocus())
-              Text('发送').fontSize(PANEL_FS).height(PANEL_BTN_H)
-                .padding({ left: sp1, right: sp1 })
-                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
-                .onClick(() => this.sendAndRefocus())
-            }
-            .width('100%')
-            .height(PANEL_H)
-            .backgroundColor(cConsolePanel)
-            .padding({ left: sp3, right: sp3 })
-            .alignItems(VerticalAlign.Center)
-          }
-          .width('100%')
-          .height('100%')
-          .backgroundColor(cConsolePanel)
-        }
-        /* 手势速查（首次进入）：盖在一切之上，点任意处关闭 */
-        if (this.showGestureHint) {
-          Column() {
+          /* 熔断横幅：上次启动失败且本次没有自动启动 —— 把原因和「仍要启动」摆出来。
+           * 不自动重试是因为跑飞的 qemu 会满速灌盘且不退（详见 enterVm 注释）。 */
+          /* 判定只看 bootFailReason：它在熔断/失败时置位，就绪或「仍要启动」时清空。
+           * 不在 build 里问 napi.vmRunning —— 那是同步 IPC 往返，每次重绘都打一次。 */
+          if (this.bootFailReason.length > 0) {
             Column({ space: sp3 }) {
-              Text('操作手势').fontSize(16).fontWeight(FontWeight.Medium).fontColor(cConsoleText)
-              Text('触摸屏').fontSize(PANEL_FS).fontColor(cConsoleAccent)
-              Text('单指点按＝左键，拖动＝移动光标；长按＝右键\n双指轻点＝右键；双指上下滑动＝滚轮')
-                .fontSize(PANEL_FS).fontColor(cConsoleText).textAlign(TextAlign.Center)
-              Text('触控板').fontSize(PANEL_FS).fontColor(cConsoleAccent)
-              Text('双指点击＝右键；双指滑动＝滚轮')
-                .fontSize(PANEL_FS).fontColor(cConsoleText).textAlign(TextAlign.Center)
-              Text('「输入」里可切换为触控板模式：滑动移光标，点按＝左键，\n长按＝按住左键拖动；滚轮方向与光标速度也在那里调')
-                .fontSize(PANEL_FS).fontColor(cConsoleText).textAlign(TextAlign.Center)
-              Button('知道了').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H + 6)
-                .padding({ left: sp3 * 2, right: sp3 * 2 })
-                .fontColor(cConsoleText).backgroundColor(cConsoleBtn)
-                .onClick(() => this.dismissGestureHint())
+              Text('上次启动失败').fontSize(PANEL_FS).fontColor(cConsoleWarn)
+              Text(this.bootFailReason).fontSize(PANEL_FS).fontColor(cConsoleText).maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+              Row({ space: sp3 }) {
+                Button('仍要启动').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H)
+                  .padding({ left: sp3, right: sp3 })
+                  .fontColor(cConsoleText).backgroundColor(cConsoleBtn)
+                  .onClick(() => { this.retryAnyway() })
+                Button('看日志').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H)
+                  .padding({ left: sp3, right: sp3 })
+                  .fontColor(cConsoleText).backgroundColor(Color.Transparent)
+                  .onClick(() => { this.failStart('上次启动失败'); })
+              }
             }
-            .padding(sp3 * 3)
-            .backgroundColor(cConsolePanelStrong)
-            .borderRadius(12)
-            .alignItems(HorizontalAlign.Center)
+            .width('100%')
+            .backgroundColor(cConsoleBanner)
+            .padding(sp3)
+            .alignItems(HorizontalAlign.Start)
           }
-          .width('100%')
-          .height('100%')
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-          .backgroundColor(cConsoleScrim)
-          .onClick(() => this.dismissGestureHint())
+          /* 手势速查（首次进入）：盖在一切之上，点任意处关闭 */
+          if (this.showGestureHint) {
+            Column() {
+              Column({ space: sp3 }) {
+                Text('操作手势').fontSize(16).fontWeight(FontWeight.Medium).fontColor(cConsoleText)
+                Text('触摸屏').fontSize(PANEL_FS).fontColor(cConsoleAccent)
+                Text('单指点按＝左键，拖动＝移动光标；长按＝右键\n双指轻点＝右键；双指上下滑动＝滚轮')
+                  .fontSize(PANEL_FS).fontColor(cConsoleText).textAlign(TextAlign.Center)
+                Text('触控板').fontSize(PANEL_FS).fontColor(cConsoleAccent)
+                Text('双指点击＝右键；双指滑动＝滚轮')
+                  .fontSize(PANEL_FS).fontColor(cConsoleText).textAlign(TextAlign.Center)
+                Text('「输入」里可切换为触控板模式：滑动移光标，点按＝左键，\n长按＝按住左键拖动；滚轮方向与光标速度也在那里调')
+                  .fontSize(PANEL_FS).fontColor(cConsoleText).textAlign(TextAlign.Center)
+                Button('知道了').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H + 6)
+                  .padding({ left: sp3 * 2, right: sp3 * 2 })
+                  .fontColor(cConsoleText).backgroundColor(cConsoleBtn)
+                  .onClick(() => this.dismissGestureHint())
+              }
+              .padding(sp3 * 3)
+              .backgroundColor(cConsolePanelStrong)
+              .borderRadius(12)
+              .alignItems(HorizontalAlign.Center)
+            }
+            .width('100%')
+            .height('100%')
+            .justifyContent(FlexAlign.Center)
+            .alignItems(HorizontalAlign.Center)
+            .backgroundColor(cConsoleScrim)
+            .onClick(() => this.dismissGestureHint())
+          }
+        }
+        .width('100%')
+        .layoutWeight(1)
+        /* letterbox 黑边由容器出（布局属性，同步）：XComponent 缩到 guest 比例居中，
+         * 边框区域露容器黑底。resize 时布局与黑边同步走，画面比例恒定不跳 */
+        .backgroundColor(Color.Black)
+        .onAreaChange((_o: Area, n: Area) => {
+          this.containerW = n.width as number;
+          this.containerH = n.height as number;
+          this.recomputeFit();
+          this.syncBarPos();
+        })
+
+        /* 串口底栏面板：交互式串口打开时常驻底部 */
+        if (this.serialView) {
+          this.serialPanel()
         }
       }
       .width('100%')
       .height('100%')
-      /* letterbox 黑边由容器出（布局属性，同步）：XComponent 缩到 guest 比例居中，
-       * 边框区域露容器黑底。resize 时布局与黑边同步走，画面比例恒定不跳 */
-      .backgroundColor(Color.Black)
-      .onAreaChange((_o: Area, n: Area) => {
-        this.containerW = n.width as number;
-        this.containerH = n.height as number;
-        this.recomputeFit();
-      })
 
-      /* 顶部悬浮开关 + 半透明工具栏（替代原底部状态栏）：浮层不占布局，画面
-       * 全窗高。收起态 = 圆钮 + 状态消息气泡（有消息才出现，瞬态等待/异常提示
-       * 不展开也能看到）；点击圆钮展开工具栏（电源/介质/串口/输入/键盘） */
-      Column({ space: sp2 }) {
+      /* 悬浮钮（可拖拽）+ 工具栏 = 两组独立绝对定位的浮层。钮行左缘 = 钮位
+       *（钮恒在行内最左，展开/气泡都不会挪动钮）；钮位以**屏幕顶部中点为
+       * 原点**的偏移表达——未拖过保持居中，拖过保持相对屏幕中心的偏移，
+       * 窗口缩放/最大化都自动跟随。位置不持久化 */
+      /* 窗口尺寸未测到前不渲染（条件由 @State containerW 驱动）——创建时
+       * 就按最终位置亮相，不会先闪在 (0,0) 再跳居中 */
+      if (this.containerW > 0) {
         Row({ space: sp2 }) {
-          Button() {
+          Stack() {
             SymbolGlyph(this.barOpen ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
               .fontSize(20)
               .fontColor([cConsoleText])
           }
-          .focusable(false)
           .width(this.barBtnH + 8)
           .height(this.barBtnH + 8)
           .backgroundColor(cConsolePanel)
           .borderRadius((this.barBtnH + 8) / 2)
-          .onClick(() => { this.barOpen = !this.barOpen })
+          .onTouch((ev: TouchEvent) => this.onBarTouch(ev))
           if (this.status.length > 0) {
             Text(this.status).fontSize(this.barFs).fontColor(cConsoleText)
               .maxLines(1)
@@ -1818,43 +1935,49 @@ struct VmConsole {
           }
         }
         .alignItems(VerticalAlign.Center)
+        .position({ x: this.barPosX(), y: this.barPosY() })
+      }
 
-        if (this.barOpen) {
-          Row({ space: sp3 }) {
-            Button('电源').focusable(false).fontSize(this.barFs).height(this.barBtnH)
+      if (this.barOpen) {
+        /* 按钮高 = 圆钮直径（barBtnH+8）：条高与收起态圆钮一致，展开不显小 */
+        Row({ space: sp3 }) {
+          Button('电源').focusable(false).fontSize(this.barFs).height(this.barBtnH + 8)
+            .padding({ left: sp1, right: sp1 })
+            .fontColor(cConsoleText).backgroundColor(Color.Transparent)
+            .bindMenu(this.powerMenu)
+          if (this.hasCds()) {
+            Button('介质').focusable(false).fontSize(this.barFs).height(this.barBtnH + 8)
               .padding({ left: sp1, right: sp1 })
               .fontColor(cConsoleText).backgroundColor(Color.Transparent)
-              .bindMenu(this.powerMenu)
-            if (this.hasCds()) {
-              Button('介质').focusable(false).fontSize(this.barFs).height(this.barBtnH)
-                .padding({ left: sp1, right: sp1 })
-                .fontColor(cConsoleText).backgroundColor(Color.Transparent)
-                .bindMenu(this.mediaMenu)
-            }
-            Button(this.serialView ? '屏幕' : '串口').focusable(false).fontSize(this.barFs).height(this.barBtnH)
-              .padding({ left: sp1, right: sp1 })
-              .fontColor(this.serialView ? cConsoleAccent : cConsoleText).backgroundColor(Color.Transparent)
-              .onClick(() => { this.toggleSerialView() })
-            Button('输入').focusable(false).fontSize(this.barFs).height(this.barBtnH)
-              .padding({ left: sp1, right: sp1 })
-              .fontColor(this.inputMode === 1 ? cConsoleAccent : cConsoleText).backgroundColor(Color.Transparent)
-              .bindMenu(this.inputMenu)
-            if (isPadOrPhone()) {
-              Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(this.barFs).height(this.barBtnH)
-                .padding({ left: sp1, right: sp1 })
-                .fontColor(this.showKbd ? cConsoleAccent : cConsoleText).backgroundColor(Color.Transparent)
-                .onClick(() => { this.toggleKbd() })
-            }
+              .bindMenu(this.mediaMenu)
           }
-          .backgroundColor(cConsolePanel)
-          .borderRadius(12)
-          .padding({ left: sp3, right: sp3, top: sp1, bottom: sp1 })
-          .constraintSize({ maxWidth: '92%' })
+          Button(this.serialView ? '屏幕' : '串口').focusable(false).fontSize(this.barFs).height(this.barBtnH + 8)
+            .padding({ left: sp1, right: sp1 })
+            .fontColor(this.serialView ? cConsoleAccent : cConsoleText).backgroundColor(Color.Transparent)
+            .onClick(() => { this.toggleSerialView() })
+          Button('输入').focusable(false).fontSize(this.barFs).height(this.barBtnH + 8)
+            .padding({ left: sp1, right: sp1 })
+            .fontColor(this.inputMode === 1 ? cConsoleAccent : cConsoleText).backgroundColor(Color.Transparent)
+            .bindMenu(this.inputMenu)
+          if (isPadOrPhone()) {
+            Button(this.showKbd ? '隐藏键盘' : '虚拟键盘').focusable(false).fontSize(this.barFs).height(this.barBtnH + 8)
+              .padding({ left: sp1, right: sp1 })
+              .fontColor(this.showKbd ? cConsoleAccent : cConsoleText).backgroundColor(Color.Transparent)
+              .onClick(() => { this.toggleKbd() })
+          }
         }
+        .backgroundColor(cConsolePanel)
+        .borderRadius(12)
+        .padding({ left: sp3, right: sp3 })
+        .constraintSize({ maxWidth: '92%' })
+        .position({ x: this.toolbarX(), y: this.toolbarY() })
+        /* 宽度实测前透明一帧（首次展开），避免从「左缘贴钮心」跳到居中 */
+        .opacity(this.toolbarW <= 0 ? 0 : 1)
+        .onAreaChange((_o: Area, n: Area) => {
+          this.toolbarW = n.width as number;
+          this.toolbarH = n.height as number;
+        })
       }
-      .alignItems(HorizontalAlign.Center)
-      .constraintSize({ maxWidth: '94%' })
-      .margin({ top: sp2 })
     }
     .width('100%')
     .height('100%')
