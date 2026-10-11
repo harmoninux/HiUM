@@ -25,7 +25,7 @@ import { pickIsoPath } from '../lib/isoPick';
 import { pathExists } from '../lib/fsutil';
 import {
   cPrimary, cSub, cWeak, cText, cBorder, cBg, cChip, cSel, cSelBg,
-  tPage, tCard, tBody, tSub, tLabel,
+  tPage, tCard, tBody, tItem, tSub, tLabel,
   sp1, sp2, sp3, sp4, sp5, bw, rElem, rBtn, rBadge, btnH, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
@@ -338,7 +338,7 @@ export struct VmTemplate {
               .fontSize(tSub).fontColor(cWeak).width('100%')
           } else {
             Row({ space: sp3 }) {
-              Button('选择 ISO').focusable(false).fontSize(tBody)
+              Button('选择 ISO').focusable(false).fontSize(tItem)
                 .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
                 .backgroundColor(Color.Transparent).fontColor(cPrimary)
                 .onClick(() => this.pickUserIso())

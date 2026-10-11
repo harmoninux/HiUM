@@ -14,9 +14,9 @@ import { pickIsoPath, pickFilePath } from '../lib/isoPick';
 import { copyFileWithProgress } from '../lib/fsutil';
 import { mainDiskPath } from '../lib/vmprofile';
 import {
-  cPrimary, cDanger, cRunning, cText, cSub, cWeak,
+  cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
   cCard, cBlock, cBorder,
-  tCard, tLabel, tBody, tSub,
+  tCard, tLabel, tBody, tItem, tSub,
   sp1, sp3, sp4, sp5, sp6, sp2, rElem, rBtn, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
@@ -539,8 +539,8 @@ export struct VmStorage {
     SecHead({ label: '系统盘' })
     if (!this.diskPath) {
       Row({ space: sp3 }) {
-        Text('系统盘缺失').fontSize(tSub).fontColor(cWeak).layoutWeight(1).padding({ top: sp1, bottom: sp1 })
-        Button('重建系统盘').focusable(false).fontSize(tBody)
+        Text('系统盘缺失').fontSize(tSub).fontColor(cWarn).layoutWeight(1).padding({ top: sp1, bottom: sp1 })
+        Button('重建系统盘').focusable(false).fontSize(tItem)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent).fontColor(cDanger)
           .onClick(() => this.confirmRebuild())
@@ -559,19 +559,19 @@ export struct VmStorage {
             .height(6).backgroundColor(cPrimary).borderRadius(rElem)
         }.width('100%').margin({ top: sp1, bottom: sp1 })
         Row({ space: sp3 }) {
-          Button('扩容').focusable(false).fontSize(tBody)
+          Button('扩容').focusable(false).fontSize(tItem)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cSub)
             .onClick(() => {
               this.newGBText = this.diskVirtualGB > 0 ? String(Math.ceil(this.diskVirtualGB)) : '';
               this.expandMode = !this.expandMode;
             })
-          Button('重建系统盘').focusable(false).fontSize(tBody)
+          Button('重建系统盘').focusable(false).fontSize(tItem)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.confirmRebuild())
           if (this.canSnapshot()) {
-            Button('创建快照').focusable(false).fontSize(tBody)
+            Button('创建快照').focusable(false).fontSize(tItem)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cPrimary)
               .onClick(() => this.snapCreateMode = !this.snapCreateMode)
@@ -582,11 +582,11 @@ export struct VmStorage {
             TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tBody)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
               .onChange((v: string) => this.snapNameText = v)
-            Button('创建').focusable(false).fontSize(tBody)
+            Button('创建').focusable(false).fontSize(tItem)
               .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
               .backgroundColor(cPrimary).fontColor(Color.White)
               .onClick(() => this.doSnapshotCreate())
-            Button('取消').focusable(false).fontSize(tBody)
+            Button('取消').focusable(false).fontSize(tItem)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cSub)
               .onClick(() => this.snapCreateMode = false)
@@ -598,11 +598,11 @@ export struct VmStorage {
             TextInput({ text: this.newGBText }).type(InputType.Number).layoutWeight(1).fontSize(tBody)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
               .onChange((v: string) => this.newGBText = v)
-            Button('确定').focusable(false).fontSize(tBody)
+            Button('确定').focusable(false).fontSize(tItem)
               .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
               .backgroundColor(cPrimary).fontColor(Color.White)
               .onClick(() => this.doExpand())
-            Button('取消').focusable(false).fontSize(tBody)
+            Button('取消').focusable(false).fontSize(tItem)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cSub)
               .onClick(() => this.expandMode = false)
@@ -628,7 +628,7 @@ export struct VmStorage {
           Text('只读').fontSize(tSub).fontColor(cSub)
           Toggle({ type: ToggleType.Switch, isOn: d.readonly })
             .onChange((v: boolean) => this.doSecondReadonly(idx, v))
-          Button('扩容').focusable(false).fontSize(tBody)
+          Button('扩容').focusable(false).fontSize(tItem)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .enabled(this.canSecondOp())
             .backgroundColor(Color.Transparent).fontColor(cSub)
@@ -637,7 +637,7 @@ export struct VmStorage {
               this.secondMode = !this.secondMode;
               this.secondExpandIdx = idx;
             })
-          Button('删除').focusable(false).fontSize(tBody)
+          Button('删除').focusable(false).fontSize(tItem)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .enabled(this.canSecondOp())
             .backgroundColor(Color.Transparent).fontColor(cDanger)
@@ -667,11 +667,11 @@ export struct VmStorage {
             TextInput({ text: this.secondNewGBText }).type(InputType.Number).layoutWeight(1).fontSize(tBody)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
               .onChange((v: string) => this.secondNewGBText = v)
-            Button('确定').focusable(false).fontSize(tBody)
+            Button('确定').focusable(false).fontSize(tItem)
               .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
               .backgroundColor(cPrimary).fontColor(Color.White)
               .onClick(() => this.doSecondExpand(this.secondExpandIdx))
-            Button('取消').focusable(false).fontSize(tBody)
+            Button('取消').focusable(false).fontSize(tItem)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cSub)
               .onClick(() => { this.secondMode = false; this.secondNewGBText = ''; this.secondExpandIdx = -1; })
@@ -686,7 +686,7 @@ export struct VmStorage {
               Text(this.baseName(this.secondSrc) + (this.secondSrcMeta.length > 0 ? `（${this.secondSrcMeta}）` : ''))
                 .fontSize(tSub).fontColor(cSub).layoutWeight(1).maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-              Button('清除').focusable(false).fontSize(tBody)
+              Button('清除').focusable(false).fontSize(tItem)
                 .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                 .backgroundColor(Color.Transparent).fontColor(cDanger)
                 .onClick(() => { this.secondSrc = ''; this.secondSrcMeta = ''; })
@@ -698,11 +698,11 @@ export struct VmStorage {
               .layoutWeight(1).fontSize(tBody)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
               .onChange((v: string) => this.secondNewGBText = v)
-            Button(this.secondSrc.length > 0 ? '导入' : '创建').focusable(false).fontSize(tBody)
+            Button(this.secondSrc.length > 0 ? '导入' : '创建').focusable(false).fontSize(tItem)
               .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
               .backgroundColor(cPrimary).fontColor(Color.White)
               .onClick(() => this.doSecondAdd())
-            Button('取消').focusable(false).fontSize(tBody)
+            Button('取消').focusable(false).fontSize(tItem)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cSub)
               .onClick(() => { this.secondMode = false; this.secondSrc = ''; this.secondSrcMeta = ''; })
@@ -736,7 +736,7 @@ export struct VmStorage {
             Text(idx === 0 ? `${this.baseName(p)}（启动盘）` : this.baseName(p))
               .fontSize(tSub).fontColor(idx === 0 ? cPrimary : cSub).layoutWeight(1)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Button('移除').focusable(false).fontSize(tBody)
+            Button('移除').focusable(false).fontSize(tItem)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cDanger)
               .onClick(() => this.removeIso(idx))
@@ -751,13 +751,13 @@ export struct VmStorage {
         }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp1, bottom: sp1 })
       }
       Row({ space: sp3 }) {
-        Button('选择文件').focusable(false).fontSize(tBody)
+        Button('选择文件').focusable(false).fontSize(tItem)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent).fontColor(cPrimary)
           .border({ width: 1, color: cBorder, style: BorderStyle.Dashed })
           .onClick(() => this.pickLocalIso())
         Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
-          .focusable(false).fontSize(tBody)
+          .focusable(false).fontSize(tItem)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .enabled(!this.ensureIsoLoading)
           .backgroundColor(Color.Transparent).fontColor(cPrimary)

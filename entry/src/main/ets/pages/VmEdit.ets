@@ -2,6 +2,10 @@
 // 由 Index.editOverlay 承载（editParam 传 VM、onClose 关闭），不再 Navigation 压栈——
 // 单页长表单四类字段混排、保存钮在页尾，弹窗 + Tab 每屏只看一类。
 // 只编辑 VmProfile JSON，保存后由列表页/console 窗口消费。
+// 表单行两种布局按语义分组，同 Tab 不混排：多选一 Chip 行 = 标签固定 72 列 + 控件
+// 从列位起排（名称/架构/显卡/接口/网卡…）；布尔 Switch 行 = 标签撑满 + 控件贴右
+// （只读/光盘启动/网络/声音…，系统设置范式）。
+// 行内按钮/Chip 字号跟随所在行（tItem），仅底部操作条与输入框用控件基准 tBody。
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
@@ -492,7 +496,7 @@ export struct VmEdit {
                   }
                   .alignItems(HorizontalAlign.Start)
                   .layoutWeight(1)
-                  Button('存储管理').focusable(false).fontSize(tBody)
+                  Button('存储管理').focusable(false).fontSize(tItem)
                     .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                     .backgroundColor(Color.Transparent).fontColor(cPrimary)
                     .onClick(() => {
@@ -517,7 +521,7 @@ export struct VmEdit {
                * 盘内容不动——Windows VM 若误建为 virtio，切到 ide 即可被安装程序识别。 */
               if (this.isX86Board()) {
                 Row({ space: sp3 }) {
-                  Text('磁盘接口').fontSize(tLabel).layoutWeight(1)
+                  Text('磁盘接口').fontSize(tLabel).width(72)
                   Chip({ label: 'virtio', active: this.diskIface === 'virtio', onTap: () => { this.diskIface = 'virtio'; } })
                   Chip({ label: 'ide（Windows）', active: this.diskIface === 'ide', onTap: () => { this.diskIface = 'ide'; } })
                 }.width('100%').padding({ top: sp1, bottom: sp1 })
@@ -532,7 +536,7 @@ export struct VmEdit {
                   Text('数据盘').fontSize(tLabel).width(72)
                   Text(this.extraDisks.length === 0 ? '未配置' : `${this.extraDisks.length} 张`)
                     .fontSize(tSub).fontColor(cSub).layoutWeight(1)
-                  Button('存储管理').focusable(false).fontSize(tBody)
+                  Button('存储管理').focusable(false).fontSize(tItem)
                     .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                     .backgroundColor(Color.Transparent).fontColor(cPrimary)
                     .onClick(() => {
@@ -571,7 +575,7 @@ export struct VmEdit {
                         .fontColor(idx === 0 ? cPrimary : cSub)
                         .layoutWeight(1)
                         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                      Button('移除').focusable(false).fontSize(tBody)
+                      Button('移除').focusable(false).fontSize(tItem)
                         .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                         .backgroundColor(Color.Transparent).fontColor(cDanger)
                         .onClick(() => this.removeIso(idx))
@@ -582,12 +586,12 @@ export struct VmEdit {
                   Text('无').fontSize(tSub).fontColor(cSub)
                 }
                 Row({ space: sp3 }) {
-                  Button('选择文件').focusable(false).fontSize(tBody)
+                  Button('选择文件').focusable(false).fontSize(tItem)
                     .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                     .backgroundColor(Color.Transparent).fontColor(cPrimary)
                     .onClick(() => this.pickLocalIso())
                   Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
-                    .focusable(false).fontSize(tBody)
+                    .focusable(false).fontSize(tItem)
                     .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                     .enabled(!this.ensureIsoLoading)
                     .onClick(() => this.pickBuiltinIso())
@@ -627,7 +631,7 @@ export struct VmEdit {
                 if (this.isX86Board()) {
                   Column({ space: 4 }) {
                     Row({ space: sp3 }) {
-                      Text('网卡型号').fontSize(tLabel).layoutWeight(1)
+                      Text('网卡型号').fontSize(tLabel).width(72)
                       Chip({ label: 'virtio', active: this.netModel === 'virtio', onTap: () => { this.netModel = 'virtio'; } })
                       Chip({ label: 'rtl8139', active: this.netModel === 'rtl8139', onTap: () => { this.netModel = 'rtl8139'; } })
                     }.width('100%')

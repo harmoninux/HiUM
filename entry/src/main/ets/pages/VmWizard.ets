@@ -17,7 +17,7 @@ import { Chip, SecHead, FoldHead } from '../lib/uiWidgets';
 import { PortForwardEditor } from '../lib/PortForwardEditor';
 import {
   cPrimary, cSub, cWeak, cText, cBorder, cDanger, cBg, cBlock, cChip, cCard,
-  tPage, tCard, tBody, tSub, tLabel, tMono,
+  tPage, tCard, tBody, tItem, tSub, tLabel, tMono,
   sp1, sp2, sp3, sp4, sp5, bw, rElem, rBtn, rBadge, btnH, btnSh, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
@@ -745,7 +745,7 @@ export struct VmWizard {
         }
       } else {
         Row({ space: sp3 }) {
-          Button('选择镜像').focusable(false).fontSize(tBody)
+          Button('选择镜像').focusable(false).fontSize(tItem)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cPrimary)
             .onClick(() => this.pickImportDisk())
@@ -779,7 +779,7 @@ export struct VmWizard {
 
       if (!this.kernelCollapsed) {
         Row({ space: sp3 }) {
-          Button('选择内核').focusable(false).fontSize(tBody)
+          Button('选择内核').focusable(false).fontSize(tItem)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cPrimary)
             .onClick(() => this.pickKernel())
@@ -787,14 +787,14 @@ export struct VmWizard {
             .fontSize(tSub).fontColor(this.kernelSrc.length > 0 ? cSub : cWeak)
             .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.kernelSrc.length > 0) {
-            Button('清除').focusable(false).fontSize(tBody)
+            Button('清除').focusable(false).fontSize(tItem)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cDanger)
               .onClick(() => { this.kernelSrc = ''; })
           }
         }
         Row({ space: sp3 }) {
-          Button('选择 initrd').focusable(false).fontSize(tBody)
+          Button('选择 initrd').focusable(false).fontSize(tItem)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cPrimary)
             .onClick(() => this.pickInitrd())
@@ -802,7 +802,7 @@ export struct VmWizard {
             .fontSize(tSub).fontColor(this.initrdSrc.length > 0 ? cSub : cWeak)
             .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.initrdSrc.length > 0) {
-            Button('清除').focusable(false).fontSize(tBody)
+            Button('清除').focusable(false).fontSize(tItem)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cDanger)
               .onClick(() => { this.initrdSrc = ''; })
@@ -827,7 +827,7 @@ export struct VmWizard {
             Text(idx === 0 ? `${this.baseName(p)}（启动盘）` : this.baseName(p))
               .fontSize(tSub).fontColor(idx === 0 ? cPrimary : cSub).layoutWeight(1)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Button('移除').focusable(false).fontSize(tBody)
+            Button('移除').focusable(false).fontSize(tItem)
               .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .onClick(() => this.removeIso(idx))
           }
@@ -837,12 +837,12 @@ export struct VmWizard {
         Text('无').fontSize(tSub).fontColor(cSub).width('100%')
       }
       Row({ space: sp3 }) {
-        Button('添加 ISO').focusable(false).fontSize(tBody)
+        Button('添加 ISO').focusable(false).fontSize(tItem)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent).fontColor(cPrimary)
           .onClick(() => this.pickLocalIso())
         Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.archLabel(this.arch)})`)
-          .focusable(false).fontSize(tBody)
+          .focusable(false).fontSize(tItem)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .enabled(!this.ensureIsoLoading)
           .onClick(() => this.pickBuiltinIso())
