@@ -428,8 +428,8 @@ function userNetdev(portForwards: string): string {
   return netdev;
 }
 
-/* 端口转发完整校验（向导即时提示用）：逐条检查 "宿主端口:客机端口" 格式、
- * 1-65535 范围、宿主端口不重复（多个 forward 抢同一宿主端口会 bind 失败），
+/* 端口转发完整校验（向导即时提示用）：逐条检查 "设备端口:虚拟机端口" 格式、
+ * 1-65535 范围、设备端口不重复（多个 forward 抢同一设备端口会 bind 失败），
  * 返回所有错误描述；空数组 = 全部合法。 */
 export function forwardErrors(text: string): string[] {
   const errs: string[] = [];
@@ -442,7 +442,7 @@ export function forwardErrors(text: string): string[] {
     }
     const kv = s.split(':');
     if (kv.length !== 2) {
-      errs.push(`「${s}」应为 宿主端口:客机端口`);
+      errs.push(`「${s}」应写成 设备端口:虚拟机端口`);
       continue;
     }
     const host = Number(kv[0]);
@@ -456,7 +456,7 @@ export function forwardErrors(text: string): string[] {
       continue;
     }
     if (seenHosts.indexOf(host) >= 0) {
-      errs.push(`宿主端口 ${host} 重复`);
+      errs.push(`设备端口 ${host} 重复`);
       continue;
     }
     seenHosts.push(host);
@@ -509,8 +509,10 @@ export function ensureRiscvVars(p: VmProfile, vmDataDir: string): string {
   return dst;
 }
 
-/* 9p 共享宿主目录：启动时经 picker 取到的 Download 目录（唯一可共享目录），guest 挂载为 /shared。
- * 读到 AppStorage（EntryAbility prepareSharedFolder 写入）；未取到则回退 app 数据目录下 shared/。 */
+/* 9p 共享宿主目录：启动时经 picker 取到的 Download 目录（唯一可共享目录）。
+ * 只暴露 mount_tag=shared，没有 guest 侧自动挂载——guest 里要手动 mount（推荐挂点
+ * /shared，UI 提示给了命令）。读到 AppStorage（EntryAbility prepareSharedFolder 写入）；
+ * 未取到则回退 app 数据目录下 shared/。 */
 export function sharedDir(filesDir: string): string {
   const host = AppStorage.get<string>('sharedHost');
   return (host && host.length > 0) ? host : filesDir + '/shared';
@@ -782,7 +784,7 @@ export function buildArgs(p: VmProfile, vmDataDir: string, sharedDir: string = '
     args.push('-nic', 'none');
   }
   if (p.net.sharedFolder && sharedDir.length > 0) {
-    /* 9p 共享宿主目录到 guest /shared（宿主目录须已存在，由调用方 mkdir） */
+    /* 9p 共享宿主目录（mount_tag=shared；guest 内需手动挂载，见 sharedDir 注释） */
     args.push('-virtfs', `local,path=${sharedDir},mount_tag=shared,security_model=none,multidevs=remap`);
   }
   /* 系统增强设备（v4）：RNG/balloon 均需 PCI；raspi 无 PCI 跳过 */

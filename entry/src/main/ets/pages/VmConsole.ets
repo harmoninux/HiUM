@@ -91,6 +91,18 @@ const TWO_TAP_SLOP = 12;
 /* 触控板（相对）模式的光标速度档：手指位移 × 倍率 = 光标位移 */
 const SPEED_FACTORS: number[] = [0.6, 1.0, 1.7];
 const SPEED_LABELS: string[] = ['慢', '中', '快'];
+/* QMP 命令名 → 动作的中文说法（qmp() 失败提示用；原始命令名/响应只进 hilog，
+ * 不外露给用户） */
+const QMP_CMD_CN: Record<string, string> = {
+  'system_reset': '重启',
+  'system_powerdown': '关机',
+  'quit': '关机',
+  'stop': '暂停',
+  'cont': '继续',
+  'eject': '弹出光盘',
+  'blockdev-change-medium': '更换光盘',
+  'send-key': '发送按键',
+};
 /* 串口日志字号档（循环切换） */
 const SERIAL_FS_LIST: number[] = [12, 14, 17];
 /* 惯性滑行的速度衰减与停止阈值（每 16ms 一拍）：0.82 的衰减下约 0.5s 滑停 */
@@ -448,11 +460,11 @@ struct VmConsole {
      * 不可读 → 启动时静默剔除（doStart 内过滤）。用 isoReadable（真 open 读）而非
      * pathExists（accessSync 可能对读不了的路径返回 true）。 */
     if (isos.length > 0 && this.profile.media.bootFromCdrom && !isoReadable(isos[0])) {
-      this.status = '启动光盘不可读';
+      this.status = '启动光盘无法读取';
       const nm = isos[0].substring(isos[0].lastIndexOf('/') + 1);
       AlertDialog.show({
-        title: '启动光盘不可读',
-        message: `光盘 ${nm} 可能已移动或失去访问权限。可改用系统盘启动，或到编辑页重新选择 ISO。`,
+        title: '启动光盘无法读取',
+        message: `光盘 ${nm} 可能已被移动或删除。可以从系统盘启动，或到「虚拟机配置」里重新选择 ISO。`,
         buttons: [
           { value: '取消', action: () => {
           } },
@@ -501,7 +513,7 @@ struct VmConsole {
       return;
     }
     AlertDialog.show({
-      title: 'QEMU 启动失败',
+      title: '虚拟机启动失败',
       message: detail,
       buttons: [{ value: '确定', action: () => {
       } }],
@@ -526,7 +538,7 @@ struct VmConsole {
         fs.accessSync(d.path);
       } catch {
         this.status = '磁盘文件缺失';
-        promptAction.showToast({ message: `${d.path.split('/').pop()} 不存在，请到存储页重建或导入` });
+        promptAction.showToast({ message: `${d.path.split('/').pop()} 不存在，请在「存储管理」里重建或导入` });
         return;
       }
     }
@@ -571,7 +583,7 @@ struct VmConsole {
       const nm = skipped[0].substring(skipped[0].lastIndexOf('/') + 1);
       promptAction.showToast({
         message: skipped.length > 1 ?
-          `${nm} 等${skipped.length}张光盘不可读，本次启动已跳过` : `光盘 ${nm} 不可读，本次启动已跳过`,
+          `${nm} 等${skipped.length}张光盘无法读取，本次启动已跳过` : `光盘 ${nm} 无法读取，本次启动已跳过`,
       });
     }
     /* riscv64 的变量存储 pflash 要每 VM 一份、且在 buildArgs 之前铺好：共用或沿用旧内容
@@ -631,8 +643,8 @@ struct VmConsole {
       }
       if (!napi.vmRunning(this.vmId)) {
         this.stopReadyWatch();
-        this.noteBootFail('启动程序异常退出');
-        this.failStart('启动失败：启动程序异常退出');
+        this.noteBootFail('启动过程中意外退出');
+        this.failStart('启动失败：启动过程中意外退出');
         return;
       }
       if (Date.now() - started > WAIT_MS) {
@@ -769,8 +781,8 @@ struct VmConsole {
          * —— 子进程死掉时 socket 立刻断开，这个事件先到，随后 aboutToDisappear
          * 就把轮询停了。实测踩过：不在这里补，熔断标记永远写不出来）。 */
         if (!this.readySeen && !this.userStopped) {
-          this.noteBootFail('启动程序异常退出');
-          this.status = '启动失败：启动程序异常退出';
+          this.noteBootFail('启动过程中意外退出');
+          this.status = '启动失败：启动过程中意外退出';
           break;
         }
         this.status = '已关机';
@@ -807,7 +819,9 @@ struct VmConsole {
     }
     const resp = napi.qmpCommand(this.vmId, req + '}');
     if (resp.indexOf('"error"') >= 0) {
-      promptAction.showToast({ message: cmd + ' 失败: ' + resp.substring(0, 120) });
+      hilog.warn(DOMAIN, TAG, 'qmp %{public}s failed: %{public}s', cmd, resp.substring(0, 200));
+      const cn = QMP_CMD_CN[cmd] ?? '操作';
+      promptAction.showToast({ message: cn + '失败，请重试' });
     }
   }
 
@@ -1563,7 +1577,7 @@ struct VmConsole {
         this.serialKey('Enter', false, (): void => { this.serialSendByte(0x0d) })
         this.serialKey('清屏', false, (): void => { this.serialText = '' })
         this.serialKey(`字号 ${this.serialFs}`, false, (): void => { this.cycleSerialFs() })
-        TextInput({ text: this.serialInput, placeholder: '输入并回车发送（Ctrl 开时 ^C 生效）' })
+        TextInput({ text: this.serialInput, placeholder: '输入后回车发送（打开 Ctrl 可发组合键）' })
           .layoutWeight(1)
           .fontSize(PANEL_FS)
           .fontFamily('monospace')
@@ -1608,7 +1622,7 @@ struct VmConsole {
       return;
     }
     if (!p.machine.serialInteractive) {
-      promptAction.showToast({ message: '串口为日志模式，可在编辑页开启交互' });
+      promptAction.showToast({ message: '当前串口是日志模式，不能发送输入' });
       return;
     }
     this.serialView = true;
@@ -1839,6 +1853,7 @@ struct VmConsole {
               Text('上次启动失败').fontSize(PANEL_FS).fontColor(cConsoleWarn)
               Text(this.bootFailReason).fontSize(PANEL_FS).fontColor(cConsoleText).maxLines(2)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
+              /* ui-layout-ok: 父 Column 已 alignItems(Start)（见横幅 Column 链式尾部） */
               Row({ space: sp3 }) {
                 Button('仍要启动').focusable(false).fontSize(PANEL_FS).height(PANEL_BTN_H)
                   .padding({ left: sp3, right: sp3 })
@@ -1946,7 +1961,7 @@ struct VmConsole {
             .fontColor(cConsoleText).backgroundColor(Color.Transparent)
             .bindMenu(this.powerMenu)
           if (this.hasCds()) {
-            Button('介质').focusable(false).fontSize(this.barFs).height(this.barBtnH + 8)
+            Button('光盘').focusable(false).fontSize(this.barFs).height(this.barBtnH + 8)
               .padding({ left: sp1, right: sp1 })
               .fontColor(cConsoleText).backgroundColor(Color.Transparent)
               .bindMenu(this.mediaMenu)

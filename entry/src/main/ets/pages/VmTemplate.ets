@@ -26,7 +26,7 @@ import { pathExists } from '../lib/fsutil';
 import {
   cPrimary, cSub, cWeak, cText, cBorder, cBg, cChip, cSel, cSelBg,
   tPage, tCard, tBody, tItem, tSub, tLabel,
-  sp1, sp2, sp3, sp4, sp5, bw, rElem, rBtn, rBadge, btnH, btnPadX,
+  sp1, sp2, sp3, sp4, sp5, bw, rElem, rBtn, rBadge, btnH, btnRow, btnPadX,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 import { Chip, SecHead } from '../lib/uiWidgets';
@@ -60,7 +60,7 @@ interface TplDef {
 const TEMPLATES: TplDef[] = [
   {
     id: 'alpine', name: 'Alpine Linux',
-    desc: '迷你安全发行版 · 文本模式 · 内置镜像',
+    desc: '迷你安全 · 无图形界面',
     archs: ['x86_64', 'i386', 'aarch64', 'arm', 'loongarch64', 'riscv64'],
     vga: 'std', memoryMB: 1024, cpus: 2, diskGB: 8,
     diskIface: 'virtio', netModel: 'virtio', rtcLocal: false, audio: true,
@@ -71,7 +71,7 @@ const TEMPLATES: TplDef[] = [
     /* 模板名就叫 Windows，不带版本：一条模板通吃 Win7/8/10（也装得下未来的
      * Win11），具体装什么由用户在名称框里自己起名（见下方注释的兼容矩阵） */
     id: 'windows', name: 'Windows',
-    desc: '兼容 Win7/8/10 · 32/64 位镜像通用 · 需自备镜像',
+    desc: '兼容 Win7/8/10 · 32/64 位镜像通用',
     /* 只开 x86_64 + cpu max（qemu32 无 long mode 引导 x64 镜像即 0xC000035A 蓝屏；
      * qemu64 缺 PREFETCHW/POPCNT，Win8.1+ x64 内核检查不过即 0x5D 蓝屏——max 是
      * TCG 可模拟指令的全集（见 qemu target/i386/cpu.c TCG_*_FEATURES），Win7/8/10
@@ -140,8 +140,9 @@ export struct VmTemplate {
       : pathExists(this.vmDataDir + '/' + builtinIsoFor(this.arch));
   }
 
+  /* 显示短称 loong64（Debian 系官方架构名）；与 VmWizard.archLabel 同一命名 */
   private archLabel(a: VmArch): string {
-    return a === 'loongarch64' ? 'loongarch' : a;
+    return a === 'loongarch64' ? 'loong64' : a;
   }
 
   private nameBase(): string {
@@ -224,7 +225,7 @@ export struct VmTemplate {
       promptAction.showToast({
         message: this.userIso.length > 0
           ? `已创建「${p.name}」`
-          : `已创建「${p.name}」；未挂安装镜像，请到编辑页选择 ISO`,
+          : `已创建「${p.name}」；未选择安装镜像，可到「虚拟机配置」里选择 ISO`,
       });
       if (this.onClose) { this.onClose(); }
       return;
@@ -248,7 +249,7 @@ export struct VmTemplate {
     const ctx = getContext(this) as common.UIAbilityContext;
     pickIsoPath(ctx).then((p: string) => {
       if (p.length === 0) {
-        promptAction.showToast({ message: '未选择文件 / 路径不可读' });
+        promptAction.showToast({ message: '未选中文件，或文件无法读取' });
         return;
       }
       this.userIso = p;
@@ -270,7 +271,7 @@ export struct VmTemplate {
               .alignItems(HorizontalAlign.Start)
               .layoutWeight(1)
               if (t.iso === 'builtin') {
-                Text('内置 ISO').fontSize(tSub).fontColor(cPrimary)
+                Text('内置镜像').fontSize(tSub).fontColor(cPrimary)
                   .backgroundColor(cChip).borderRadius(rBadge)
                   .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
               } else {
@@ -313,11 +314,13 @@ export struct VmTemplate {
           Text(`${Math.round(this.cpus)} 核`).fontSize(tLabel).width('100%')
           Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
             .onChange((v: number) => this.cpus = v)
+            .height(btnRow)
 
           SecHead({ label: '内存' })
           Text(`${Math.round(this.memoryMB)} MB`).fontSize(tLabel).width('100%')
           Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
             .onChange((v: number) => this.memoryMB = v)
+            .height(btnRow)
 
           SecHead({ label: '系统盘' })
           Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
@@ -347,7 +350,7 @@ export struct VmTemplate {
                 .layoutWeight(1).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
             }
             .width('100%')
-            Text('Windows 镜像需自备（不随应用分发）；也可暂不选择，创建后到编辑页补挂')
+            Text('Windows 安装镜像需自备（应用不内置）；也可以先不选，创建后在「虚拟机配置」里选择')
               .fontSize(tSub).fontColor(cWeak).width('100%')
           }
 
@@ -359,11 +362,11 @@ export struct VmTemplate {
             .fontSize(tItem)
             .maxLength(60)
             .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg)
-            .padding({ left: inpPadX, right: inpPadX })
+            .padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
             .onChange((v: string) => this.nameInput = v)
           Text(this.tpl().iso === 'builtin'
-            ? '其余按推荐默认：网络开启 · 声卡开 · TCG 多线程 · 从光盘引导'
-            : '已按 Windows 兼容性自动配置：IDE 磁盘 · 兼容网卡 · 本地时钟 · 声卡开')
+            ? '其余保持推荐配置：网络已开启 · 声音已开启，并从光盘启动'
+            : '已按 Windows 兼容性自动配好磁盘、网卡与时钟，保持默认即可')
             .fontSize(tSub).fontColor(cWeak).width('100%')
         }
         .alignItems(HorizontalAlign.Start)

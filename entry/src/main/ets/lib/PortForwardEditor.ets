@@ -7,7 +7,7 @@
  * 历史档里手工改坏、解析不出 host:guest 的条目原样保留展示（红字 + 仅允许移除），
  * 不能让编辑器把用户的存量内容悄悄吃掉。 */
 
-import { cDanger, cSub, cWeak, sp2, sp3, tBody, tItem, tSub, rBtn, btnSh, inpH, inpBg, inpRadius, inpPadX } from './uiTokens';
+import { cDanger, cPrimary, cSub, cWeak, sp1, sp2, sp3, tBody, tItem, tLabel, tSub, rBtn, btnSh, btnRow, inpH, inpBg, inpRadius, inpPadX } from './uiTokens';
 import { forwardErrors } from './vmprofile';
 
 interface FwdRow {
@@ -19,6 +19,7 @@ interface FwdRow {
 @Component
 export struct PortForwardEditor {
   @Link text: string;
+  @Link incomplete: number; /* 只填了一端的行数：宿主保存/下一步时拦截（见 commit） */
   @State rows: FwdRow[] = [];
   @State invalids: string[] = []; /* 存量非法条目（只展示 + 可移除） */
   private nextId: number = 0;
@@ -42,20 +43,27 @@ export struct PortForwardEditor {
     this.invalids = invalids;
   }
 
-  /* 把当前行状态序列化回 @Link text（只收完整行；非法存量条目原样带上） */
+  /* 把当前行状态序列化回 @Link text（只收完整行；非法存量条目原样带上）。
+   * 顺带统计"半行"（只填了一端）：半行进不了 text，不单独上报的话用户会以为
+   * 已配置而静默失效——宿主拿它拦保存。空行（两端都没填）是"点了添加又放弃"，
+   * 不算半行。打字过程中不实时报错（避免逐字输入时的假报警），只在提交时拦。 */
   private commit(): void {
     const parts: string[] = [];
+    let half = 0;
     for (const r of this.rows) {
       const h = r.host.trim();
       const g = r.guest.trim();
       if (h.length > 0 && g.length > 0) {
         parts.push(h + ':' + g);
+      } else if (h.length > 0 || g.length > 0) {
+        half++;
       }
     }
     for (const s of this.invalids) {
       parts.push(s);
     }
     this.text = parts.join(',');
+    this.incomplete = half;
   }
 
   private setRow(idx: number, host: string, guest: string): void {
@@ -87,39 +95,52 @@ export struct PortForwardEditor {
     this.commit();
   }
 
-  /* 既有校验器（宿主端口不重复等）直接复用：序列化后的 text 就是它的入参口径 */
+  /* 既有校验器直接复用：序列化后的 text 就是它的入参口径。红字显示在本区块内，
+   * 不重复「端口转发：」前缀（保存/步骤级的汇总红字才需要该类前缀做定位） */
   private errText(): string {
     if (this.text.trim().length === 0) {
       return '';
     }
     const errs = forwardErrors(this.text);
-    return errs.length > 0 ? '端口转发：' + errs.join('；') : '';
+    return errs.join('；');
   }
 
   build() {
     Column({ space: sp2 }) {
+      /* 标题与添加入口同行：动作按钮贴标题右端（原「添加一行」在列表底部另起一行，
+       * 与标题脱节）。标题文本由本组件自渲染，使用方不再另起 Text（两处曾各叫
+       * 「端口转发/端口映射」，收口于此） */
+      Row() {
+        Text('端口转发').fontSize(tLabel).layoutWeight(1)
+        Button('添加转发规则').focusable(false).fontSize(tItem)
+          .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+          .backgroundColor(Color.Transparent).fontColor(cPrimary)
+          .onClick(() => this.addRow())
+      }.width('100%')
       if (this.rows.length === 0 && this.invalids.length === 0) {
-        Text('暂无端口转发').fontSize(tSub).fontColor(cWeak).width('100%')
+        Text('暂无规则').fontSize(tSub).fontColor(cWeak).width('100%')
       }
       ForEach(this.rows, (r: FwdRow, idx: number) => {
+        /* 两个框各自带全标签（设备端口 : 虚拟机端口）。曾用「设备/端口 + → 虚拟机」
+         * 的碎标签组合，读起来像 "设备:端口 → 虚拟机" 语义割裂（框宽 106 为放下
+         * 「虚拟机端口」5 字占位的最小值） */
         Row({ space: sp3 }) {
-          TextInput({ text: r.host, placeholder: '宿主' })
+          TextInput({ text: r.host, placeholder: '设备端口' })
             .type(InputType.Number)
-            .width(84)
+            .width(106)
             .fontSize(tItem)
-            .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+            .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
             .onChange((v: string) => this.setRow(idx, v, r.guest))
           Text(':').fontSize(tBody).fontColor(cSub)
-          TextInput({ text: r.guest, placeholder: '客机' })
+          TextInput({ text: r.guest, placeholder: '虚拟机端口' })
             .type(InputType.Number)
-            .width(84)
+            .width(106)
             .fontSize(tItem)
-            .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+            .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
             .onChange((v: string) => this.setRow(idx, r.host, v))
-          Text('→ 虚拟机').fontSize(tSub).fontColor(cWeak)
           Blank()
           Button('移除').focusable(false).fontSize(tItem)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+            .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.removeRow(idx))
         }.width('100%')
@@ -129,22 +150,15 @@ export struct PortForwardEditor {
           Text(`「${s}」格式无效`).fontSize(tSub).fontColor(cDanger).layoutWeight(1)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           Button('移除').focusable(false).fontSize(tItem)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+            .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cDanger)
             .onClick(() => this.removeInvalid(idx))
         }.width('100%')
       }, (s: string, idx: number) => `inv${idx}:${s}`)
-      Row() {
-        Button('添加一行').focusable(false).fontSize(tItem)
-          .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
-          .backgroundColor(Color.Transparent).fontColor(cSub)
-          .onClick(() => this.addRow())
-        Blank()
-      }.width('100%')
       if (this.errText().length > 0) {
         Text(this.errText()).fontSize(tSub).fontColor(cDanger).width('100%')
       }
-      Text('设备（宿主）端口 → 虚拟机内端口；两端都填完才生效，在电脑上用 localhost:宿主端口 访问')
+      Text('左边填设备端口，右边填虚拟机端口；在设备上用 localhost:设备端口 即可访问虚拟机里的服务')
         .fontSize(tSub).fontColor(cWeak).width('100%')
     }
     .alignItems(HorizontalAlign.Start)

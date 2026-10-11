@@ -34,7 +34,7 @@ function deepCopy(p: VmProfile): VmProfile {
 export async function cloneVm(store: VmStore, p: VmProfile,
   progress: (stage: string, pct: number) => void): Promise<string> {
   if (vmIsRunning(p.id)) {
-    return 'VM 运行中，无法克隆';
+    return '虚拟机运行中，请先关机再克隆';
   }
   const vmsDir = store.dir;
   const newId = newProfileId();
@@ -61,7 +61,7 @@ export async function cloneVm(store: VmStore, p: VmProfile,
       ok = false;
     }
     if (!ok) {
-      return '源文件不存在：' + baseName(src);
+      return '找不到文件：' + baseName(src);
     }
   }
 

@@ -32,6 +32,12 @@ deps:
 hap:
 	hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
 
+# ArkTS UI 布局自查：Row 不写宽度会按内容宽渲染、被外层 Column 默认居中
+# （磁盘分配/磁盘来源/光盘按钮行/存储页按钮行实测连爆）。改 UI 后与交付前必跑；
+# --strict 有未豁免项即失败，有意居中的行前加 `// ui-layout-ok: 理由` 豁免。
+ui-check:
+	python3 scripts/check-ui-layout.py . --strict
+
 # 发布上架包：release 签名配置（含发布材料路径/口令密文）不入库，存放在
 # gitignore 的 .ohos/build-profile.release.json5；打包时临时换入根 build-profile.json5，
 # 结束（含构建失败）即还原调试配置。assembleApp 内置 SignApp，无需手动签名。

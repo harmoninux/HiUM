@@ -23,7 +23,7 @@ import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
   cCard, cBlock, cChip, cConsoleScrim,
   tCard, tBody, tItem, tSub, tMono, iconFs,
-  sp1, sp2, sp3, sp4, sp5, sp6, rCard, rElem, rBadge, rBtn, btnH, btnSh, btnPadX, bw,
+  sp1, sp2, sp3, sp4, sp5, sp6, rCard, rElem, rBadge, rBtn, btnH, btnSh, btnRow, btnPadX, bw,
   inpH, inpBg, inpRadius, inpPadX,
 } from '../lib/uiTokens';
 
@@ -142,7 +142,7 @@ export struct VmManage {
       return;
     }
     if (this.isRunningNow()) {
-      promptAction.showToast({ message: '虚拟机运行中，无法克隆' });
+      promptAction.showToast({ message: '虚拟机运行中，请先关机再克隆' });
       return;
     }
     this.cloneStage = '准备';
@@ -334,7 +334,7 @@ export struct VmManage {
   /* 系统盘概览一句话（无盘 → 未配置） */
   private diskSummary(): string {
     return this.diskPath
-      ? `${this.diskFmt} · 虚拟 ${this.diskVirtualGB.toFixed(1)}G · 实占 ${this.diskActualGB.toFixed(1)}G`
+      ? `${this.diskFmt} · 容量 ${this.diskVirtualGB.toFixed(1)}G · 已占 ${this.diskActualGB.toFixed(1)}G`
       : '未配置';
   }
 
@@ -389,10 +389,10 @@ export struct VmManage {
       return '未配置系统盘';
     }
     if (this.diskFmt !== 'qcow2') {
-      return '仅 qcow2 格式系统盘支持';
+      return '系统盘不是 qcow2 格式，暂不支持快照';
     }
     if (this.profile !== null && vmIsRunning(this.profile.id)) {
-      return '关机后可创建';
+      return '关机后才能创建快照';
     }
     return '可用';
   }
@@ -521,7 +521,7 @@ export struct VmManage {
       abilityName: 'VmConsoleAbility',
       parameters: { vmId: p.id, vmName: p.name },
     }).catch((err: BusinessError) => {
-      promptAction.showToast({ message: '打开窗口失败 (' + err.code + ')，请重试' });
+      promptAction.showToast({ message: '打开窗口失败，请重试' });
     });
   }
 
@@ -556,7 +556,7 @@ export struct VmManage {
     const label = force ? '强制关机' : '关机';
     const message = force
       ? `将立即切断「${p.name}」的电源，未保存的数据可能丢失。确认？`
-      : `向「${p.name}」发送关机信号，客户机将保存数据后自行退出。确认？`;
+      : `将向「${p.name}」发送关机信号，系统会保存数据后自行退出。确认？`;
     AlertDialog.show({
       title: label,
       message: message,
@@ -594,14 +594,14 @@ export struct VmManage {
       return;
     }
     if (vmIsRunning(p.id)) {
-      promptAction.showToast({ message: '虚拟机运行中，无法删除' });
+      promptAction.showToast({ message: '虚拟机运行中，请先关机再删除' });
       return;
     }
     AlertDialog.show({
       title: '删除虚拟机',
       /* remove 会删 vms 目录内全部磁盘（含数据盘），文案必须如实列出，否则用户
        * 以为数据盘安全，实际一并消失（数据丢失级别的表述缺陷，不能只提系统盘） */
-      message: `将删除「${p.name}」的配置${this.deleteDiskPart()}及内核文件副本（仅应用目录内，外部 ISO 不受影响），确认？`,
+      message: `将删除「${p.name}」的配置${this.deleteDiskPart()}及内核文件，外部的 ISO 不受影响。确认？`,
       primaryButton: { value: '取消', action: () => {} },
       secondaryButton: {
         value: '删除',
@@ -717,7 +717,7 @@ export struct VmManage {
         }, (d: VmDisk) => d.path)
       }.alignItems(HorizontalAlign.Start).layoutWeight(1)
       Button('存储管理').focusable(false).fontSize(tItem)
-        .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+        .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
         .backgroundColor(Color.Transparent).fontColor(cPrimary)
         .onClick(() => this.openStorage())
     }.width('100%').padding({ top: sp1, bottom: sp3 }).alignItems(VerticalAlign.Center)
@@ -733,14 +733,14 @@ export struct VmManage {
       if (this.snapCreateMode && this.canSnapshot()) {
         Row({ space: sp3 }) {
           TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tItem)
-            .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+            .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
             .onChange((v: string) => this.snapNameText = v)
           Button('创建').focusable(false).fontSize(tItem)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+            .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(cPrimary).fontColor(Color.White)
             .onClick(() => this.doSnapshotCreate())
           Button('取消').focusable(false).fontSize(tItem)
-            .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+            .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cSub)
             .onClick(() => { this.snapCreateMode = false; this.snapNameText = ''; })
         }.width('100%').margin({ top: sp3 })
@@ -757,11 +757,11 @@ export struct VmManage {
               Text(this.dateStr(s.dateSec)).fontSize(tMono).fontColor(cWeak)
             }.alignItems(HorizontalAlign.Start).layoutWeight(1)
             Button('恢复').focusable(false).fontSize(tItem)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+              .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cPrimary)
               .onClick(() => this.doSnapshotApply(s))
             Button('删除').focusable(false).fontSize(tItem)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+              .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cDanger)
               .onClick(() => this.doSnapshotDelete(s))
           }.width('100%')        }, (s: VmSnapshotEntry) => s.id + ':' + s.name)
@@ -772,7 +772,7 @@ export struct VmManage {
           /* 区块级操作入口与历史快照行的 恢复/删除 同位：行右端 */
           if (this.canSnapshot() && !this.snapCreateMode) {
             Button('创建快照').focusable(false).fontSize(tItem)
-              .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+              .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
               .backgroundColor(Color.Transparent).fontColor(cPrimary)
               .onClick(() => { this.snapCreateMode = true; this.snapNameText = ''; })
           }
@@ -786,7 +786,7 @@ export struct VmManage {
     Column() {
       Column({ space: sp1 }) {
         Text(this.netEnabled ? '已启用' : '已关闭').fontSize(tItem)
-        Text(`端口转发 ${(this.profile && this.profile.net.portForwards.length > 0) ? this.profile.net.portForwards : '无'} · 9p 共享${(this.profile && this.profile.net.sharedFolder) ? '开' : '关'}`)
+        Text(`端口转发 ${(this.profile && this.profile.net.portForwards.length > 0) ? this.profile.net.portForwards : '无'} · 共享目录 ${(this.profile && this.profile.net.sharedFolder) ? '开' : '关'}`)
           .fontSize(tSub).fontColor(cSub)
       }.alignItems(HorizontalAlign.Start).width('100%')    }.alignItems(HorizontalAlign.Start)
   }
@@ -803,7 +803,7 @@ export struct VmManage {
       }.fontSize(tSub).fontColor(cSub)
       Blank()
       Button('复制').focusable(false).fontSize(tItem)
-        .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+        .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
         .backgroundColor(Color.Transparent).fontColor(cPrimary)
         .onClick(() => this.copyArgs())
     }.width('100%').padding({ top: sp1, bottom: sp1 }).alignItems(VerticalAlign.Center)
@@ -869,6 +869,7 @@ export struct VmManage {
               .onClick(() => this.navStack.pop())
           }
           Column({ space: sp1 }) {
+            /* ui-layout-ok: 父 Column 已 alignItems(Start)（见本块链式尾部） */
             Row({ space: sp1 }) {
               Text(this.name).fontSize(tCard).fontWeight(FontWeight.Medium).fontColor(cText)
                 .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })

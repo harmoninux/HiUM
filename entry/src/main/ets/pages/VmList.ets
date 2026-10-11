@@ -20,7 +20,7 @@ import {
 } from '../lib/vmregistry';
 import {
   cPrimary, cDanger, cRunning, cWarn, cText, cSub, cWeak,
-  cBg, cCard, cBorder, cChip, cSel, cSelBg, cBlock,
+  cBg, cCard, cBorder, cChip, cSel, cSelBg, cBlock, cOverlayBg, cOverlayText,
   tPage, tCard, tLabel, tBody, tItem, tSub, iconFs,
   sp1, sp2, sp3, sp4, sp5, sp6, rCard, rElem, rBadge, bw, btnH, btnPadX,
 } from '../lib/uiTokens';
@@ -236,7 +236,7 @@ export struct VmList {
       abilityName: 'VmConsoleAbility',
       parameters: { vmId: p.id, vmName: p.name },
     }).catch((err: BusinessError) => {
-      promptAction.showToast({ message: '打开窗口失败 (' + err.code + ')，请重试' });
+      promptAction.showToast({ message: '打开窗口失败，请重试' });
     });
   }
 
@@ -262,7 +262,7 @@ export struct VmList {
 
   private confirmDeleteVm(p: VmProfile): void {
     if (vmIsRunning(p.id)) {
-      promptAction.showToast({ message: '虚拟机运行中，无法删除' });
+      promptAction.showToast({ message: '虚拟机运行中，请先关机再删除' });
       return;
     }
     /* remove 会删 vms 目录内全部磁盘（含数据盘），确认文案必须如实列出（同 VmManage） */
@@ -270,7 +270,7 @@ export struct VmList {
     const diskPart = n > 0 ? `、系统盘、${n} 张数据盘` : '、系统盘';
     AlertDialog.show({
       title: '删除虚拟机',
-      message: `将删除「${p.name}」的配置${diskPart}及内核文件副本（仅应用目录内，外部 ISO 不受影响），确认？`,
+      message: `将删除「${p.name}」的配置${diskPart}及内核文件，外部的 ISO 不受影响。确认？`,
       primaryButton: { value: '取消', action: () => {} },
       secondaryButton: {
         value: '删除',
@@ -303,6 +303,7 @@ export struct VmList {
       Text('点下方按钮创建你的第一台虚拟机')
         .fontSize(tSub)
         .fontColor(cWeak)
+      /* ui-layout-ok: 空态按钮有意居中（整个空态 Column 即居中设计） */
       Row({ space: sp3 }) {
         Button() {
           SymbolGlyph($r('sys.symbol.plus'))
@@ -324,18 +325,31 @@ export struct VmList {
   @Builder
   sideRow(p: VmProfile) {
     Row({ space: sp3 }) {
-      /* 画面缩略图：运行过即有缓存（VmConsole 抓帧）；无图灰块占位，同尺寸不跳 */
-      if (this.thumbs[p.id] !== undefined) {
-        Image(this.thumbs[p.id])
-          .width(72).height(44)
-          .objectFit(ImageFit.Cover)
-          .borderRadius(rElem)
-      } else {
-        Column()
-          .width(72).height(44)
-          .backgroundColor(cBlock)
-          .borderRadius(rElem)
+      /* 画面缩略图：运行过即有缓存（VmConsole 抓帧）；无图灰块占位，同尺寸不跳。
+       * arch 角标叠于左下角（半透明黑底白字）——从规格行挪来，规格行只留 核/内存/盘 */
+      Stack({ alignContent: Alignment.BottomStart }) {
+        if (this.thumbs[p.id] !== undefined) {
+          Image(this.thumbs[p.id])
+            .width(72).height(44)
+            .objectFit(ImageFit.Cover)
+            .borderRadius(rElem)
+        } else {
+          Column()
+            .width(72).height(44)
+            .backgroundColor(cBlock)
+            .borderRadius(rElem)
+        }
+        Text(p.machine.arch)
+          .fontSize(tSub)
+          .fontColor(cOverlayText)
+          .backgroundColor(cOverlayBg)
+          .borderRadius(rBadge)
+          .padding({ left: sp1, right: sp1 })
+          .margin({ left: sp1, bottom: sp1 })
+          .maxLines(1)
       }
+      .width(72)
+      .height(44)
       Column({ space: sp1 }) {
         Row({ space: sp1 }) {
           Text(p.name)
@@ -365,7 +379,8 @@ export struct VmList {
         .width('100%')
         .alignItems(VerticalAlign.Center)
 
-        Text(`${p.machine.arch} · ${this.fmtNum(p.runtime.memoryMB / 1024, 'G')} · ${p.runtime.cpus}核` + this.diskUsed(p))
+        /* 规格顺序：核 → 内存 → 磁盘（arch 已上缩略图角标） */
+        Text(`${p.runtime.cpus}核 · ${this.fmtNum(p.runtime.memoryMB / 1024, 'G')}` + this.diskUsed(p))
           .fontSize(tSub)
           .fontColor(cSub)
           .maxLines(1)
