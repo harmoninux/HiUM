@@ -17,8 +17,8 @@ import { prepareStart } from '../lib/tempSession';
 import { takePendingVmId, isPadOrPhone } from '../lib/vmwindows';
 import { VirtualKeyboard } from '../lib/VirtualKeyboard';
 import {
-  sp1, sp2, sp3, cCard, cText, cPrimary,
-  cConsoleText, cConsoleAccent, cConsoleDanger, cConsoleLogText, cConsoleWarn,
+  sp1, sp2, sp3, cCard, cText, cPrimary, cDanger,
+  cConsoleText, cConsoleAccent, cConsoleLogText, cConsoleWarn,
   cConsolePanel, cConsolePanelStrong, cConsoleInputBg, cConsolePlaceholder,
   cConsoleBanner, cConsoleBtn, cConsoleScrim,
 } from '../lib/uiTokens';
@@ -651,7 +651,7 @@ struct VmConsole {
       message: `将立即重启「${nm}」，未保存的数据可能丢失。确认？`,
       buttons: [
         { value: '取消', action: () => {} },
-        { value: '重启', fontColor: cConsoleDanger, action: () => this.qmp('system_reset') },
+        { value: '重启', fontColor: cDanger, action: () => this.qmp('system_reset') },
       ],
     });
   }
@@ -663,7 +663,7 @@ struct VmConsole {
       message: `将立即切断「${nm}」的电源，未保存的数据可能丢失。确认？`,
       buttons: [
         { value: '取消', action: () => {} },
-        { value: '强制关机', fontColor: cConsoleDanger, action: () => this.forcePowerOff() },
+        { value: '强制关机', fontColor: cDanger, action: () => this.forcePowerOff() },
       ],
     });
   }
@@ -1007,7 +1007,7 @@ struct VmConsole {
         .enabled(this.qmpAlive)
         .onClick(() => { this.confirmRestart() })
       MenuItem({ content: '强制关机' })
-        .contentFontColor(cConsoleDanger)
+        .contentFontColor(cDanger)
         .onClick(() => { this.confirmForceOff() })
       MenuItem({ content: 'Ctrl+Alt+Del' })
         .enabled(this.qmpAlive)
