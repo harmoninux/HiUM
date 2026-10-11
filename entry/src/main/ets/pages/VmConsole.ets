@@ -134,8 +134,9 @@ class VmXComponentController extends XComponentController {
 struct VmConsole {
   @StorageLink('vmDataDir') vmDataDir: string = '';
   @StorageLink('filesDir') filesDir: string = '';
-  @StorageLink('vmListVersion') @Watch('refreshVmName') vmListVersion: number = 0;
-  @State vmName: string = ''; /* 底部状态栏标题（改名后经 vmListVersion 跨窗口跟新） */
+  /* vmListVersion：仅作「写通道」用（截图完成/改名后 bump 通知列表与详情页刷新）；
+   * 窗口标题由系统标题栏展示 VM 名，console 内不再持有名称副本 */
+  @StorageLink('vmListVersion') vmListVersion: number = 0;
   @State status: string = '';
   /* QMP 可用（就绪往返过一次）：关机/重启/Ctrl+Alt+Del 的启用依据。
    * build 里不问 napi.vmRunning（同步 IPC 往返），经本状态由事件驱动翻转 */
@@ -318,7 +319,6 @@ struct VmConsole {
     this.vmId = takePendingVmId();
     if (this.vmId.length > 0) {
       this.profile = new VmStore(this.filesDir).load(this.vmId);
-      this.refreshVmName();
     }
     this.xcController.vmId = this.vmId;
     this.xcController.onReady = () => {
@@ -354,13 +354,6 @@ struct VmConsole {
     this.stopGeoWatch();
     napi.setQmpEventCallback(this.vmId, null);
     this.closeSerial();
-  }
-
-  /* 状态栏标题：单独 @State，不挂在 profile 上（profile 非响应式，且启动期
-   * 不该被改名重载打乱）；管理页改名会 vmListVersion++，@Watch 在此重读落档 */
-  private refreshVmName(): void {
-    const p = new VmStore(this.filesDir).load(this.vmId);
-    this.vmName = p ? p.name : '';
   }
 
   private enterVm(): void {
@@ -1829,12 +1822,6 @@ struct VmConsole {
 
         if (this.barOpen) {
           Row({ space: sp3 }) {
-            if (this.vmName.length > 0) {
-              Text(this.vmName).fontSize(this.barFs).fontWeight(FontWeight.Medium).fontColor(cConsoleText)
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .constraintSize({ maxWidth: isPadOrPhone() ? '40%' : '60%' })
-            }
             Button('电源').focusable(false).fontSize(this.barFs).height(this.barBtnH)
               .padding({ left: sp1, right: sp1 })
               .fontColor(cConsoleText).backgroundColor(Color.Transparent)
