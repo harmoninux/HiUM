@@ -4,10 +4,10 @@
 // 只编辑 VmProfile JSON，保存后由列表页/console 窗口消费。
 // 表单行布局：能贴右的贴右（设置行范式）——布尔 Switch 行与选项少的 Chip 行
 // （磁盘接口/网卡型号）标签撑满 + 控件贴右；选项多一行放不下的 Chip 行（架构/
-// 显卡）才用标签 72 列 + 控件从列位流动排列。
-// 按钮字号：与非按钮内容并排的行内按钮跟随所在行文字（tItem；与输入框并排则
-// tBody 跟输入框）；纯按钮行（选择文件/添加 ISO/添加数据盘等，区块级动作）与
-// 底部操作条一律 tBody。危险动作（移除/删除/清除）一律透明底 + cDanger。
+// 显卡）才用标签 72 列 + 控件从列位流动排列。Slider 一行标签、一行滑条。
+// 字号按区域定档（不逐按钮判断）：内容区（标签/值/说明/Chip/按钮/输入框）一律
+// tItem 14、说明 tSub 12、输入框 inpH 36 与胶囊协调；仅底部操作条用 tBody 16
+// /btnH 40。危险动作（移除/删除/清除）一律透明底 + cDanger。
 import { promptAction } from '@kit.ArkUI';
 import napiModule from 'libentry.so';
 import { common } from '@kit.AbilityKit';
@@ -436,7 +436,7 @@ export struct VmEdit {
                 Text('名称').fontSize(tLabel).width(72)
                 TextInput({ text: this.name })
                   .layoutWeight(1)
-                  .fontSize(tBody)
+                  .fontSize(tItem)
                   .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                   .onChange((v: string) => this.name = v)
               }.padding({ top: sp1, bottom: sp1 })
@@ -451,21 +451,17 @@ export struct VmEdit {
                   .textAlign(TextAlign.Start)
               }.padding({ top: sp1, bottom: sp1 })
 
-              Row({ space: sp1 }) {
-                Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
-                  .width(120)
-                Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
-                  .onChange((v: number) => this.cpus = v)
-                  .layoutWeight(1)
-              }.alignItems(VerticalAlign.Center).padding({ top: sp3, bottom: sp3 })
+              Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
+              Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
+                .onChange((v: number) => this.cpus = v)
+                .width('100%')
+                .padding({ top: sp1, bottom: sp3 })
 
-              Row() {
-                Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
-                  .width(120)
-                Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
-                  .onChange((v: number) => this.memoryMB = v)
-                  .layoutWeight(1)
-              }.alignItems(VerticalAlign.Center).padding({ top: sp3, bottom: sp3 })
+              Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
+              Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
+                .onChange((v: number) => this.memoryMB = v)
+                .width('100%')
+                .padding({ top: sp1, bottom: sp3 })
 
               /* v4 显卡：x86 板卡可换；virt/raspi 固定（说明行） */
               Row({ space: sp3 }) {
@@ -588,12 +584,12 @@ export struct VmEdit {
                   Text('无').fontSize(tSub).fontColor(cSub)
                 }
                 Row({ space: sp3 }) {
-                  Button('选择文件').focusable(false).fontSize(tBody)
+                  Button('选择文件').focusable(false).fontSize(tItem)
                     .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                     .backgroundColor(Color.Transparent).fontColor(cPrimary)
                     .onClick(() => this.pickLocalIso())
                   Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
-                    .focusable(false).fontSize(tBody)
+                    .focusable(false).fontSize(tItem)
                     .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                     .enabled(!this.ensureIsoLoading)
                     .onClick(() => this.pickBuiltinIso())
@@ -684,7 +680,7 @@ export struct VmEdit {
                   Text('监听端口').fontSize(tLabel).width(96)
                   TextInput({ text: this.gdbPortText })
                     .layoutWeight(1)
-                    .fontSize(tBody)
+                    .fontSize(tItem)
                     .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                     .onChange((v: string) => this.gdbPortText = v)
                 }.padding({ bottom: sp1 })
@@ -706,7 +702,7 @@ export struct VmEdit {
                   Text('内核引导').fontSize(tLabel)
                   Text(this.kernelLabel()).fontSize(tSub).fontColor(cWeak)
                   TextInput({ text: this.kernelAppend, placeholder: '内核参数，如 console=tty0 console=ttyS0 root=/dev/vda' })
-                    .fontSize(tBody)
+                    .fontSize(tItem)
                     .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                     .onChange((v: string) => this.kernelAppend = v)
                 }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp3, bottom: sp3 })
@@ -716,7 +712,7 @@ export struct VmEdit {
                 Text('自定义 QEMU 参数').fontSize(tLabel)
                 Text('追加到命令行末尾').fontSize(tSub).fontColor(cWeak)
                 TextArea({ placeholder: '如 -device usb-kbd', text: this.extraArgs })
-                  .fontSize(tBody)
+                  .fontSize(tItem)
                   .height(108).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                   .onChange((v: string) => this.extraArgs = v)
               }.alignItems(HorizontalAlign.Start).padding({ top: sp3, bottom: sp3 })

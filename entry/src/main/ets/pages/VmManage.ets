@@ -716,14 +716,14 @@ export struct VmManage {
       }
       if (this.snapCreateMode && this.canSnapshot()) {
         Row({ space: sp3 }) {
-          TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tBody)
+          TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tItem)
             .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
             .onChange((v: string) => this.snapNameText = v)
-          Button('创建').focusable(false).fontSize(tBody)
+          Button('创建').focusable(false).fontSize(tItem)
             .height(btnH).borderRadius(rBtn).padding({ left: btnPadX, right: btnPadX })
             .backgroundColor(cPrimary).fontColor(Color.White)
             .onClick(() => this.doSnapshotCreate())
-          Button('取消').focusable(false).fontSize(tBody)
+          Button('取消').focusable(false).fontSize(tItem)
             .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cSub)
             .onClick(() => { this.snapCreateMode = false; this.snapNameText = ''; })

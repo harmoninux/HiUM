@@ -53,8 +53,10 @@ export const btnSh = 32;  /* 小/文字式动作按钮高 */
 export const btnPadX = 16;/* 按钮水平内边距 */
 export const iconFs = 22; /* 图标按钮内 SymbolGlyph 字号（容器 btnH；截图卡等语境特例除外） */
 
-/* ---- 文本输入框（统一外观，不再依赖系统默认高度/圆角/底色） ---- */
-export const inpH = 40;      /* 标准输入框高（与 btnH 对齐，同排不错位） */
+/* ---- 文本输入框（统一外观，不再依赖系统默认高度/圆角/底色） ----
+ * 输入框属于弹窗内容区：字体随内容档 tItem、高度 36 与 Chip 胶囊协调；
+ * 底部操作条按钮才用 btnH 40。console 串口输入框不在此列（专档）。 */
+export const inpH = 36;      /* 标准输入框高（与 Chip 胶囊一致） */
 export const inpBg = cBlock; /* 输入框底，浅灰块 */
 export const inpRadius = 8;  /* 输入框圆角 */
 export const inpPadX = 16;   /* 输入框左右内边距 */

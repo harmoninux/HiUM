@@ -356,7 +356,7 @@ export struct VmTemplate {
            * 装的系统（Win10 模板常用来装 Win7/8），想装别的就在这里起名 */
           SecHead({ label: '名称' })
           TextInput({ text: this.nameInput, placeholder: `留空自动命名（${this.namePreview}）` })
-            .fontSize(tBody)
+            .fontSize(tItem)
             .maxLength(60)
             .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg)
             .padding({ left: inpPadX, right: inpPadX })

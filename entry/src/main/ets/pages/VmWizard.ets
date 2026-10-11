@@ -662,7 +662,7 @@ export struct VmWizard {
         .width('100%')
 
         TextInput({ text: this.cpuModel, placeholder: '自定义（预设外的机型）' })
-          .fontSize(tBody)
+          .fontSize(tItem)
           .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
           .onChange((v: string) => this.cpuModel = v)
 
@@ -808,7 +808,7 @@ export struct VmWizard {
           }
         }
         TextInput({ text: this.kernelAppend, placeholder: '内核参数（可选），如 console=tty0 console=ttyS0 root=/dev/vda' })
-          .fontSize(tBody)
+          .fontSize(tItem)
           .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
           .onChange((v: string) => this.kernelAppend = v)
         Text('指定内核后由 qemu 直接装载引导（-kernel），绕过 BIOS/UEFI 流程；内核与 initrd 在创建时复制进虚拟机目录')
@@ -837,12 +837,12 @@ export struct VmWizard {
         Text('无').fontSize(tSub).fontColor(cSub).width('100%')
       }
       Row({ space: sp3 }) {
-        Button('添加 ISO').focusable(false).fontSize(tBody)
+        Button('添加 ISO').focusable(false).fontSize(tItem)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .backgroundColor(Color.Transparent).fontColor(cPrimary)
           .onClick(() => this.pickLocalIso())
         Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.archLabel(this.arch)})`)
-          .focusable(false).fontSize(tBody)
+          .focusable(false).fontSize(tItem)
           .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
           .enabled(!this.ensureIsoLoading)
           .onClick(() => this.pickBuiltinIso())
@@ -893,7 +893,7 @@ export struct VmWizard {
     Column({ space: sp3 }) {
       Text('名称').fontSize(tLabel).width(72)
       TextInput({ text: this.name, placeholder: '必填' })
-        .fontSize(tBody)
+        .fontSize(tItem)
         .maxLength(60)
         .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
         .onChange((v: string) => this.name = v)
