@@ -427,9 +427,10 @@ export struct VmEdit {
         .alignItems(HorizontalAlign.Start)
         .padding({ top: sp2 })
 
-        /* 右侧内容：一次只渲染当前 Tab */
+        /* 右侧内容：一次只渲染当前 Tab。行距节奏收归本容器统一（space sp2），
+         * 行内不再自带上下 padding——否则各行 4/12 随机叠加出行距 8~24 乱跳 */
         Scroll() {
-          Column() {
+          Column({ space: sp2 }) {
             if (this.tabIdx === 0) {
               /* —— 基础 —— */
               Row() {
@@ -439,8 +440,7 @@ export struct VmEdit {
                   .fontSize(tItem)
                   .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                   .onChange((v: string) => this.name = v)
-              }.padding({ top: sp1, bottom: sp1 })
-
+              }
               Row() {
                 Text('架构').fontSize(tLabel).width(72)
                 Text(this.arch)
@@ -449,20 +449,17 @@ export struct VmEdit {
                   .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).layoutWeight(1)
                   .padding({ left: inpPadX, right: inpPadX })
                   .textAlign(TextAlign.Start)
-              }.padding({ top: sp1, bottom: sp1 })
-
+              }
               Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
               Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
                 .onChange((v: number) => this.cpus = v)
                 .width('100%')
-                .padding({ top: sp1, bottom: sp3 })
-
+                .height(40)                
               Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
               Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
                 .onChange((v: number) => this.memoryMB = v)
                 .width('100%')
-                .padding({ top: sp1, bottom: sp3 })
-
+                .height(40)                
               /* v4 显卡：x86 板卡可换；virt/raspi 固定（说明行） */
               Row({ space: sp3 }) {
                 Text('显卡').fontSize(tLabel).width(72)
@@ -476,8 +473,7 @@ export struct VmEdit {
                   Text(this.isRaspiBoard() ? '板载（固定）' : 'virtio-gpu（固定）')
                     .fontSize(tSub).fontColor(cSub).layoutWeight(1)
                 }
-              }.width('100%').padding({ top: sp1, bottom: sp1 })
-            } else if (this.tabIdx === 1) {
+              }.width('100%')            } else if (this.tabIdx === 1) {
               /* —— 存储：容量/重建/数据盘增删在「存储管理」弹窗，此处只做开关与光盘 —— */
               Column({ space: sp1 }) {
                 Row() {
@@ -505,28 +501,31 @@ export struct VmEdit {
                       }
                     })
                 }
-              }.alignItems(HorizontalAlign.Start).padding({ top: sp3, bottom: sp3 })
-
+              }.alignItems(HorizontalAlign.Start)
               /* v5：系统盘只读 + 数据盘列表（创建/导入/移除/扩容在存储弹窗） */
-              Row() {
-                Text('系统盘只读').fontSize(tLabel).layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.diskReadonly })
-                  .onChange((v: boolean) => this.diskReadonly = v)
-              }.padding({ top: sp1, bottom: sp1 })
-              Text('开启后防系统盘误写；扩容、快照等管理操作不受影响').fontSize(tSub).fontColor(cWeak).width('100%')
+              Column({ space: sp1 }) {
+                Row() {
+                  Text('系统盘只读').fontSize(tLabel).layoutWeight(1)
+                  Toggle({ type: ToggleType.Switch, isOn: this.diskReadonly })
+                    .onChange((v: boolean) => this.diskReadonly = v)
+                }.width('100%')
+                Text('开启后防系统盘误写；扩容、快照等管理操作不受影响').fontSize(tSub).fontColor(cWeak).width('100%')
+              }
 
               /* 磁盘接口（仅 x86 板卡有 IDE 南桥）：切换只影响 -drive if= 的挂载方式，
                * 盘内容不动——Windows VM 若误建为 virtio，切到 ide 即可被安装程序识别。 */
               if (this.isX86Board()) {
-                Row({ space: sp3 }) {
-                  Text('磁盘接口').fontSize(tLabel).layoutWeight(1)
-                  Chip({ label: 'virtio', active: this.diskIface === 'virtio', onTap: () => { this.diskIface = 'virtio'; } })
-                  Chip({ label: 'ide（Windows）', active: this.diskIface === 'ide', onTap: () => { this.diskIface = 'ide'; } })
-                }.width('100%').padding({ top: sp1, bottom: sp1 })
-                Text(this.diskIface === 'ide'
-                  ? 'Windows 免装驱动即可识别'
-                  : '性能更好，Linux 首选；Windows 需另装驱动')
-                  .fontSize(tSub).fontColor(cWeak).width('100%')
+                Column({ space: sp1 }) {
+                  Row({ space: sp3 }) {
+                    Text('磁盘接口').fontSize(tLabel).layoutWeight(1)
+                    Chip({ label: 'virtio', active: this.diskIface === 'virtio', onTap: () => { this.diskIface = 'virtio'; } })
+                    Chip({ label: 'ide（Windows）', active: this.diskIface === 'ide', onTap: () => { this.diskIface = 'ide'; } })
+                  }.width('100%')
+                  Text(this.diskIface === 'ide'
+                    ? 'Windows 免装驱动即可识别'
+                    : '性能更好，Linux 首选；Windows 需另装驱动')
+                    .fontSize(tSub).fontColor(cWeak).width('100%')
+                }
               }
 
               Column({ space: sp1 }) {
@@ -558,11 +557,9 @@ export struct VmEdit {
                         next[idx] = { path: d.path, readonly: v, iface: d.iface };
                         this.extraDisks = next;
                       })
-                  }.width('100%').padding({ top: sp1, bottom: sp1 })
-                }, (d: VmDisk) => d.path)
+                  }.width('100%')                }, (d: VmDisk) => d.path)
                 Text('快照仅含系统盘，数据盘不参与').fontSize(tSub).fontColor(cWeak).width('100%')
-              }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp3, bottom: sp3 })
-
+              }.alignItems(HorizontalAlign.Start).width('100%')
               Column({ space: sp1 }) {
                 Text('光盘 ISO').fontSize(tLabel)
                 if (this.cdromPaths.length > 0) {
@@ -591,43 +588,40 @@ export struct VmEdit {
                   Button(this.ensureIsoLoading ? `内置下载 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
                     .focusable(false).fontSize(tItem)
                     .height(btnSh).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+                    .backgroundColor(Color.Transparent).fontColor(cPrimary)
                     .enabled(!this.ensureIsoLoading)
                     .onClick(() => this.pickBuiltinIso())
                 }
-              }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp3, bottom: sp3 })
-
+              }.alignItems(HorizontalAlign.Start).width('100%')
               Row() {
                 Text(this.hasKernel() ? '从光盘启动（内核引导时无效）' : '从光盘启动')
                   .fontSize(tLabel).layoutWeight(1)
                 Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
                   .enabled(!this.hasKernel())
                   .onChange((v: boolean) => this.bootFromCdrom = v)
-              }.padding({ top: sp1, bottom: sp1 })
-            } else if (this.tabIdx === 2) {
+              }            } else if (this.tabIdx === 2) {
               /* —— 网络 —— */
               Row() {
                 Text('启用网络').fontSize(tLabel).layoutWeight(1)
                 Toggle({ type: ToggleType.Switch, isOn: this.netEnabled })
                   .onChange((v: boolean) => this.netEnabled = v)
-              }.padding({ top: sp1, bottom: sp1 })
-
+              }
               if (this.netEnabled) {
-                Column({ space: 4 }) {
+                Column({ space: sp1 }) {
                   Text('端口映射').fontSize(tLabel)
                   PortForwardEditor({ text: this.$portForwards })
-                }.alignItems(HorizontalAlign.Start).padding({ top: sp3, bottom: sp3 })
-                Column({ space: 4 }) {
+                }.alignItems(HorizontalAlign.Start)
+                Column({ space: sp1 }) {
                   Row() {
                     Text('共享目录').fontSize(tLabel).layoutWeight(1)
                     Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
                       .onChange((v: boolean) => this.sharedFolder = v)
                   }.padding({ left: 0, right: 0 })
                   Text('开启后虚拟机可读写设备的 Download 目录（在虚拟机内是 /shared）').fontSize(tSub).fontColor(cWeak)
-                }.alignItems(HorizontalAlign.Start).padding({ top: sp3, bottom: sp3 })
-                /* 网卡型号（仅 x86 板卡可切）：rtl8139 是 XP/Win7 唯一双 in-box 驱动的
+                }.alignItems(HorizontalAlign.Start)                /* 网卡型号（仅 x86 板卡可切）：rtl8139 是 XP/Win7 唯一双 in-box 驱动的
                  * 网卡，性能弱于 virtio；Linux 用 virtio。 */
                 if (this.isX86Board()) {
-                  Column({ space: 4 }) {
+                  Column({ space: sp1 }) {
                     Row({ space: sp3 }) {
                       Text('网卡型号').fontSize(tLabel).layoutWeight(1)
                       Chip({ label: 'virtio', active: this.netModel === 'virtio', onTap: () => { this.netModel = 'virtio'; } })
@@ -637,86 +631,93 @@ export struct VmEdit {
                       ? 'Windows 默认'
                       : 'Linux 默认；Windows 需装 virtio-win 驱动')
                       .fontSize(tSub).fontColor(cWeak).width('100%')
-                  }.alignItems(HorizontalAlign.Start).padding({ top: sp3, bottom: sp3 })
-                }
+                  }.alignItems(HorizontalAlign.Start)                }
               }
             } else {
               /* —— 高级 —— */
               /* 声音（raspi 无模拟声卡禁用） */
-              Row() {
-                Text('声音').fontSize(tLabel).layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.audio })
-                  .enabled(!this.isRaspiBoard())
-                  .onChange((v: boolean) => this.audio = v)
-              }.width('100%').padding({ top: sp1, bottom: sp1 })
-              Text('开启后虚拟机里的声音通过设备的扬声器/耳机播放').fontSize(tSub).fontColor(cWeak)
-                .width('100%')
+              Column({ space: sp1 }) {
+                Row() {
+                  Text('声音').fontSize(tLabel).layoutWeight(1)
+                  Toggle({ type: ToggleType.Switch, isOn: this.audio })
+                    .enabled(!this.isRaspiBoard())
+                    .onChange((v: boolean) => this.audio = v)
+                }.width('100%')
+                Text('开启后虚拟机里的声音通过设备的扬声器/耳机播放').fontSize(tSub).fontColor(cWeak)
+                  .width('100%')
+              }
 
               /* v4 系统增强：RNG/balloon（raspi 无 PCI 禁用） */
-              Row() {
-                Text('随机数 (RNG)').fontSize(tLabel).layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.rng })
-                  .enabled(!this.isRaspiBoard())
-                  .onChange((v: boolean) => this.rng = v)
-              }.padding({ top: sp1, bottom: sp1 })
-              Text('给虚拟机提供随机数来源，可加快部分系统的启动；默认关闭即可').fontSize(tSub).fontColor(cWeak)
-                .padding({ bottom: sp1 })
-              Row() {
-                Text('内存回收 (Balloon)').fontSize(tLabel).layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.balloon })
-                  .enabled(!this.isRaspiBoard())
-                  .onChange((v: boolean) => this.balloon = v)
-              }.padding({ top: sp1, bottom: sp1 })
-              Text('虚拟机空闲时归还部分内存给设备；一般无需开启').fontSize(tSub).fontColor(cWeak)
-                .padding({ bottom: sp1 })
-              /* v6：GDB 调试后端（开机后可连 `gdb target remote :端口`） */
-              Row() {
-                Text('GDB 调试').fontSize(tLabel).layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.gdbOn })
-                  .onChange((v: boolean) => this.gdbOn = v)
-              }.padding({ top: sp1, bottom: sp1 })
-              if (this.gdbOn) {
+              Column({ space: sp1 }) {
                 Row() {
-                  Text('监听端口').fontSize(tLabel).width(96)
-                  TextInput({ text: this.gdbPortText })
-                    .layoutWeight(1)
-                    .fontSize(tItem)
-                    .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
-                    .onChange((v: string) => this.gdbPortText = v)
-                }.padding({ bottom: sp1 })
-                Text('在电脑上执行 gdb，连接 target remote :' + this.gdbPortText).fontSize(tSub).fontColor(cWeak)
-                  .padding({ bottom: sp1 })
+                  Text('随机数 (RNG)').fontSize(tLabel).layoutWeight(1)
+                  Toggle({ type: ToggleType.Switch, isOn: this.rng })
+                    .enabled(!this.isRaspiBoard())
+                    .onChange((v: boolean) => this.rng = v)
+                }.width('100%')
+                Text('给虚拟机提供随机数来源，可加快部分系统的启动；默认关闭即可').fontSize(tSub).fontColor(cWeak)
+                  .width('100%')
               }
-              Row() {
-                Text('RTC 本地时区').fontSize(tLabel).layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.rtcLocal })
-                  .onChange((v: boolean) => this.rtcLocal = v)
-              }.padding({ top: sp1, bottom: sp1 })
-              Text('虚拟机内的时钟跟随设备时区显示，Windows 虚拟机建议开启').fontSize(tSub).fontColor(cWeak)
-                .padding({ bottom: sp1 })
+              Column({ space: sp1 }) {
+                Row() {
+                  Text('内存回收 (Balloon)').fontSize(tLabel).layoutWeight(1)
+                  Toggle({ type: ToggleType.Switch, isOn: this.balloon })
+                    .enabled(!this.isRaspiBoard())
+                    .onChange((v: boolean) => this.balloon = v)
+                }.width('100%')
+                Text('虚拟机空闲时归还部分内存给设备；一般无需开启').fontSize(tSub).fontColor(cWeak)
+                  .width('100%')
+              }
+              /* v6：GDB 调试后端（开机后可连 `gdb target remote :端口`） */
+              Column({ space: sp1 }) {
+                Row() {
+                  Text('GDB 调试').fontSize(tLabel).layoutWeight(1)
+                  Toggle({ type: ToggleType.Switch, isOn: this.gdbOn })
+                    .onChange((v: boolean) => this.gdbOn = v)
+                }.width('100%')
+                if (this.gdbOn) {
+                  Row() {
+                    Text('监听端口').fontSize(tLabel).width(96)
+                    TextInput({ text: this.gdbPortText })
+                      .layoutWeight(1)
+                      .fontSize(tItem)
+                      .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
+                      .onChange((v: string) => this.gdbPortText = v)
+                  }.width('100%')
+                  Text('在电脑上执行 gdb，连接 target remote :' + this.gdbPortText).fontSize(tSub).fontColor(cWeak)
+                    .width('100%')
+                }
+              }
+              Column({ space: sp1 }) {
+                Row() {
+                  Text('RTC 本地时区').fontSize(tLabel).layoutWeight(1)
+                  Toggle({ type: ToggleType.Switch, isOn: this.rtcLocal })
+                    .onChange((v: boolean) => this.rtcLocal = v)
+                }.width('100%')
+                Text('虚拟机内的时钟跟随设备时区显示，Windows 虚拟机建议开启').fontSize(tSub).fontColor(cWeak)
+                  .width('100%')
+              }
 
               /* 内核引导：已配 kernel 时展示文件名 + 可编辑的内核参数（-append）。
                * kernel/initrd 文件本身创建后不可更换（重建 VM 走向导） */
               if (this.hasKernel()) {
-                Column({ space: 4 }) {
+                Column({ space: sp1 }) {
                   Text('内核引导').fontSize(tLabel)
                   Text(this.kernelLabel()).fontSize(tSub).fontColor(cWeak)
                   TextInput({ text: this.kernelAppend, placeholder: '内核参数，如 console=tty0 console=ttyS0 root=/dev/vda' })
                     .fontSize(tItem)
                     .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                     .onChange((v: string) => this.kernelAppend = v)
-                }.alignItems(HorizontalAlign.Start).width('100%').padding({ top: sp3, bottom: sp3 })
-              }
+                }.alignItems(HorizontalAlign.Start).width('100%')              }
 
-              Column({ space: 4 }) {
+              Column({ space: sp1 }) {
                 Text('自定义 QEMU 参数').fontSize(tLabel)
                 Text('追加到命令行末尾').fontSize(tSub).fontColor(cWeak)
                 TextArea({ placeholder: '如 -device usb-kbd', text: this.extraArgs })
                   .fontSize(tItem)
                   .height(108).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX })
                   .onChange((v: string) => this.extraArgs = v)
-              }.alignItems(HorizontalAlign.Start).padding({ top: sp3, bottom: sp3 })
-            }
+              }.alignItems(HorizontalAlign.Start)            }
           }
           .width('100%')
           /* Column 默认水平居中：占满宽度的行看不出来，自适应宽度的说明文字
