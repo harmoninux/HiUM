@@ -1800,20 +1800,32 @@ struct VmConsole {
       })
 
       /* 顶部悬浮开关 + 半透明工具栏（替代原底部状态栏）：浮层不占布局，画面
-       * 全窗高。收起时画面上方居中一枚半透明圆钮；点击展开浮动工具栏（状态
-       * 文字 + 电源/介质/串口/输入/键盘），再点收起。恒深色配色走 console 专档 */
+       * 全窗高。收起态 = 圆钮 + 状态消息气泡（有消息才出现，瞬态等待/异常提示
+       * 不展开也能看到）；点击圆钮展开工具栏（电源/介质/串口/输入/键盘） */
       Column({ space: sp2 }) {
-        Button() {
-          SymbolGlyph(this.barOpen ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
-            .fontSize(18)
-            .fontColor([cConsoleText])
+        Row({ space: sp2 }) {
+          Button() {
+            SymbolGlyph(this.barOpen ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
+              .fontSize(18)
+              .fontColor([cConsoleText])
+          }
+          .focusable(false)
+          .width(this.barBtnH + 14)
+          .height(this.barBtnH + 14)
+          .backgroundColor(cConsolePanel)
+          .borderRadius((this.barBtnH + 14) / 2)
+          .onClick(() => { this.barOpen = !this.barOpen })
+          if (this.status.length > 0) {
+            Text(this.status).fontSize(this.barFs).fontColor(cConsoleText)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .constraintSize({ maxWidth: isPadOrPhone() ? 220 : 340 })
+              .backgroundColor(cConsolePanel)
+              .borderRadius(12)
+              .padding({ left: sp2, right: sp2, top: sp1, bottom: sp1 })
+          }
         }
-        .focusable(false)
-        .width(this.barBtnH + 14)
-        .height(this.barBtnH + 14)
-        .backgroundColor(cConsolePanel)
-        .borderRadius((this.barBtnH + 14) / 2)
-        .onClick(() => { this.barOpen = !this.barOpen })
+        .alignItems(VerticalAlign.Center)
 
         if (this.barOpen) {
           Row({ space: sp3 }) {
