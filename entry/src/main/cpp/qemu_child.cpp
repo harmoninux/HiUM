@@ -18,9 +18,14 @@
 #include <stdint.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
 #include <atomic>
 #include <string>
 #include <vector>
+#include <thread>
 
 #undef LOG_DOMAIN
 #undef LOG_TAG
@@ -213,6 +218,86 @@ void onStubDestroy(void *userData)
     g_quit.store(true);
 }
 
+/* ---- TEMP: /proc 读取探针（HUD 数据面可行性实测，结论入 spec 后移除）----
+ * 子进程自读 /proc/self 下文件，给「字段存在与格式」打地面真值：
+ * 线程名与 ticks（task 目录下 comm、stat）、内存（status VmRSS）、IO（io rchar/wchar）。 */
+void procProbeSelf()
+{
+    int threads = 0;
+    DIR *d = opendir("/proc/self/task");
+    if (d != nullptr) {
+        struct dirent *e;
+        while ((e = readdir(d)) != nullptr) {
+            if (e->d_name[0] < '0' || e->d_name[0] > '9') {
+                continue;
+            }
+            threads++;
+            if (threads > 8) {
+                continue; /* 样本只打前 8 个线程，够认格式 */
+            }
+            char path[96];
+            char comm[64] = "";
+            unsigned long utime = 0, stime = 0;
+            snprintf(path, sizeof(path), "/proc/self/task/%s/comm", e->d_name);
+            FILE *f = fopen(path, "r");
+            if (f != nullptr) {
+                size_t n = fread(comm, 1, sizeof(comm) - 1, f);
+                comm[n] = '\0';
+                for (size_t i = 0; i < n; i++) {
+                    if (comm[i] == '\n') {
+                        comm[i] = '\0';
+                        break;
+                    }
+                }
+                fclose(f);
+            }
+            snprintf(path, sizeof(path), "/proc/self/task/%s/stat", e->d_name);
+            f = fopen(path, "r");
+            if (f != nullptr) {
+                char buf[512];
+                if (fgets(buf, sizeof(buf), f) != nullptr) {
+                    /* 字段 14/15 = utime/stime；comm 可含空格，取最后一个 ')' 之后数 */
+                    char *rp = strrchr(buf, ')');
+                    if (rp != nullptr) {
+                        sscanf(rp + 1, " %*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lu %lu",
+                               &utime, &stime);
+                    }
+                }
+                fclose(f);
+            }
+            OH_LOG_INFO(LOG_APP, "PROBE-SELF tid=%{public}s comm=%{public}s utime=%{public}lu stime=%{public}lu",
+                        e->d_name, comm, utime, stime);
+        }
+        closedir(d);
+    } else {
+        OH_LOG_ERROR(LOG_APP, "PROBE-SELF opendir task errno=%{public}d", errno);
+    }
+    FILE *f = fopen("/proc/self/status", "r");
+    if (f != nullptr) {
+        char buf[256];
+        while (fgets(buf, sizeof(buf), f) != nullptr) {
+            if (strncmp(buf, "VmRSS", 5) == 0) {
+                OH_LOG_INFO(LOG_APP, "PROBE-SELF status: %{public}s", buf);
+                break;
+            }
+        }
+        fclose(f);
+    }
+    f = fopen("/proc/self/io", "r");
+    if (f != nullptr) {
+        char buf[256];
+        while (fgets(buf, sizeof(buf), f) != nullptr) {
+            if (strncmp(buf, "rchar", 5) == 0 || strncmp(buf, "wchar", 5) == 0) {
+                OH_LOG_INFO(LOG_APP, "PROBE-SELF io: %{public}s", buf);
+            }
+        }
+        fclose(f);
+    } else {
+        OH_LOG_ERROR(LOG_APP, "PROBE-SELF open io errno=%{public}d", errno);
+    }
+    OH_LOG_INFO(LOG_APP, "PROBE-SELF done threads=%{public}d pid=%{public}d", threads, getpid());
+}
+
 } // namespace
 
 extern "C" __attribute__((visibility("default"))) OHIPCRemoteStub *NativeChildProcess_OnConnect()
@@ -228,9 +313,18 @@ extern "C" __attribute__((visibility("default"))) void NativeChildProcess_MainPr
     OH_LOG_INFO(LOG_APP, "child: MainProc entered");
     /* VM 跑完一轮（running 由真转假）或收到 shutdown/父进程消失时退出 */
     bool wasRunning = false;
+    bool probed = false;
     while (!g_quit.load()) {
         bool r = vm_running();
         if (r) {
+            if (!probed) {
+                /* TEMP 探针：起来 2s 后自读 /proc/self 打地面真值（结论入 spec 后移除） */
+                probed = true;
+                std::thread([]() {
+                    usleep(2 * 1000 * 1000);
+                    procProbeSelf();
+                }).detach();
+            }
             wasRunning = true;
         } else if (wasRunning) {
             break;
