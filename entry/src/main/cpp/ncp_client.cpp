@@ -8,16 +8,9 @@
 #include <IPCKit/ipc_error_code.h>
 #include <hilog/log.h>
 
-#include <dirent.h>
-#include <stdio.h>
-#include <string.h>
-#include <errno.h>
-#include <unistd.h>
-
 #include <deque>
 #include <map>
 #include <mutex>
-#include <thread>
 
 #undef LOG_DOMAIN
 #undef LOG_TAG
@@ -27,130 +20,6 @@
 namespace {
 
 using namespace qemu_ipc;
-
-/* ---- TEMP: /proc 读取探针（HUD 数据面可行性实测，结论入 spec 后移除）----
- * 父进程视角两问：① 子进程在 /proc 里可见吗（pid 发现——NCP 不给 pid，
- * ChildState 无 pid 字段，ppid 扫描是唯一自助途径）；② 可见时
- * task/comm/status/io 读得动吗（errno 说话）。 */
-void procProbeParent()
-{
-    DIR *d = opendir("/proc");
-    if (d == nullptr) {
-        OH_LOG_ERROR(LOG_APP, "PROBE-PARENT opendir /proc errno=%{public}d", errno);
-        return;
-    }
-    pid_t self = getpid();
-    std::vector<std::string> kids;
-    struct dirent *e;
-    while ((e = readdir(d)) != nullptr) {
-        if (e->d_name[0] < '0' || e->d_name[0] > '9') {
-            continue;
-        }
-        FILE *f = fopen((std::string("/proc/") + e->d_name + "/stat").c_str(), "r");
-        if (f == nullptr) {
-            continue; /* 看不见别人的进程是常态，不算异常 */
-        }
-        char buf[512];
-        if (fgets(buf, sizeof(buf), f) != nullptr) {
-            char *rp = strrchr(buf, ')');
-            int ppid = 0;
-            if (rp != nullptr && sscanf(rp + 1, " %*c %d", &ppid) == 1 && ppid == (int)self) {
-                kids.push_back(e->d_name);
-            }
-        }
-        fclose(f);
-    }
-    closedir(d);
-    if (kids.empty()) {
-        OH_LOG_ERROR(LOG_APP, "PROBE-PARENT: 子进程在 /proc 不可见 → pid 发现不可行，读子进程数据必走 IPC 上报");
-        return;
-    }
-    for (const std::string &k : kids) {
-        OH_LOG_INFO(LOG_APP, "PROBE-PARENT: 看见子进程 pid=%{public}s", k.c_str());
-        char path[128];
-        snprintf(path, sizeof(path), "/proc/%s/task", k.c_str());
-        int threads = 0;
-        DIR *td = opendir(path);
-        if (td != nullptr) {
-            struct dirent *te;
-            while ((te = readdir(td)) != nullptr) {
-                if (te->d_name[0] < '0' || te->d_name[0] > '9') {
-                    continue;
-                }
-                threads++;
-                if (threads > 4) {
-                    continue; /* 样本只打前 4 个线程 */
-                }
-                char p2[160];
-                char comm[64] = "";
-                unsigned long utime = 0, stime = 0;
-                snprintf(p2, sizeof(p2), "/proc/%s/task/%s/comm", k.c_str(), te->d_name);
-                FILE *f = fopen(p2, "r");
-                if (f != nullptr) {
-                    size_t n = fread(comm, 1, sizeof(comm) - 1, f);
-                    comm[n] = '\0';
-                    for (size_t i = 0; i < n; i++) {
-                        if (comm[i] == '\n') {
-                            comm[i] = '\0';
-                            break;
-                        }
-                    }
-                    fclose(f);
-                } else {
-                    OH_LOG_ERROR(LOG_APP, "PROBE-PARENT comm open errno=%{public}d", errno);
-                }
-                snprintf(p2, sizeof(p2), "/proc/%s/task/%s/stat", k.c_str(), te->d_name);
-                f = fopen(p2, "r");
-                if (f != nullptr) {
-                    char b[512];
-                    if (fgets(b, sizeof(b), f) != nullptr) {
-                        char *rp = strrchr(b, ')');
-                        if (rp != nullptr) {
-                            sscanf(rp + 1, " %*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lu %lu",
-                                   &utime, &stime);
-                        }
-                    }
-                    fclose(f);
-                } else {
-                    OH_LOG_ERROR(LOG_APP, "PROBE-PARENT task stat open errno=%{public}d", errno);
-                }
-                OH_LOG_INFO(LOG_APP, "PROBE-PARENT tid=%{public}s comm=%{public}s utime=%{public}lu stime=%{public}lu",
-                            te->d_name, comm, utime, stime);
-            }
-            closedir(td);
-            OH_LOG_INFO(LOG_APP, "PROBE-PARENT 子进程 task 目录可列 threads=%{public}d", threads);
-        } else {
-            OH_LOG_ERROR(LOG_APP, "PROBE-PARENT task opendir errno=%{public}d", errno);
-        }
-        snprintf(path, sizeof(path), "/proc/%s/status", k.c_str());
-        FILE *f = fopen(path, "r");
-        if (f != nullptr) {
-            char b[256];
-            while (fgets(b, sizeof(b), f) != nullptr) {
-                if (strncmp(b, "VmRSS", 5) == 0) {
-                    OH_LOG_INFO(LOG_APP, "PROBE-PARENT status: %{public}s", b);
-                    break;
-                }
-            }
-            fclose(f);
-        } else {
-            OH_LOG_ERROR(LOG_APP, "PROBE-PARENT status open errno=%{public}d", errno);
-        }
-        snprintf(path, sizeof(path), "/proc/%s/io", k.c_str());
-        f = fopen(path, "r");
-        if (f != nullptr) {
-            char b[256];
-            while (fgets(b, sizeof(b), f) != nullptr) {
-                if (strncmp(b, "rchar", 5) == 0 || strncmp(b, "wchar", 5) == 0) {
-                    OH_LOG_INFO(LOG_APP, "PROBE-PARENT io: %{public}s", b);
-                }
-            }
-            fclose(f);
-        } else {
-            OH_LOG_ERROR(LOG_APP, "PROBE-PARENT io open errno=%{public}d", errno);
-        }
-    }
-}
 
 /* 一台 VM 的子进程状态。条目创建后常驻 map（数量=VM 数，很小），
  * 地址稳定，因此可以安全地先取 ChildState*、释放全局锁、再持 child 自己的
@@ -322,11 +191,6 @@ void onChildStarted(int errCode, OHIPCRemoteProxy *proxy)
         if (childRet == 0) {
             chp->vmRunning = true;
             chp->attached = true;
-            /* TEMP 探针：START 成功 6s 后父进程试读子进程 /proc（结论入 spec 后移除） */
-            std::thread([]() {
-                usleep(6 * 1000 * 1000);
-                procProbeParent();
-            }).detach();
         } else {
             /* VM 没起来：让子进程退出，别留着空转 */
             OHIPCParcel *sd = newRequest();

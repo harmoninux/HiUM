@@ -90,19 +90,24 @@ token**。恒深底浅字不随深浅色切换（叠在不可预知的 guest 画
   ArkTS 只消费算好的每秒值（接口风格对齐 `diskInfo`：返回 JSON 串）。
 - 子进程刚死/采样失败：显示「—」，自动停拍（进程不存在不建定时器拍空数据）。
 
-## 4. 读取路线（实现首日探针定）
+## 4. 读取路线（2026-10-17 真机探针定案：B）
 
-同一数据面，两条路线：
+探针实测（临时提交 a45bd15，设备 192.168.1.7:39415，VM 运行中）：
 
-- **A · 父进程直读** `/proc/<child_pid>/`：IPC 协议零改动、子进程不用动（部署快）。
-  风险：HarmonyOS 沙箱对读自有子进程 /proc 无文档背书（Android 同场景一般允许）。
-- **B · 子进程自读 + IPC 上报**：`qemu_ipc.h` 加 `kStats = 11`（`[ver] → [ver]累计值+线程榜`），
-  子进程自读自己零权限风险；payload KB 级，远低于 OHIPC parcel MB 级红线（kScreenshot
-  教训）；版本号不 bump（父子同包同批构建，同 kScreenshot 先例）。
+- **父进程视角**：`opendir(/proc)` 全量扫描，**看不见自己的子进程**（逐 pid 打开
+  stat 全部失败）——pid 发现本身不可行（NCP 不给 pid，ChildState 无 pid 字段，
+  ppid 扫描是唯一自助途径），**路线 A（父读）排除**。
+- **子进程自读全绿**：task 目录 30 线程可列；`comm`、`stat` 的 utime/stime、
+  `status` 的 VmRSS（实测 81356 kB）、`io` 的 rchar/wchar（实测 2434175/42104）
+  全部可读，格式与预期一致。
+- **线程名实测**：qemu 线程名确实落在 comm（qemu-main/qemu-render/qemu-log-relay…）。
+  注意 x86_64 guest 在 arm64 宿主下 vCPU 并入 qemu-main 线程（MTTCG off 的表现，
+  hdc 侧同进程复核未见「CPU N/TCG」）——线程榜如实显示，不假设该名字必然出现。
 
-**探针**：native 侧对运行中子进程一次 `open(/proc/<pid>/stat)`，失败与否立刻见分晓。
-通 → 走 A；不通 → 落 B。上次卡死观测证明这设备内核 /proc task 级数据真实存在
-（当时经 hdc shell 读），未验证的只是 app 沙箱视角。
+**定案：路线 B**——`qemu_ipc.h` 加 `kStats = 11`（`[ver] → [ver]累计 ticks/RSS/io +
+线程榜`），子进程自读自己零权限风险；payload KB 级远低于 OHIPC parcel MB 级红线
+（kScreenshot 教训）；版本号不 bump（父子同包同批构建，同 kScreenshot 先例）。
+差分状态持父进程 native 层。
 
 ## 5. 边界与后置
 
