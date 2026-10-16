@@ -80,8 +80,8 @@ const BAR_DRAG_THRESHOLD = 5;
 const PANEL_H = 32;
 const PANEL_BTN_H = 26;
 const PANEL_FS = 12;
-/* 串口日志区固定高（设计稿：约 5~6 行 12 号字的等宽行） */
-const SERIAL_LOG_H = 110;
+/* 串口日志区固定高（约 7~8 行 12 号字的等宽行） */
+const SERIAL_LOG_H = 144;
 const FAB_PREF = 'vmconsole_fab'; /* console 偏好文件名（虚拟键盘显隐 / 输入设置 / 串口字号共用） */
 /* 串口输入框的组件 id：发送后要把焦点交还给它（见 sendAndRefocus） */
 const SERIAL_INPUT_ID = 'hium-serial-input';
@@ -103,7 +103,7 @@ const QMP_CMD_CN: Record<string, string> = {
   'blockdev-change-medium': '更换光盘',
   'send-key': '发送按键',
 };
-/* 串口日志字号档（循环切换） */
+/* 串口日志字号合法档（偏好校验用；字号循环键帽已随键帽精简移除） */
 const SERIAL_FS_LIST: number[] = [12, 14, 17];
 /* 惯性滑行的速度衰减与停止阈值（每 16ms 一拍）：0.82 的衰减下约 0.5s 滑停 */
 const GLIDE_DECAY = 0.82;
@@ -173,11 +173,11 @@ struct VmConsole {
   @State barOffY: number = 0;
   @State toolbarW: number = 0; /* 工具栏实测宽高（以钮为中心定位；0 = 尚未测出） */
   @State toolbarH: number = 0;
-  /* v4 交互式串口：serialView=串口底栏面板打开（画面压上部）；文本/输入/Ctrl 修饰态均在页内 */
+  /* v5 交互式串口：serialView=串口浮层面板打开（悬浮画面底部之上，画面满幅）；
+   * 文本/输入/Ctrl 修饰态均在页内 */
   @State serialView: boolean = false;
   @State serialText: string = '';
   @State serialInput: string = '';
-  @State ctrlOn: boolean = false; /* Ctrl 修饰（发送时对字母做 ^C 类映射） */
   /* 上次启动失败留下的熔断标记（非空 = 本次进入不自动启动，需用户点「仍要启动」） */
   @State bootFailReason: string = '';
   private vmId: string = '';
@@ -1384,6 +1384,9 @@ struct VmConsole {
   }
 
   private toggleKbd(): void {
+    if (!this.showKbd && this.serialView) {
+      this.closeSerial(); /* 互斥：键盘面板沉底部，会盖住串口输入行 */
+    }
     this.showKbd = !this.showKbd;
     preferences.getPreferences(this.vmCtx(), FAB_PREF).then((prefs: preferences.Preferences) => {
       prefs.putSync(this.vmPrefKey('kbd'), this.showKbd);
@@ -1532,22 +1535,22 @@ struct VmConsole {
 
   /* ================= 交互式串口（v4）：画面 ↔ 串口视图 ================= */
 
-  /* 键帽 chip（Ctrl/Esc/Enter/清屏/字号共用）：圆角浅底方块；
-   * active 用于 Ctrl 修饰态高亮（同工具栏按钮的强调语义） */
+  /* 键帽 chip（清屏等动作）：圆角浅底方块 */
   @Builder
-  serialKey(label: string, active: boolean, action: () => void) {
+  serialKey(label: string, action: () => void) {
     Text(label)
       .fontSize(PANEL_FS)
       .height(PANEL_BTN_H)
       .padding({ left: sp3, right: sp3 })
-      .fontColor(active ? cConsoleAccent : cConsoleText)
+      .fontColor(cConsoleText)
       .backgroundColor(cConsoleKey)
       .borderRadius(rConsole)
       .onClick(action)
   }
 
-  /* 串口底栏面板（样式按设计稿）：日志区（更深底 + 等宽）+ 键帽/输入行。
-   * 面板推开画面而非覆盖——串口调试常要同时看画面。 */
+  /* 串口面板（底栏改浮层 v5）：日志区（更深底 + 等宽）+ 清屏/输入行。
+   * 悬浮于画面底部之上，画面不再被挤压；面板 90% 半透明深底保日志可读的同时
+   * 透出一点画面，盖住的是画面下缘而非布局空间。 */
   @Builder
   serialPanel() {
     Column({ space: sp2 }) {
@@ -1572,11 +1575,7 @@ struct VmConsole {
       .clip(true) /* 圆角裁剪滚动内容 */
 
       Row({ space: sp2 }) {
-        this.serialKey('Ctrl', this.ctrlOn, (): void => { this.ctrlOn = !this.ctrlOn })
-        this.serialKey('Esc', false, (): void => { this.serialSendByte(0x1b) })
-        this.serialKey('Enter', false, (): void => { this.serialSendByte(0x0d) })
-        this.serialKey('清屏', false, (): void => { this.serialText = '' })
-        this.serialKey(`字号 ${this.serialFs}`, false, (): void => { this.cycleSerialFs() })
+        this.serialKey('清屏', (): void => { this.serialText = '' })
         TextInput({ text: this.serialInput, placeholder: '输入后回车发送（打开 Ctrl 可发组合键）' })
           .layoutWeight(1)
           .fontSize(PANEL_FS)
@@ -1609,6 +1608,7 @@ struct VmConsole {
     .width('100%')
     .padding({ left: sp3, right: sp3, top: sp2, bottom: sp2 })
     .backgroundColor(cConsolePanelSolid)
+    .borderRadius({ topLeft: 12, topRight: 12 })
   }
 
   /* 打开串口视图：先回放本 VM 的落盘日志尾部（chardev logfile，跨启动累积；
@@ -1626,21 +1626,14 @@ struct VmConsole {
       return;
     }
     this.serialView = true;
+    this.showKbd = false; /* 互斥：串口面板与虚拟键盘都沉在画面底部，并存会互相压住 */
     this.serialText = readTail(serialLogPath(this.vmId, this.vmDataDir), 64 * 1024);
     this.serialInput = '';
-    this.ctrlOn = false;
     napi.serialOpen(this.vmId, serialSockPath(p, this.vmDataDir));
     napi.setSerialCallback(this.vmId, (text: string) => this.onSerialData(text));
     setTimeout(() => {
       this.serialScroller.scrollEdge(Edge.Bottom);
     }, 100);
-  }
-
-  /* 串口日志字号循环切换（12→14→17），全局偏好 */
-  private cycleSerialFs(): void {
-    const cur = SERIAL_FS_LIST.indexOf(this.serialFs);
-    this.serialFs = SERIAL_FS_LIST[(cur < 0 ? 0 : cur + 1) % SERIAL_FS_LIST.length];
-    this.saveConsolePrefs();
   }
 
   private closeSerial(): void {
@@ -1673,21 +1666,9 @@ struct VmConsole {
     this.serialScroller.scrollEdge(Edge.Bottom);
   }
 
-  /* Ctrl+字母 → 控制字节（^C=0x03）；其余字符原样。发送回车结尾（Linux ttyS0 icrnl 会转 \n） */
-  private ctrlMap(ch: string): string {
-    if (!this.ctrlOn) {
-      return ch;
-    }
-    const c = ch.charCodeAt(0);
-    if ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) { /* A-Z a-z */
-      return String.fromCharCode(c & 0x1f);
-    }
-    return ch;
-  }
-
   /* 发送（回车 / 点「发送」）后把焦点交还输入框：onSubmit 会让输入框失焦，
    * 用户得再点一下才能继续输入，连续调试串口时很别扭。空回车与发送失败也回焦，
-   * 否则同样要重新点一次。 */
+   * 否则同样要重新点一次。发送回车结尾（Linux ttyS0 icrnl 会转 \n） */
   private sendAndRefocus(): void {
     this.serialSendText();
     focusControl.requestFocus(SERIAL_INPUT_ID);
@@ -1698,25 +1679,12 @@ struct VmConsole {
     if (t.length === 0) {
       return;
     }
-    let wire = '';
-    for (let i = 0; i < t.length; i++) {
-      wire += this.ctrlMap(t.charAt(i));
-    }
-    wire += '\r';
-    const ret = napi.serialWrite(this.vmId, wire);
+    const ret = napi.serialWrite(this.vmId, t + '\r');
     if (ret < 0) {
       promptAction.showToast({ message: '串口未连接' });
       return;
     }
     this.serialInput = '';
-  }
-
-  /* 发送单个原始字符（Esc=0x1b；Enter=0x0d；Ctrl 单发 0x03 在此收尾） */
-  private serialSendByte(code: number): void {
-    const ret = napi.serialWrite(this.vmId, String.fromCharCode(code));
-    if (ret < 0) {
-      promptAction.showToast({ message: '串口未连接' });
-    }
   }
 
   /* ================ 窗口最大化 → 沉浸全屏（参照 wineohos VirtualDesktopAbility） ================
@@ -1780,8 +1748,8 @@ struct VmConsole {
     /* 根 = 左上角对齐的 Stack：纵向内容（画面区 + 串口面板）+ 绝对定位的
      * 悬浮钮/工具栏浮层（不占布局，沉浸（最大化）时画面依旧铺满） */
     Stack({ alignContent: Alignment.TopStart }) {
-      /* 纵向 = 画面区 + 串口底栏面板：面板打开时画面压到上部（推开而非覆盖，
-       * 串口调试常要同时看画面）；其后的悬浮钮/工具栏是 Stack 浮层，不占布局 */
+      /* 纵向 = 画面区（串口面板已在画面 Stack 内作浮层，不再占布局挤压画面）；
+       * 其后的悬浮钮/工具栏是 Stack 浮层，不占布局 */
       Column() {
         /* VM 画面区：XComponent + 虚拟键盘/熔断横幅/手势速查 overlay */
         Stack() {
@@ -1843,6 +1811,18 @@ struct VmConsole {
            * 键帽/把手消费触摸（见 VirtualKeyboard 组件 hitTest 说明） */
           if (isPadOrPhone() && this.showKbd) {
             VirtualKeyboard({ vmId: this.vmId, showKbd: this.$showKbd })
+          }
+          /* 串口面板 overlay：悬浮于画面底部之上，画面保持满幅——原底栏形态推开
+           * 画面（平板横屏吃掉约 1/3 高），而串口调试高频需要的是画面够大。
+           * wrapper 只为沉底占位：空白区 Transparent 不拦兄弟命中，触摸照达画面 */
+          if (this.serialView) {
+            Column() {
+              this.serialPanel()
+            }
+            .width('100%')
+            .height('100%')
+            .justifyContent(FlexAlign.End)
+            .hitTestBehavior(HitTestMode.Transparent)
           }
           /* 熔断横幅：上次启动失败且本次没有自动启动 —— 把原因和「仍要启动」摆出来。
            * 不自动重试是因为跑飞的 qemu 会满速灌盘且不退（详见 enterVm 注释）。 */
@@ -1913,10 +1893,6 @@ struct VmConsole {
           this.syncBarPos();
         })
 
-        /* 串口底栏面板：交互式串口打开时常驻底部 */
-        if (this.serialView) {
-          this.serialPanel()
-        }
       }
       .width('100%')
       .height('100%')
@@ -1966,7 +1942,7 @@ struct VmConsole {
               .fontColor(cConsoleText).backgroundColor(Color.Transparent)
               .bindMenu(this.mediaMenu)
           }
-          Button(this.serialView ? '屏幕' : '串口').focusable(false).fontSize(this.barFs).height(this.barBtnH + 8)
+          Button('串口').focusable(false).fontSize(this.barFs).height(this.barBtnH + 8)
             .padding({ left: sp1, right: sp1 })
             .fontColor(this.serialView ? cConsoleAccent : cConsoleText).backgroundColor(Color.Transparent)
             .onClick(() => { this.toggleSerialView() })

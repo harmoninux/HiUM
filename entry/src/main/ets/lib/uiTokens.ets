@@ -110,23 +110,25 @@ export const cOverlayText = '#ffffffff';
  * 不随系统深浅切换，故不走资源双色板而是固定值。注意不能直接套上面那组资源色：
  * cPrimary/cDanger/cWeak 是给浅色背景设计的深色值，搬到这里对比度只有 2.1~2.9:1
  *（实测「画面」「强制断电」这类文字看不清）；下面这组是深色浮层上的浅色版本，
- * 均 ≥4.5:1（WCAG AA）。同一语义值只留此处一份，改色只改这里。 ---- */
+ * 均 ≥4.5:1（WCAG AA）。同一语义值只留此处一份，改色只改这里。
+ * 底色带透明度（panel 80%/面板 90%）：透出 guest 画面换取浮层感，亮画面下
+ * 对比度会有最坏情况损失——文字/强调色恒浅色不变，靠底色透明度档位平衡。 ---- */
 export const cConsoleText = '#fff5f7fa';      /* 浮层主文本 4.9:1 */
 export const cConsoleAccent = '#ff94beff';    /* 浮层主色：选中态/强调 4.9:1 */
 export const cConsoleDanger = '#ffffa8a8';    /* 浮层危险操作（亮红） 4.8:1 */
 export const cConsoleLogText = '#fff1f2f4';   /* 串口日志正文 */
 export const cConsoleWarn = '#fffecaca';      /* 熔断横幅标题（亮黄红） */
-export const cConsolePanel = '#e620242b';     /* 串口面板/键帽行底（半透明深灰） */
+export const cConsolePanel = '#cc20242b';     /* 悬浮钮/工具栏底（80% 深灰，透出画面） */
 export const cConsolePanelStrong = '#ee20242b'; /* 速查卡片底（更实一点） */
-export const cConsoleInputBg = '#ff2b313b';   /* 串口输入框底（与面板拉开边界） */
+export const cConsoleInputBg = '#ee2b313b';   /* 串口输入框底（93%，与面板拉开边界） */
 export const cConsolePlaceholder = '#ff9aa4b2'; /* 串口输入框占位/光标提示 */
 export const cConsoleBanner = '#e6601b1b';    /* 启动失败横幅底 */
 export const cConsoleBtn = '#40ffffff';       /* 深色浮层上的浅色按钮底 */
 export const cConsoleScrim = 'rgba(0,0,0,0.55)'; /* 全屏遮罩（手势速查/截图卡按钮） */
 
-/* ---- 串口底栏面板（2026-10-11 按设计稿重做：面板推开画面、底部常驻，非半透明浮层）---- */
-export const cConsolePanelSolid = '#ff20242b'; /* 面板底（不透：底栏之下无画面可透） */
-export const cConsoleLogBg = '#ff171a20';      /* 日志区底（比面板再深一档） */
+/* ---- 串口面板（v5 改浮层：悬浮于画面底部之上、盖住画面下缘，半透明保日志可读的同时透出画面）---- */
+export const cConsolePanelSolid = '#e620242b'; /* 面板底（90% 深灰） */
+export const cConsoleLogBg = '#ee171a20';      /* 日志区底（93%，比面板再深一档保正文可读） */
 export const cConsoleKey = '#1fffffff';        /* 键帽 chip 底（12% 白） */
 export const cConsolePrimary = '#ff0563ff';    /* 主色实心（发送钮底，白字 ≥4.5:1，固定深底蓝） */
 
