@@ -26,6 +26,7 @@ const SERIAL_FS_OPTIONS: string[] = ['12', '14', '17'];
 
 @Component
 export struct SettingsSheet {
+  onOpenLicense: () => void = () => {}; /* 打开开源许可详情（VmList 侧的独立 sheet） */
   @StorageLink('filesDir') filesDir: string = '';
   @StorageLink('vmDataDir') vmDataDir: string = '';
   @State inputMode: number = 0;
@@ -99,6 +100,9 @@ export struct SettingsSheet {
       }
     };
     walk(this.vmDataDir);
+    /* 磁盘镜像与 VM 配置在 files/vms（VmStore 目录），与 vmDataDir（固件+内置 ISO）
+     * 是平级目录——只走一边会把 GB 级磁盘漏成百 MB（2026-10-17 真机抓到） */
+    walk(this.filesDir + '/vms');
     this.assetBytes = total;
     this.isoBytes = isos;
   }
@@ -129,6 +133,13 @@ export struct SettingsSheet {
 
   private sizeOf(name: string): number {
     return this.isoBytes.get(name) ?? 0;
+  }
+
+  private openRepo(): void {
+    const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    ctx.openLink('https://github.com/harmoninux/HiUM').catch((e: Error) => {
+      hilog.warn(DOMAIN, TAG, 'settings openRepo: %{public}s', JSON.stringify(e));
+    });
   }
 
   private deleteIso(name: string): void {
@@ -181,10 +192,11 @@ export struct SettingsSheet {
             this.serialFs = parseInt(v);
             this.savePref('serial_fs', this.serialFs);
           } })
+        Text('下次打开控制台时生效').fontSize(tSub).fontColor(cWeak).width('100%')
 
         SecHead({ label: '存储' })
         InfoRow({ label: '虚拟机资产', main: this.human(this.assetBytes),
-          sub: '磁盘 / 镜像 / 内核合计（vms 目录）' })
+          sub: '虚拟机磁盘、镜像与内核文件合计' })
         /* 内置镜像 = 单标签 + 下载列表（用户定：逐行 InfoRow 重复「内置镜像」标签难看）；
          * 行内 名称 + 大小 + 删除；空态「未下载」弱提示 */
         Column({ space: sp1 }) {
@@ -212,7 +224,12 @@ export struct SettingsSheet {
         SecHead({ label: '关于' })
         InfoRow({ label: '应用', main: 'HiUM', sub: 'HarmonyOS 上的 QEMU 虚拟机' })
         InfoRow({ label: '版本', main: this.version.length > 0 ? this.version : '—' })
-        Text('更改控制台设置后，下次打开控制台生效').fontSize(tSub).fontColor(cWeak).width('100%')
+        InfoRow({ label: '开源地址', main: 'github.com/harmoninux/HiUM',
+          actionLabel: '打开',
+          onAction: (): void => this.openRepo() })
+        InfoRow({ label: '开源许可', main: 'GPL-2.0',
+          actionLabel: '详情',
+          onAction: (): void => this.onOpenLicense() })
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
@@ -220,5 +237,6 @@ export struct SettingsSheet {
     }
     .width('100%')
     .height('100%')
+    .align(Alignment.TopStart) /* 同 LicenseSheet：内容不足一屏时不要垂直居中 */
   }
 }

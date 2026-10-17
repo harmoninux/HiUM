@@ -25,6 +25,7 @@ import {
   sp1, sp2, sp3, sp4, sp5, sp6, rCard, rElem, rBadge, bw, btnH, btnPadX,
 } from '../lib/uiTokens';
 import { SettingsSheet } from './SettingsSheet';
+import { LicenseSheet } from './LicenseSheet';
 
 /* 磁盘信息（侧栏显示虚拟大小；diskInfo 返回 qemu-img info JSON 串） */
 interface DiskNapi {
@@ -48,6 +49,7 @@ export struct VmList {
   @Consume('editParam') editParam: VmProfile | null;
   @State selectedId: string = ''; /* 当前选中行（详情区正在展示的 VM） */
   @State showSettings: boolean = false; /* 全局设置 sheet（标题行齿轮入口） */
+  @State showLicense: boolean = false; /* 开源许可 sheet（设置页「详情」入口） */
   /* 行缩略图（vmId → PixelMap，VmConsole 抓帧缓存；加载完 bump thumbVer 触发重绘） */
   private thumbs: Record<string, image.PixelMap> = {};
   @State thumbVer: number = 0;
@@ -464,7 +466,7 @@ export struct VmList {
     .height('100%')
     .backgroundColor(cBg)
 
-    /* 设置 sheet 宿主：同 Index 四模态的 1×1 常驻节点模式 */
+    /* 设置 / 开源许可 sheet 宿主：同 Index 四模态的 1×1 常驻节点模式 */
     Column().width(1).height(1).hitTestBehavior(HitTestMode.None)
       .bindSheet(this.showSettings, this.settingsSheetBuilder(), {
         title: { title: '设置' },
@@ -475,6 +477,16 @@ export struct VmList {
           this.showSettings = false;
         },
       })
+    Column().width(1).height(1).hitTestBehavior(HitTestMode.None)
+      .bindSheet(this.showLicense, this.licenseSheetBuilder(), {
+        title: { title: '开源许可' },
+        preferType: SheetType.CENTER,
+        height: 540,
+        width: 640,
+        onWillDisappear: () => {
+          this.showLicense = false;
+        },
+      })
 
     }
     .width('100%')
@@ -483,6 +495,11 @@ export struct VmList {
 
   @Builder
   settingsSheetBuilder() {
-    SettingsSheet()
+    SettingsSheet({ onOpenLicense: (): void => { this.showLicense = true; } })
+  }
+
+  @Builder
+  licenseSheetBuilder() {
+    LicenseSheet()
   }
 }
