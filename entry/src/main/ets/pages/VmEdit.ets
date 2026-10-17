@@ -445,10 +445,14 @@ export struct VmEdit {
               SliderRow({ label: '内存', value: this.memoryMB, min: 256, max: 8192, step: 256,
                 format: (v: number): string => `${Math.round(v)} MB`,
                 onChange: (v: number) => { this.memoryMB = v; } })
-              /* v4 显卡：x86 板卡可换（ChipRow）；virt/raspi 固定 → 只读值展示 */
+              /* v4 显卡：x86 板卡可换（ChipRow）；virt/raspi 固定 → 只读值展示。
+               * desc 只对选中项做一句话说明（同向导，2026-10-17 用户定） */
               if (this.isX86Board()) {
                 ChipRow({ label: '显卡', options: ['std', 'cirrus', 'vmware', 'virtio'], value: this.vga,
-                  desc: 'cirrus/vmware 对老系统（Win9x/旧 DOS）兼容性更好；virtio 性能最好',
+                  desc: this.vga === 'std' ? 'QEMU 默认'
+                    : this.vga === 'cirrus' ? 'Win9x/旧 DOS 时代老卡'
+                    : this.vga === 'vmware' ? 'XP 以后可装 VMware 驱动加速'
+                    : '性能最好，新系统首选',
                   onChange: (v: string) => { this.vga = v as VgaType; } })
               } else {
                 ValueRow({ label: '显卡', value: this.isRaspiBoard() ? '板载（固定）' : 'virtio-gpu（固定）' })
@@ -473,7 +477,8 @@ export struct VmEdit {
               /* 磁盘接口（仅 x86 板卡有 IDE 南桥）：切换只影响 -drive if= 的挂载方式，
                * 盘内容不动——Windows VM 若误建为 virtio，切到 ide 即可被安装程序识别。 */
               if (this.isX86Board()) {
-                ChipRow({ label: '磁盘接口', options: ['virtio', 'IDE'], value: this.diskIface,
+                ChipRow({ label: '磁盘接口', options: ['virtio', 'ide'], labels: ['virtio', 'IDE'],
+                  value: this.diskIface,
                   desc: this.diskIface === 'ide' ? 'Windows 免装驱动即可识别' : '性能更好，Linux 首选；Windows 需另装驱动',
                   onChange: (v: string) => { this.diskIface = v as DiskIface; } })
               }

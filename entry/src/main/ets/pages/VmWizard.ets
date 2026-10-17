@@ -289,9 +289,9 @@ export struct VmWizard {
    * q35 再自动切 UEFI）；virt 按架构固定 EDK2；树莓派 SoC 自带、无外部固件 */
   private firmwareHint(): string {
     const b = fitBoard(this.arch, this.board);
-    if (b === 'pc' || b === 'q35') { return '引导固件：传统 BIOS（自动）'; }
-    if (b === 'virt') { return '引导固件：UEFI（按架构固定）'; }
-    return '引导固件：树莓派自带';
+    if (b === 'pc' || b === 'q35') { return '引导固件：传统 BIOS'; }
+    if (b === 'virt') { return '引导固件：UEFI'; }
+    return ''; /* 树莓派 SoC 自带固件、无可选性，不占一行（用户定：冗余） */
   }
 
   /* 保存进 profile 的固件值：跟随板卡推导。OVMF_CODE/VARS 尚未产出，x86 一律
@@ -641,19 +641,23 @@ export struct VmWizard {
           }, (b: string) => b)
         }
         .width('100%')
-        Text(this.firmwareHint()).fontSize(tSub).fontColor(cWeak).width('100%')
+        if (this.firmwareHint().length > 0) {
+          Text(this.firmwareHint()).fontSize(tSub).fontColor(cWeak).width('100%')
+        }
       }
 
       /* —— v4 显卡（x86 板卡可换；virt 固定 virtio-gpu；raspi 板载）——
        * 4 项行内放得下，走 ChipRow B 形（旧 wrap 流式 + desc 置底违背大原则）；
-       * 组标签由 ChipRow 自带，不再挂 SecHead（避免双标题） */
+       * 组标签由 ChipRow 自带，不再挂 SecHead（避免双标题）。desc 只对选中项
+       * 做一句话说明（用户定：全选项长串说明冗余）；非 x86 板卡整段不渲染
+       *（「型号固定」无信息量） */
       if (this.isX86Board()) {
         ChipRow({ label: '显卡', options: ['std', 'cirrus', 'vmware', 'virtio'], value: this.vga,
-          desc: 'cirrus/vmware 对老系统（Win9x/旧 DOS）兼容性更好；virtio 性能最好',
+          desc: this.vga === 'std' ? 'QEMU 默认'
+            : this.vga === 'cirrus' ? 'Win9x/旧 DOS 时代老卡'
+            : this.vga === 'vmware' ? 'XP 以后可装 VMware 驱动加速'
+            : '性能最好，新系统首选',
           onChange: (v: string) => { this.vga = v as VgaType; } })
-      } else {
-        Text('当前机型的显卡型号固定，无法更换')
-          .fontSize(tSub).fontColor(cWeak).width('100%')
       }
 
       /* CPU 机型组：默认折叠，点组头展开/收起 */
@@ -758,7 +762,8 @@ export struct VmWizard {
        * （fitDiskIface 收敛为 virtio）。 */
       if (this.arch === 'x86_64' || this.arch === 'i386') {
         Column() {
-          ChipRow({ label: '磁盘接口', options: ['virtio', 'IDE'], value: this.diskIface,
+          ChipRow({ label: '磁盘接口', options: ['virtio', 'ide'], labels: ['virtio', 'IDE'],
+            value: this.diskIface,
             desc: this.diskIface === 'ide' ? 'Windows 免装驱动即可识别' : '性能更好，Linux 首选；Windows 需另装驱动',
             onChange: (v: string) => { this.diskIface = v as DiskIface; } })
         }.margin({ top: sp3 })

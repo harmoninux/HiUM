@@ -201,14 +201,21 @@ export struct ToggleRow {
 /* 选项行（≤4 项）：B 形——标签 + desc 左侧堆叠，chips 右侧随整块垂直居中
  *（与 ToggleRow 同构；真机量测：desc 置底旧形下 chips 只对标签行居中，相对
  * 标签+注释整块偏上 ~27px，用户打回 2026-10-17）。desc 可随选中联动（调用方
- * 传计算表达式）。选项数超宽/需换行 → 向导的 wrap 流式组装，不用本组件。 */
+ * 传计算表达式）。labels：显示名（与 options 一一对应）——枚举值与展示串大小写
+ * 不同时必传（磁盘接口 'ide' vs 'IDE'：原值比较不相等曾致两枚全不亮，且点选会把
+ * 展示串当值落盘，2026-10-17）。选项数超宽/需换行 → 向导的 wrap 流式组装。 */
 @Component
 export struct ChipRow {
   @Prop label: string = '';
   @Prop options: string[] = [];
+  @Prop labels: string[] = [];
   @Prop value: string = '';
   @Prop desc: string = '';
   onChange: (v: string) => void = (_v: string) => {};
+
+  private labelOf(o: string, idx: number): string {
+    return this.labels.length === this.options.length ? this.labels[idx] : o;
+  }
 
   build() {
     Row({ space: sp3 }) {
@@ -222,8 +229,8 @@ export struct ChipRow {
       .layoutWeight(1)
       /* ui-layout-ok: chips 按内容宽，靠外层 Row 右置 */
       Row({ space: sp3 }) {
-        ForEach(this.options, (o: string) => {
-          Chip({ label: o, active: this.value === o, onTap: () => this.onChange(o) })
+        ForEach(this.options, (o: string, idx: number) => {
+          Chip({ label: this.labelOf(o, idx), active: this.value === o, onTap: () => this.onChange(o) })
         }, (o: string) => o)
       }
     }
