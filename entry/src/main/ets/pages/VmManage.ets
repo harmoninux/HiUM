@@ -92,9 +92,11 @@ export struct VmManage {
    * 高密屏天生上采样 ~3.5x 发糊（实测踩过），必须显式换算回物理 1:1 */
   @State thumbPxW: number = 0;
   @State thumbPxH: number = 0;
-  /* v6 克隆：cloneStage != '' = 克隆进行中（进度条显示 stage+pct） */
-  @State cloneStage: string = '';
-  @State clonePct: number = 0;
+  /* v7 克隆：进度展示走 Index 层的全窗口 bindSheet 居中卡（系统遮罩盖侧栏+内容，
+   * 页内不自绘遮罩）。stage/pct 双向到 AppStorage 供 Index 渲染与 @Watch 开关 sheet；
+   * 页面重建时清残留——克隆不跨进程存活，残留 stage 只会制造假弹窗 */
+  @StorageLink('vmCloneStage') cloneStage: string = '';
+  @StorageLink('vmClonePct') clonePct: number = 0;
   @State isWide: boolean = false; /* 宽屏(Split)下隐藏返回；getWindowSize 判宽 */
   @Consume('showStorage') showStorage: boolean; /* 存储弹窗开关（Index 全窗口遮罩层） */
   @Consume('storageParam') storageParam: VmProfile | null; /* 当前打开的存储弹窗所属 VM */
@@ -109,6 +111,10 @@ export struct VmManage {
   private lastThumbAt: number = 0;
 
   aboutToAppear(): void {
+    /* 防假弹窗：克隆任务不跨页面实例存活，能进到这里必无活克隆 */
+    if (this.cloneStage.length > 0) {
+      this.cloneStage = '';
+    }
     this.refreshProfile();
     this.thumbTimer = setInterval(() => {
       if (!this.isRunningNow()) {
@@ -601,7 +607,7 @@ export struct VmManage {
       title: '删除虚拟机',
       /* remove 会删 vms 目录内全部磁盘（含数据盘），文案必须如实列出，否则用户
        * 以为数据盘安全，实际一并消失（数据丢失级别的表述缺陷，不能只提系统盘） */
-      message: `将删除「${p.name}」的配置${this.deleteDiskPart()}及内核文件，外部的 ISO 不受影响。确认？`,
+      message: `将删除「${p.name}」的配置${this.deleteDiskPart()}及内核文件。确认？`,
       primaryButton: { value: '取消', action: () => {} },
       secondaryButton: {
         value: '删除',
@@ -1047,17 +1053,8 @@ export struct VmManage {
       .height('100%')
       .backgroundColor(cCard)
 
-      /* v6：克隆进度（复制大磁盘时可见 stage + 百分比） */
-      if (this.cloneStage.length > 0) {
-        Row({ space: sp3 }) {
-          Text(this.cloneStage + ' ' + this.clonePct + '%').fontSize(tSub).fontColor(cSub).layoutWeight(1)
-          Progress({ value: this.clonePct, total: 100, type: ProgressType.Linear })
-            .width(120).color(cPrimary)
-        }
-        .width('100%')
-        .padding({ left: sp4, right: sp4, top: sp1, bottom: sp1 })
-        .backgroundColor(cCard)
-      }
+      /* 克隆进度展示在 Index 层的全窗口 bindSheet（见 cloneSheetBuilder）：
+       * 系统遮罩盖住侧栏+内容，页内不重复渲染 */
 
       Snackbar({ msg: this.$snack })
 

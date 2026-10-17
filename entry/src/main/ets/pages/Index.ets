@@ -32,6 +32,28 @@ struct Index {
    * 组件又不重建、aboutToAppear 不重跑，于是编辑页保存的 vmListVersion++ 打不到它，
    * 概览 chips 会停在旧值。NavDestination.onShown 是唯一能捕获「重新显示」的时机。 */
   @StorageLink('manageShownTick') manageShownTick: number = 0;
+  /* 克隆进度：VmManage 双向写 AppStorage，这里 @Watch 驱动全窗口 sheet（系统遮罩
+   * 盖住侧栏+内容——克隆中切 VM/启动源/删源全部不可达）；shouldDismiss 拦截防误关 */
+  @StorageLink('vmCloneStage') @Watch('onCloneStage') cloneStage: string = '';
+  @StorageLink('vmClonePct') clonePct: number = 0;
+  @State showCloneSheet: boolean = false;
+
+  onCloneStage(): void {
+    this.showCloneSheet = this.cloneStage.length > 0;
+  }
+
+  @Builder
+  cloneSheetBuilder() {
+    Column({ space: sp3 }) {
+      Text(this.cloneStage + ' ' + this.clonePct + '%').fontSize(tBody).fontColor(cSub)
+        .width('100%')
+      Progress({ value: this.clonePct, total: 100, type: ProgressType.Linear })
+        .width('100%')
+        .color(cPrimary)
+    }
+    .width('100%')
+    .padding({ left: btnPadX, right: btnPadX, top: sp3, bottom: sp3 })
+  }
 
   @Builder
   pageMap(name: string, param: Object) {
@@ -54,6 +76,14 @@ struct Index {
       }
     }
     .hideTitleBar(true)
+    .onBackPressed(() => {
+      /* 克隆进行中挡返回：全屏遮罩的一部分——中途离开会让进行中的克隆
+       * 失去进度展示与完成提示的落点（AppStorage 由 VmManage 双向写入） */
+      if (name === 'manage' && (AppStorage.get<string>('vmCloneStage') ?? '').length > 0) {
+        return true;
+      }
+      return false;
+    })
     .onShown(() => {
       /* 只对详情页发信号；edit 页自身不需要（它每次都是新建的）。
        * 顺带 bump vmListVersion：pop 回来时侧栏若已 active，@Watch 立即生效，
@@ -170,6 +200,19 @@ struct Index {
           },
           onWillDisappear: () => {
             this.showEdit = false;
+          },
+        })
+      Column().width(1).height(1).hitTestBehavior(HitTestMode.None)
+        .bindSheet(this.showCloneSheet, this.cloneSheetBuilder(), {
+          title: { title: '克隆虚拟机' },
+          showClose: false, /* 克隆中不可关：标题栏不渲染关闭图标（SheetOptions，API 11+） */
+          preferType: SheetType.CENTER,
+          height: 220,
+          shouldDismiss: (_d: SheetDismiss) => {
+            /* 克隆中不允许手动关：进度结束由 showCloneSheet 程序化收起 */
+          },
+          onWillDisappear: () => {
+            this.showCloneSheet = false;
           },
         })
     }
