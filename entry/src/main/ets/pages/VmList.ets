@@ -270,7 +270,7 @@ export struct VmList {
     const diskPart = n > 0 ? `、系统盘、${n} 张数据盘` : '、系统盘';
     AlertDialog.show({
       title: '删除虚拟机',
-      message: `将删除「${p.name}」的配置${diskPart}及内核文件，外部的 ISO 不受影响。确认？`,
+      message: `将删除「${p.name}」的配置${diskPart}及内核文件。确认？`,
       primaryButton: { value: '取消', action: () => {} },
       secondaryButton: {
         value: '删除',
@@ -391,7 +391,7 @@ export struct VmList {
 
     }
     .width('100%')
-    .padding(sp4)
+    .padding(sp3) /* 卡内边距 12：用户反馈 16 四周显空旷（300vp 侧栏里更明显） */
     .backgroundColor(this.selectedId === p.id ? cSelBg : cCard)
     .border({ width: bw, color: this.selectedId === p.id ? cSel : cBorder })
     .borderRadius(rCard)
