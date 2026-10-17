@@ -24,6 +24,7 @@ import {
   tPage, tCard, tLabel, tBody, tItem, tSub, iconFs,
   sp1, sp2, sp3, sp4, sp5, sp6, rCard, rElem, rBadge, bw, btnH, btnPadX,
 } from '../lib/uiTokens';
+import { SettingsSheet } from './SettingsSheet';
 
 /* 磁盘信息（侧栏显示虚拟大小；diskInfo 返回 qemu-img info JSON 串） */
 interface DiskNapi {
@@ -46,6 +47,7 @@ export struct VmList {
   @Consume('showEdit') showEdit: boolean; /* 编辑弹窗开关（行长按菜单「编辑」用） */
   @Consume('editParam') editParam: VmProfile | null;
   @State selectedId: string = ''; /* 当前选中行（详情区正在展示的 VM） */
+  @State showSettings: boolean = false; /* 全局设置 sheet（标题行齿轮入口） */
   /* 行缩略图（vmId → PixelMap，VmConsole 抓帧缓存；加载完 bump thumbVer 触发重绘） */
   private thumbs: Record<string, image.PixelMap> = {};
   @State thumbVer: number = 0;
@@ -404,6 +406,15 @@ export struct VmList {
       Row() {
         Text('虚拟机').fontSize(tPage).fontWeight(FontWeight.Medium).layoutWeight(1)
         Button() {
+          SymbolGlyph($r('sys.symbol.gearshape'))
+            .fontSize(iconFs)
+            .fontColor([cPrimary])
+        }
+        .focusable(false)
+        .width(btnH).height(btnH)
+        .backgroundColor(Color.Transparent)
+        .onClick(() => { this.showSettings = true; })
+        Button() {
           SymbolGlyph($r('sys.symbol.plus'))
             .fontSize(iconFs)
             .fontColor([cPrimary])
@@ -453,8 +464,25 @@ export struct VmList {
     .height('100%')
     .backgroundColor(cBg)
 
+    /* 设置 sheet 宿主：同 Index 四模态的 1×1 常驻节点模式 */
+    Column().width(1).height(1).hitTestBehavior(HitTestMode.None)
+      .bindSheet(this.showSettings, this.settingsSheetBuilder(), {
+        title: { title: '设置' },
+        preferType: SheetType.CENTER,
+        height: 540,
+        width: 640,
+        onWillDisappear: () => {
+          this.showSettings = false;
+        },
+      })
+
     }
     .width('100%')
     .height('100%')
+  }
+
+  @Builder
+  settingsSheetBuilder() {
+    SettingsSheet()
   }
 }

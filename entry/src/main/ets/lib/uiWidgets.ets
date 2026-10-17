@@ -283,7 +283,7 @@ export struct InfoRow {
   onAction: () => void = () => {};
 
   build() {
-    Row() {
+    Row({ space: sp3 }) {
       Text(this.label).fontSize(tLabel).width(72)
       Column({ space: sp1 }) {
         Text(this.main).fontSize(this.mainDim ? tSub : tItem).fontColor(this.mainDim ? cWeak : cText)

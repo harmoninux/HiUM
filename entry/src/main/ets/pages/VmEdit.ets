@@ -495,7 +495,8 @@ export struct VmEdit {
                   }
                 } })
               /* 盘列表只在有盘时出现（未配置时挂一条「快照不含数据盘」注释无从谈起）；
-               * 缩进 72 对齐 InfoRow 值列。行内 Toggle 同 ToggleRow 做盒留白补偿 */
+               * 缩进 84 对齐 InfoRow 值列（72 标签列 + sp3 间距）。行内 Toggle 同
+               * ToggleRow 做盒留白补偿 */
               if (this.extraDisks.length > 0) {
                 Column({ space: sp1 }) {
                   ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
@@ -518,7 +519,7 @@ export struct VmEdit {
                 }
                 .alignItems(HorizontalAlign.Start)
                 .width('100%')
-                .padding({ left: 72 })
+                .padding({ left: 84 })
               }
               /* 光盘 ISO 行：整块上下堆叠——标签 / 文件名（通栏，移除落行尾最右，
                * 与上方「存储管理」同一右缘）/ 动作钮一行两个。不放左右两列：挂载态
