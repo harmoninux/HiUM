@@ -329,15 +329,14 @@ export struct VmList {
        * arch 角标叠于左下角（半透明黑底白字）——从规格行挪来，规格行只留 核/内存/盘 */
       Stack({ alignContent: Alignment.BottomStart }) {
         if (this.thumbs[p.id] !== undefined) {
+          /* 缩略图直角（用户定 2026-10-17：截图没必要圆角矩形） */
           Image(this.thumbs[p.id])
             .width(72).height(44)
             .objectFit(ImageFit.Cover)
-            .borderRadius(rElem)
         } else {
           Column()
             .width(72).height(44)
             .backgroundColor(cBlock)
-            .borderRadius(rElem)
         }
         Text(p.machine.arch)
           .fontSize(tSub)

@@ -141,7 +141,8 @@ export struct VmManage {
   /* 本页 VM 是否运行：build 直接依赖 @StorageLink('runningMap')（响应式），
    * runningMap 每 2s 由 VmList poll 刷新，变化即触发重绘，此处拿到最新值。 */
   /* v6 克隆入口：复制磁盘/内核资产为新 id 副本并在列表可见。
-   * 运行中或被页面其它克隆占用时按钮已禁用，这里再兜底一次。 */
+   * 运行中或被页面其它克隆占用时按钮已禁用，这里再兜底一次。
+   * 执行前弹确认（2026-10-17 用户定）：复制是重动作——占盘、耗时都要先讲清。 */
   private startClone(): void {
     const p = this.profile;
     if (!p || this.cloneStage.length > 0) {
@@ -149,6 +150,22 @@ export struct VmManage {
     }
     if (this.isRunningNow()) {
       promptAction.showToast({ message: '虚拟机运行中，请先关机再克隆' });
+      return;
+    }
+    AlertDialog.show({
+      title: '克隆虚拟机',
+      message: `将完整复制「${p.name}」的磁盘等资产为新副本：会占用额外存储空间，磁盘越大耗时越长（可能数分钟）。确认克隆？`,
+      primaryButton: { value: '取消', action: () => {} },
+      secondaryButton: {
+        value: '克隆',
+        action: () => this.doClone(),
+      },
+    });
+  }
+
+  private doClone(): void {
+    const p = this.profile;
+    if (!p || this.cloneStage.length > 0) {
       return;
     }
     this.cloneStage = '准备';
