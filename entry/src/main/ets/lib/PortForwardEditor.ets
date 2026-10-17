@@ -117,9 +117,6 @@ export struct PortForwardEditor {
           .backgroundColor(Color.Transparent).fontColor(cPrimary)
           .onClick(() => this.addRow())
       }.width('100%')
-      if (this.rows.length === 0 && this.invalids.length === 0) {
-        Text('暂无规则').fontSize(tSub).fontColor(cWeak).width('100%')
-      }
       ForEach(this.rows, (r: FwdRow, idx: number) => {
         /* 两个框各自带全标签（设备端口 : 虚拟机端口）。曾用「设备/端口 + → 虚拟机」
          * 的碎标签组合，读起来像 "设备:端口 → 虚拟机" 语义割裂（框宽 106 为放下

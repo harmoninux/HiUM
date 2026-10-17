@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HiUM · 设置项范式标准 · 改后视觉稿</title>
+<style>
+  /* 评审底稿（深色）；框内为应用浅色主题实况（token 与 resources/base 一致） */
+  :root{
+    --t:#15181C; --sub:#4B5563; --weak:#6B7280; --bg:#FAFAFA; --card:#FFFFFF;
+    --bd:#E8E8E8; --block:#F1F2F4; --selbg:#EEF4FF; --pri:#0563FF; --ph:#9CA3AF;
+    --sheet:#14171C; --ink:#C9D1DC; --mut:#8B96A5; --line:rgba(255,255,255,.10);
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--sheet);color:var(--ink);
+       font:14px/1.6 system-ui,"PingFang SC","HarmonyOS Sans SC","Microsoft YaHei",sans-serif;
+       padding:44px 36px 72px}
+  .wrap{max-width:1500px;margin:0 auto}
+  h1{font-size:22px;color:#F2F5F9;font-weight:700}
+  h1 .badge{display:inline-block;vertical-align:3px;margin-left:10px;padding:2px 10px;
+            border-radius:999px;background:var(--pri);color:#fff;font-size:12px;font-weight:700}
+  .sub{color:var(--mut);margin:8px 0 30px;font-size:13px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:36px;align-items:start}
+
+  /* ---------- 应用帧 ---------- */
+  .frame{background:var(--bg);border-radius:14px;border:1px solid var(--line);overflow:hidden;
+         box-shadow:0 18px 44px rgba(0,0,0,.45)}
+  .ftitle{background:var(--card);border-bottom:1px solid var(--bd);
+          padding:12px 18px;font-size:15px;font-weight:600;color:var(--t);
+          display:flex;align-items:center;gap:10px}
+  .tabs{display:flex;gap:4px;background:var(--card);padding:8px 18px 0;border-bottom:1px solid var(--bd)}
+  .tab{font-size:13px;color:var(--weak);padding:7px 14px;border-radius:8px 8px 0 0}
+  .tab.on{color:var(--pri);background:var(--selbg);font-weight:600}
+  .body{padding:18px}
+  .sec{margin-top:22px}
+  .sec:first-child{margin-top:0}
+  .cap{font-size:12px;font-weight:700;color:var(--pri);letter-spacing:1.5px;margin-bottom:12px}
+  .rows{display:flex;flex-direction:column;gap:16px}
+
+  /* ---------- 范式行（浅色实际观感） ---------- */
+  .lbl{width:72px;flex:none;font-size:14px;color:var(--t)}
+  .frow{display:flex;align-items:center;gap:12px}
+  .inp{flex:1;height:32px;background:var(--block);border-radius:8px;padding:0 12px;
+       font-size:14px;color:var(--t);display:flex;align-items:center}
+  .inp.ph{color:var(--ph)}
+  .inp.multi{height:56px;align-items:flex-start;padding-top:6px}
+  .vrow{display:flex;align-items:center;gap:12px}
+  .vval{font-size:14px;color:var(--sub)}
+  .trowb{display:flex;align-items:center;gap:12px}
+  .tcol{flex:1}
+  .tl{font-size:14px;color:var(--t)}
+  .desc{font-size:12px;color:var(--weak);margin-top:2px}
+  .desc.full{margin-top:5px}
+  .tgl{width:44px;height:24px;border-radius:12px;background:var(--pri);position:relative;flex:none}
+  .tgl.off{background:#C9CDD3}
+  .tgl i{position:absolute;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;
+         box-shadow:0 1px 2px rgba(0,0,0,.25)}
+  .tgl i.r{right:3px}.tgl i.l{left:3px}
+  .crow1{display:flex;align-items:center;justify-content:space-between}
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{height:26px;padding:0 14px;border-radius:7px;background:var(--block);color:var(--sub);
+        font-size:13px;display:flex;align-items:center}
+  .chip.on{background:var(--pri);color:#fff;font-weight:600}
+  .srow{display:flex;align-items:center;gap:12px}
+  .srow .tl{flex:1}
+  .sv{font-size:14px;color:var(--sub);font-variant-numeric:tabular-nums}
+  .track{position:relative;height:4px;border-radius:2px;background:var(--bd);margin-top:10px}
+  .strack{position:relative;height:4px;border-radius:2px;background:var(--bd);width:150px;flex:none}
+  .fill{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--pri)}
+  .thumb{position:absolute;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;
+         border-radius:50%;background:#fff;border:2px solid var(--pri);box-shadow:0 1px 3px rgba(0,0,0,.2)}
+  .irow{display:flex;align-items:center;gap:12px}
+  .icol{flex:1}
+  .im{font-size:14px;color:var(--t)}
+  .isub{font:12px ui-monospace,Consolas,monospace;color:var(--weak);margin-top:2px}
+  .act{font-size:14px;color:var(--pri);background:transparent;border:none;flex:none}
+  .tiles{display:flex;gap:12px}
+  .tile{width:150px;border:1.5px solid var(--bd);border-radius:10px;padding:10px 14px;background:var(--card)}
+  .tile.on{border-color:var(--pri);background:var(--selbg)}
+  .tile .tn{font-size:15px;font-weight:600;color:var(--t)}
+  .tile .td{font-size:12px;color:var(--weak);margin-top:2px}
+  .tile.on .td{color:#3B76D9}
+
+  /* ---------- 向导骨架（步骤条 + 底部导航） ---------- */
+  .wsteps{display:flex;align-items:center;gap:6px;padding:10px 18px;background:var(--card);
+          border-bottom:1px solid var(--bd);flex-wrap:wrap}
+  .wstep{font-size:12px;color:var(--weak);padding:3px 10px;border-radius:999px;background:var(--block)}
+  .wstep.done{color:var(--sub)}
+  .wstep.cur{color:#fff;background:var(--pri);font-weight:600}
+  .wsep{width:14px;height:1px;background:var(--bd)}
+  .wnav{display:flex;gap:10px;align-items:center;padding:12px 18px;background:var(--card);
+        border-top:1px solid var(--bd)}
+  .wbtn{font-size:14px;padding:0 18px;height:32px;border-radius:8px;display:flex;align-items:center;border:none}
+  .wbtn.ghost{color:var(--sub);background:var(--block)}
+  .wbtn.pri{color:#fff;background:var(--pri);font-weight:600}
+
+  /* ---------- 图注 / 底部区 ---------- */
+  .cap-note{margin-top:12px;font-size:12.5px;color:var(--mut)}
+  .cap-note b{color:#E7ECF3;font-weight:600}
+  .ba{margin-top:44px}
+  h2{font-size:16px;color:#E7ECF3;margin-bottom:14px}
+  .ba-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;
+          background:#1A1E25;border:1px solid var(--line);border-radius:12px;padding:14px}
+  .cell{border-radius:10px;padding:12px 14px;position:relative}
+  .cell.old{background:#232830}
+  .cell.new{background:var(--bg)}
+  .tag{position:absolute;top:-9px;left:12px;font-size:11px;font-weight:700;padding:1px 8px;border-radius:4px}
+  .old .tag{background:#3A4150;color:#B9C2CF}
+  .new .tag{background:var(--pri);color:#fff}
+  .cell .inner{margin-top:8px}
+  .ba-note{font-size:12px;color:var(--mut);margin-top:8px}
+  table.leg{border-collapse:collapse;width:100%;font-size:12.5px;margin-top:10px}
+  table.leg th,table.leg td{border:1px solid var(--line);padding:7px 10px;text-align:left}
+  table.leg th{color:#E7ECF3;font-weight:600;background:#1A1E25}
+  table.leg td{color:var(--ink)}
+  footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);
+         font-size:12.5px;color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>设置项范式标准 · 改后视觉稿<span class="badge">评审用</span></h1>
+  <p class="sub">七范式收敛（FieldRow / ValueRow / ToggleRow / ChipRow / ChipGroup / SliderGroup / InfoRow）·
+     全局规则 R1–R4 · 注释判据制（术语 / 代价差异 / 反直觉 / 默认背书，满足其一才配）·
+     大原则=标签和注释都在左侧、操作项在右侧垂直居中；desc 一律左堆叠，无置底形态 · 2026-10-17</p>
+
+  <div class="cols">
+
+    <!-- ============ VmEdit 帧（基础 + 存储） ============ -->
+    <div class="frame">
+      <div class="ftitle">虚拟机配置 · Alpine-x86_64</div>
+      <div class="tabs"><span class="tab on">基础</span><span class="tab on" style="background:none;color:var(--weak)">存储</span><span class="tab">网络</span><span class="tab">高级</span></div>
+      <div class="body">
+        <div class="sec">
+          <div class="cap">TAB · 基础</div>
+          <div class="rows">
+            <div class="frow"><span class="lbl">名称</span><span class="inp">Alpine-x86_64</span></div>
+            <div class="vrow"><span class="lbl">架构</span><span class="vval">x86_64</span></div>
+            <div class="srow"><span class="tl">CPU 核数</span>
+              <div class="strack"><div class="fill" style="width:20%"></div><div class="thumb" style="left:20%"></div></div>
+              <span class="sv" style="width:56px;text-align:right">2</span></div>
+            <div class="srow"><span class="tl">内存</span>
+              <div class="strack"><div class="fill" style="width:22%"></div><div class="thumb" style="left:22%"></div></div>
+              <span class="sv" style="width:56px;text-align:right">1024 MB</span></div>
+            <div class="crow1"><span class="lbl">显卡</span>
+              <span class="chips"><span class="chip">std</span><span class="chip">cirrus</span><span class="chip">vmware</span><span class="chip on">virtio</span></span>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="cap">TAB · 存储</div>
+          <div class="rows">
+            <div class="irow"><span class="lbl">系统盘</span>
+              <span class="icol"><span class="im">alpine.qcow2</span>
+                <div class="isub">qcow2 · 虚拟 16.0G · 已占 1.2G</div></span>
+              <button class="act">存储管理</button>
+            </div>
+            <div class="trowb"><span class="tcol"><span class="tl">系统盘只读</span>
+                <div class="desc">开启后防系统盘误写；扩容、快照不受影响</div></span>
+              <span class="tgl"><i class="r"></i></span>
+            </div>
+            <div class="trowb"><span class="tcol"><span class="lbl">磁盘接口</span>
+                <div class="desc">性能更好，Linux 首选；Windows 需另装驱动</div></span>
+              <span class="chips" style="flex:none"><span class="chip on">virtio</span><span class="chip">IDE</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="cap-note"><b>左帧要点</b>：ValueRow 改<b>纯文本</b>（旧稿借输入框底，示意可编辑——拟）；
+      Slider <b>值右对齐</b>成列（拟）；InfoRow 的 sub 走等宽字体（数据≠注释）；
+      ToggleRow / ChipRow 同为 <b>B 形</b>——desc 左堆叠、控件随整块垂直居中
+      （chips 对标签行居中的旧形：控件相对「标签+注释」整块偏上 ~27px，真机量测，已废）。</div>
+
+    <!-- ============ VmEdit 帧（网络 + 高级） ============ -->
+    <div class="frame">
+      <div class="ftitle">虚拟机配置 · Alpine-x86_64</div>
+      <div class="tabs"><span class="tab" style="color:var(--weak)">基础</span><span class="tab" style="color:var(--weak)">存储</span><span class="tab on">网络</span><span class="tab">高级</span></div>
+      <div class="body">
+        <div class="sec">
+          <div class="cap">TAB · 网络</div>
+          <div class="rows">
+            <div class="trowb"><span class="tcol"><span class="tl">网络</span></span>
+              <span class="tgl"><i class="r"></i></span>
+            </div>
+            <div class="crow1"><span class="lbl">网卡型号</span>
+              <span class="chips"><span class="chip on">virtio</span><span class="chip">rtl8139</span></span>
+            </div>
+            <div class="trowb"><span class="tcol"><span class="tl">共享文件夹</span></span>
+              <span class="tgl"><i class="r"></i></span>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="cap">TAB · 高级（注释判据示例）</div>
+          <div class="rows">
+            <div class="trowb"><span class="tcol"><span class="tl">声音</span></span>
+              <span class="tgl off"><i class="l"></i></span>
+            </div>
+            <div class="trowb"><span class="tcol"><span class="tl">RNG</span>
+                <div class="desc">为 guest 提供熵源，加快启动与加密操作</div></span>
+              <span class="tgl"><i class="r"></i></span>
+            </div>
+            <div class="trowb"><span class="tcol"><span class="tl">Balloon</span>
+                <div class="desc">内存气球：宿主紧张时回收 guest 闲置内存</div></span>
+              <span class="tgl"><i class="r"></i></span>
+            </div>
+            <div class="trowb"><span class="tcol"><span class="tl">RTC 使用本地时钟</span>
+                <div class="desc">默认 UTC；Windows 客机选本地可免注册表改动</div></span>
+              <span class="tgl off"><i class="l"></i></span>
+            </div>
+            <div class="trowb"><span class="tcol"><span class="tl">GDB 调试</span>
+                <div class="desc">连接需先在电脑侧做端口转发（hdc fport），GDB 内 target remote :端口</div></span>
+              <span class="tgl"><i class="r"></i></span>
+            </div>
+            <div class="frow"><span class="lbl">监听端口</span><span class="inp" style="flex:none;width:140px">34477</span></div>
+            <div class="frow" style="align-items:flex-start"><span class="lbl" style="margin-top:6px">内核参数</span>
+              <span class="inp multi ph">console=tty0 console=ttyS0 root=/dev/vda</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="cap-note"><b>右帧要点（注释判据制）</b>：声音——自解释，<b>按判据不配</b>（现版有，收敛时删）；
+      RNG / Balloon——判据1 术语，<b>保留</b>；RTC——判据4 默认背书，<b>补</b>；
+      GDB——判据1+4，连接指引挂在<b>开关行左堆叠</b>，监听端口为纯输入行；内核参数用 <b>placeholder 给示例</b>，不是说明。</div>
+
+    <!-- ============ VmWizard 帧（向导骨架 + 步内范式） ============ -->
+    <div class="frame">
+      <div class="ftitle">新建虚拟机</div>
+      <div class="wsteps">
+        <span class="wstep done">架构</span><span class="wsep"></span>
+        <span class="wstep done">机器类型</span><span class="wsep"></span>
+        <span class="wstep done">CPU/内存</span><span class="wsep"></span>
+        <span class="wstep cur">磁盘/镜像</span><span class="wsep"></span>
+        <span class="wstep">网络</span><span class="wsep"></span>
+        <span class="wstep">命名</span>
+      </div>
+      <div class="body">
+        <div class="sec">
+          <div class="cap">STEP 4 / 6 · 磁盘/镜像（步内范式落位）</div>
+          <div class="rows">
+            <div class="chips"><span class="chip on">新建空白盘</span><span class="chip">导入现有镜像</span></div>
+            <div class="srow"><span class="tl">容量</span>
+              <div class="strack"><div class="fill" style="width:26%"></div><div class="thumb" style="left:26%"></div></div>
+              <span class="sv" style="width:56px;text-align:right">8 GB</span></div>
+            <div class="trowb"><span class="tcol"><span class="tl" style="font-size:14px">分配方式</span>
+                <div class="desc">固定=建盘即预留整块，免中途空间不足</div></span>
+              <span class="chips" style="flex:none"><span class="chip on">动态分配</span><span class="chip">固定大小</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="wnav">
+        <button class="wbtn ghost">上一步</button>
+        <span style="flex:1"></span>
+        <button class="wbtn pri">下一步</button>
+      </div>
+    </div>
+    <div class="cap-note"><b>向导骨架原样保留</b>：顶部六步指示器 + 底部 上一步/下一步（每步即时校验，
+      「完成」只在最后一步出现）——范式标准只替换<b>步内行的画法</b>，不改流程、不改分步。
+      各步范式落位：</div>
+    <table class="leg" style="margin-top:10px">
+      <tr><th>步骤</th><th>范式落位</th></tr>
+      <tr><td>1 架构</td><td>ChipRow（6 项换行 chips）</td></tr>
+      <tr><td>2 机器类型</td><td>ChipGroup · tile 变体（磁贴自带白话副标题）</td></tr>
+      <tr><td>3 CPU/内存</td><td>SliderGroup ×2（值右对齐）+ ChipGroup（型号 + 自定义槽）+ ToggleRow B 形（系统增强）</td></tr>
+      <tr><td>4 磁盘/镜像</td><td>ChipGroup（来源）+ SliderGroup（容量）+ ChipRow（分配方式 + desc 判据3）</td></tr>
+      <tr><td>5 网络</td><td>ToggleRow + ChipRow（网卡型号）</td></tr>
+      <tr><td>6 命名</td><td>FieldRow（placeholder 提示必填）</td></tr>
+    </table>
+
+  </div>
+
+  <!-- ============ 改前 → 改后 ============ -->
+  <div class="ba">
+    <h2>关键差异 · 改前 → 改后</h2>
+
+    <div class="ba-row">
+      <div class="cell old"><span class="tag">改前</span>
+        <div class="inner"><div class="vrow"><span class="lbl">架构</span>
+          <span class="inp" style="color:var(--sub)">x86_64</span></div></div>
+        <div class="ba-note">只读值借输入框底——示意可编辑，误导</div></div>
+      <div class="cell new"><span class="tag">改后 · ValueRow</span>
+        <div class="inner"><div class="vrow"><span class="lbl">架构</span>
+          <span class="vval">x86_64</span></div></div>
+        <div class="ba-note">纯文本：「不可编辑」不可长得像输入框</div></div>
+    </div>
+
+    <div class="ba-row">
+      <div class="cell old"><span class="tag">改前</span>
+        <div class="inner">
+          <div class="tl" style="font-size:14px">CPU 核数: 2</div>
+          <div class="track"><div class="fill" style="width:20%"></div><div class="thumb" style="left:20%"></div></div></div>
+        <div class="ba-note">滑条全宽置底，操作项不在行内右侧</div></div>
+      <div class="cell new"><span class="tag">改后 · SliderRow</span>
+        <div class="inner">
+          <div class="srow"><span class="tl">CPU 核数</span>
+            <div class="strack"><div class="fill" style="width:20%"></div><div class="thumb" style="left:20%"></div></div>
+            <span class="sv" style="width:56px;text-align:right">2</span></div></div>
+        <div class="ba-note">标签左、滑条右固定宽、值最右成列（tabular-nums）</div></div>
+    </div>
+
+    <div class="ba-row">
+      <div class="cell old"><span class="tag">改前</span>
+        <div class="inner">
+          <div class="trowb"><span class="tcol"><span class="tl">系统盘只读</span></span>
+            <span class="tgl"><i class="r"></i></span></div>
+          <div class="desc full">开启后防系统盘误写；扩容、快照不受影响</div></div>
+        <div class="ba-note">desc 全宽置底；开关只对首行居中，说明像补丁</div></div>
+      <div class="cell new"><span class="tag">改后 · ToggleRow（B 形）</span>
+        <div class="inner">
+          <div class="trowb"><span class="tcol"><span class="tl">系统盘只读</span>
+              <div class="desc">开启后防系统盘误写；扩容、快照不受影响</div></span>
+            <span class="tgl"><i class="r"></i></span></div></div>
+        <div class="ba-note">desc 与标签同侧堆叠，开关垂直居中——系统设置同款</div></div>
+    </div>
+
+    <div class="ba-row">
+      <div class="cell old"><span class="tag">改前</span>
+        <div class="inner"><div class="trowb"><span class="tcol"><span class="tl">声音</span>
+            <div class="desc">（现版带说明，判据下属自解释项）</div></span>
+          <span class="tgl"><i class="r"></i></span></div></div>
+        <div class="ba-note">注释有无凭手感，逐项飘</div></div>
+      <div class="cell new"><span class="tag">改后 · 注释判据制</span>
+        <div class="inner"><div class="trowb"><span class="tcol"><span class="tl">声音</span></span>
+          <span class="tgl off"><i class="l"></i></span></div></div>
+        <div class="ba-note">判据：术语/代价差异/反直觉/默认背书——满足其一才配；声音不配（删）</div></div>
+    </div>
+  </div>
+
+  <!-- ============ 范式 × 注释缺省矩阵 ============ -->
+  <div class="ba">
+    <h2>七范式 × 注释缺省（含样例位置）</h2>
+    <table class="leg">
+      <tr><th>范式</th><th>布局</th><th>desc 缺省</th><th>样例</th></tr>
+      <tr><td>FieldRow</td><td>72列 + 输入32（多行变体顶对齐）</td><td>不配，placeholder 给示例（带注释的输入项：注释挪所在开关行）</td><td>名称 / 监听端口 / 内核参数</td></tr>
+      <tr><td>ValueRow</td><td>72列 + 纯文本值</td><td>无</td><td>架构</td></tr>
+      <tr><td>ToggleRow</td><td><b>B 形</b>：标签+desc 左堆叠、开关右垂直居中</td><td>按判据（约半数）</td><td>只读/接口/RNG/Balloon 配；网络/声音/共享不配</td></tr>
+      <tr><td>ChipRow</td><td><b>B 形</b>：标签+desc 左堆叠、chips 右随整块居中</td><td>按判据</td><td>显卡（无）/ 磁盘接口（判据2）/ 分配方式（判据3）</td></tr>
+      <tr><td>ChipGroup</td><td>标签行 + chips 换行 + 自定义槽</td><td>按判据；磁贴变体自带副标题</td><td>CPU 型号 / 系统盘来源 / 机器类型（tile）</td></tr>
+      <tr><td>SliderRow</td><td>标签左 + 滑条右固定宽 + 值最右（成列）</td><td>不配（自解释连续量）</td><td>核数 / 内存 / 容量</td></tr>
+      <tr><td>InfoRow</td><td>72列 + 主值 + 等宽 sub + 动作钮</td><td>无 desc；sub 是数据（tMono）</td><td>系统盘 / 数据盘入口</td></tr>
+    </table>
+  </div>
+
+  <footer>HiUM 设置项范式标准 · 视觉稿 v1（2026-10-17）· 色值取自 resources/base/element/color.json 与 uiTokens.ets（inpH=32/btnRow=24）·
+          两项标「拟」的决策（ValueRow 纯文本、Slider 值右对齐）随本稿一并评审</footer>
+</div>
+</body>
+</html>

@@ -581,6 +581,7 @@ export struct VmStorage {
           Row({ space: sp3 }) {
             TextInput({ text: this.snapNameText, placeholder: '快照名' }).layoutWeight(1).fontSize(tItem)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
               .onChange((v: string) => this.snapNameText = v)
             Button('创建').focusable(false).fontSize(tItem)
               .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
@@ -596,6 +597,7 @@ export struct VmStorage {
           Row({ space: sp3 }) {
             Text('新大小(GB)').fontSize(tSub).fontColor(cSub)
             TextInput({ text: this.newGBText }).type(InputType.Number).layoutWeight(1).fontSize(tItem)
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
               .onChange((v: string) => this.newGBText = v)
             Button('确定').focusable(false).fontSize(tItem)
@@ -664,6 +666,7 @@ export struct VmStorage {
             Text('新大小(GB)').fontSize(tSub).fontColor(cSub)
             TextInput({ text: this.secondNewGBText }).type(InputType.Number).layoutWeight(1).fontSize(tItem)
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
               .onChange((v: string) => this.secondNewGBText = v)
             Button('确定').focusable(false).fontSize(tItem)
               .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
@@ -694,6 +697,7 @@ export struct VmStorage {
             Text('新大小(GB)').fontSize(tSub).fontColor(cSub)
             TextInput({ text: this.secondNewGBText, placeholder: '新建时填写（1-512）' })
               .layoutWeight(1).fontSize(tItem)
+              .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
               .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
               .onChange((v: string) => this.secondNewGBText = v)
             Button(this.secondSrc.length > 0 ? '导入' : '创建').focusable(false).fontSize(tItem)

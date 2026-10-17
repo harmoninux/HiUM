@@ -13,7 +13,7 @@ import {
 } from '../lib/vmprofile';
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { pickIsoPath, pickFilePath } from '../lib/isoPick';
-import { Chip, SecHead, FoldHead } from '../lib/uiWidgets';
+import { Chip, SecHead, FoldHead, FieldRow, ToggleRow, ChipRow, SliderRow } from '../lib/uiWidgets';
 import { PortForwardEditor } from '../lib/PortForwardEditor';
 import {
   cPrimary, cSub, cWeak, cText, cBorder, cDanger, cBg, cBlock, cChip, cCard,
@@ -644,21 +644,13 @@ export struct VmWizard {
         Text(this.firmwareHint()).fontSize(tSub).fontColor(cWeak).width('100%')
       }
 
-      /* —— v4 显卡（x86 板卡可换；virt 固定 virtio-gpu；raspi 板载） —— */
-      SecHead({ label: '显卡' })
+      /* —— v4 显卡（x86 板卡可换；virt 固定 virtio-gpu；raspi 板载）——
+       * 4 项行内放得下，走 ChipRow B 形（旧 wrap 流式 + desc 置底违背大原则）；
+       * 组标签由 ChipRow 自带，不再挂 SecHead（避免双标题） */
       if (this.isX86Board()) {
-        Column({ space: sp1 }) {
-          Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
-            ForEach(['std', 'cirrus', 'vmware', 'virtio'], (g: string) => {
-              Row() {
-                Chip({ label: g, active: this.vga === g, onTap: () => { this.vga = g as VgaType; } })
-              }.margin({ right: sp3, bottom: sp3 })
-            }, (g: string) => g)
-          }
-          .width('100%')
-          Text('cirrus/vmware 对老系统（Win9x/旧 DOS）兼容性更好；virtio 性能最好')
-            .fontSize(tSub).fontColor(cWeak).width('100%')
-        }
+        ChipRow({ label: '显卡', options: ['std', 'cirrus', 'vmware', 'virtio'], value: this.vga,
+          desc: 'cirrus/vmware 对老系统（Win9x/旧 DOS）兼容性更好；virtio 性能最好',
+          onChange: (v: string) => { this.vga = v as VgaType; } })
       } else {
         Text('当前机型的显卡型号固定，无法更换')
           .fontSize(tSub).fontColor(cWeak).width('100%')
@@ -700,48 +692,24 @@ export struct VmWizard {
   stepCpuMem() {
     Column({ space: sp3 }) {
       SecHead({ label: '内存与核数' })
-      Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
-      Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
-        .onChange((v: number) => this.memoryMB = v)
-        .height(btnRow)
-      Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
-      Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
-        .onChange((v: number) => this.cpus = v)
-        .height(btnRow)
+      SliderRow({ label: '内存', value: this.memoryMB, min: 256, max: 8192, step: 256,
+        format: (v: number): string => `${Math.round(v)} MB`,
+        onChange: (v: number) => { this.memoryMB = v; } })
+      SliderRow({ label: 'CPU 核数', value: this.cpus, min: 1, max: 8, step: 1,
+        onChange: (v: number) => { this.cpus = v; } })
 
       /* —— v4 系统增强：RNG/balloon（需 PCI；raspi 禁用） —— */
       SecHead({ label: '系统增强' })
-      Column() {
-        Row() {
-          Text('随机数发生器 (RNG)').fontSize(tLabel).layoutWeight(1)
-          Toggle({ type: ToggleType.Switch, isOn: this.rng })
-            .enabled(!this.isRaspiBoard())
-            .onChange((v: boolean) => this.rng = v)
-        }.width('100%')
-        Text('为虚拟机提供随机数来源，加密等应用的初始化更快')
-          .fontSize(tSub).fontColor(cWeak).width('100%')
-      }
-      Column() {
-        Row() {
-          Text('内存回收 (Balloon)').fontSize(tLabel).layoutWeight(1)
-          Toggle({ type: ToggleType.Switch, isOn: this.balloon })
-            .enabled(!this.isRaspiBoard())
-            .onChange((v: boolean) => this.balloon = v)
-        }.width('100%')
-        Text('虚拟机空闲时把暂用不到的内存还给设备，整机内存更宽裕')
-          .fontSize(tSub).fontColor(cWeak).width('100%')
-      }
-      /* v6：声音——默认开；raspi 无 PCI 且 QEMU 未模拟树莓派声卡，禁用 */
-      Column() {
-        Row() {
-          Text('声音').fontSize(tLabel).layoutWeight(1)
-          Toggle({ type: ToggleType.Switch, isOn: this.audio })
-            .enabled(!this.isRaspiBoard())
-            .onChange((v: boolean) => this.audio = v)
-        }.width('100%')
-        Text('开启后虚拟机里的声音通过设备的扬声器/耳机播放')
-          .fontSize(tSub).fontColor(cWeak).width('100%')
-      }
+      ToggleRow({ label: '随机数发生器 (RNG)', isOn: this.rng, enable: !this.isRaspiBoard(),
+        desc: '为虚拟机提供随机数来源，加密等应用的初始化更快',
+        onChange: (v: boolean) => { this.rng = v; } })
+      ToggleRow({ label: '内存回收 (Balloon)', isOn: this.balloon, enable: !this.isRaspiBoard(),
+        desc: '虚拟机空闲时把暂用不到的内存还给设备，整机内存更宽裕',
+        onChange: (v: boolean) => { this.balloon = v; } })
+      /* v6：声音——默认开；raspi 无 PCI 且 QEMU 未模拟树莓派声卡，禁用。
+       * 自解释项，按注释判据不配 desc（旧说明是 label 复述，已删） */
+      ToggleRow({ label: '声音', isOn: this.audio, enable: !this.isRaspiBoard(),
+        onChange: (v: boolean) => { this.audio = v; } })
 
       this.stepErrorMsg()
     }
@@ -761,23 +729,13 @@ export struct VmWizard {
         Chip({ label: '导入现有镜像', active: this.diskSource === 'import', onTap: () => { this.diskSource = 'import'; } })
       }.width('100%')
       if (this.diskSource === 'new') {
-        Text(`磁盘大小: ${Math.round(this.diskGB)}GB`).fontSize(tLabel)
-        Slider({ value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
-          min: 0, max: DISK_SIZES.length - 1, step: 1 })
-          .onChange((v: number) => this.diskGB = DISK_SIZES[Math.round(v)])
-          .height(btnRow)
-        /* 说明放控件下方整宽（全局摆放规范见 uiTokens.ets 头部）。
-         * 内部 Row 必须占满整宽：只按内容宽会被外层 Column 水平居中，chips 浮在中间（实测踩过） */
-        Column({ space: sp1 }) {
-          Row({ space: sp3 }) {
-            Text('磁盘分配').fontSize(tSub).fontColor(cSub)
-            Chip({ label: '动态分配', active: this.diskAlloc === 'dynamic', onTap: () => { this.diskAlloc = 'dynamic'; } })
-            Chip({ label: '固定大小', active: this.diskAlloc === 'fixed', onTap: () => { this.diskAlloc = 'fixed'; } })
-          }.width('100%')
-          Text(this.diskAlloc === 'fixed' ? '创建即占满，写入更快' : '按需占用，用到多少占多少')
-            .fontSize(tSub).fontColor(cWeak).width('100%')
-        }
-        .alignItems(HorizontalAlign.Start)
+        SliderRow({ label: '磁盘大小', value: Math.max(0, DISK_SIZES.indexOf(this.diskGB)),
+          min: 0, max: DISK_SIZES.length - 1, step: 1,
+          format: (v: number): string => `${DISK_SIZES[Math.round(v)]}GB`,
+          onChange: (v: number) => { this.diskGB = DISK_SIZES[Math.round(v)]; } })
+        ChipRow({ label: '磁盘分配', options: ['动态分配', '固定大小'], value: this.diskAlloc === 'fixed' ? '固定大小' : '动态分配',
+          desc: this.diskAlloc === 'fixed' ? '创建即占满，写入更快' : '按需占用，用到多少占多少',
+          onChange: (v: string) => { this.diskAlloc = v === '固定大小' ? 'fixed' : 'dynamic'; } })
       } else {
         Column() {
           Row({ space: sp3 }) {
@@ -799,17 +757,11 @@ export struct VmWizard {
        * 不认；ide 是 XP/Win7 开箱即认的兼容路径。切到无关架构时该选择不会被装配
        * （fitDiskIface 收敛为 virtio）。 */
       if (this.arch === 'x86_64' || this.arch === 'i386') {
-        Column({ space: sp1 }) {
-          Row({ space: sp3 }) {
-            Text('磁盘接口').fontSize(tSub).fontColor(cSub)
-            Chip({ label: 'virtio', active: this.diskIface === 'virtio', onTap: () => { this.diskIface = 'virtio'; } })
-            Chip({ label: 'IDE', active: this.diskIface === 'ide', onTap: () => { this.diskIface = 'ide'; } })
-          }
-          .width('100%')
-          Text(this.diskIface === 'ide' ? 'Windows 免装驱动即可识别' : '性能更好，Linux 首选；Windows 需另装驱动')
-            .fontSize(tSub).fontColor(cWeak).width('100%')
-        }
-        .margin({ top: sp3 })
+        Column() {
+          ChipRow({ label: '磁盘接口', options: ['virtio', 'IDE'], value: this.diskIface,
+            desc: this.diskIface === 'ide' ? 'Windows 免装驱动即可识别' : '性能更好，Linux 首选；Windows 需另装驱动',
+            onChange: (v: string) => { this.diskIface = v as DiskIface; } })
+        }.margin({ top: sp3 })
       }
 
       /* 直接内核引导：默认折叠的高级组；选了 kernel 即绕过固件引导（-kernel） */
@@ -864,7 +816,7 @@ export struct VmWizard {
       if (this.cdromPaths.length > 0) {
         ForEach(this.cdromPaths, (p: string, idx: number) => {
           Row({ space: sp3 }) {
-            Text(idx === 0 ? `${this.baseName(p)}（启动盘）` : this.baseName(p))
+            Text(this.baseName(p))
               .fontSize(tSub).fontColor(idx === 0 ? cPrimary : cSub).layoutWeight(1)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             Button('移除').focusable(false).fontSize(tItem)
@@ -883,7 +835,7 @@ export struct VmWizard {
             .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .backgroundColor(Color.Transparent).fontColor(cPrimary)
             .onClick(() => this.pickLocalIso())
-          Button(this.ensureIsoLoading ? `下载中 ${this.isoPct}%` : `内置 Alpine (${this.archLabel(this.arch)})`)
+          Button(this.ensureIsoLoading ? `下载中 ${this.isoPct}%` : '内置 Alpine')
             .focusable(false).fontSize(tItem)
             .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
             .enabled(!this.ensureIsoLoading)
@@ -892,11 +844,8 @@ export struct VmWizard {
         Text('从光盘启动时，使用第一张 ISO 引导')
           .fontSize(tSub).fontColor(cWeak).width('100%')
       }
-      Row() {
-        Text('从光盘启动').fontSize(tLabel).layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
-          .onChange((v: boolean) => this.bootFromCdrom = v)
-      }.width('100%')
+      ToggleRow({ label: '从光盘启动', isOn: this.bootFromCdrom,
+        onChange: (v: boolean) => { this.bootFromCdrom = v; } })
 
       this.stepErrorMsg()
     }
@@ -908,23 +857,14 @@ export struct VmWizard {
   stepNet() {
     Column({ space: sp3 }) {
       SecHead({ label: '网络' })
-      Row() {
-        Text('启用网络').fontSize(tLabel).layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.netEnabled })
-          .onChange((v: boolean) => this.netEnabled = v)
-      }.width('100%')
+      ToggleRow({ label: '启用网络', isOn: this.netEnabled,
+        onChange: (v: boolean) => { this.netEnabled = v; } })
       if (this.netEnabled) {
         PortForwardEditor({ text: this.$portForwards, incomplete: this.$pfIncomplete })
-        Column() {
-          Row() {
-            Text('共享目录').fontSize(tLabel).layoutWeight(1)
-            Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
-              .onChange((v: boolean) => this.sharedFolder = v)
-          }.width('100%')
-          if (this.sharedFolder) {
-            Text('开启后虚拟机可读写设备的下载目录；需在虚拟机内挂载后使用：mkdir -p /shared && mount -t 9p -o trans=virtio shared /shared').fontSize(tSub).fontColor(cWeak)
-          }
-        }
+        /* 挂载指引只在开启后出现（沿旧交互），B 形左堆叠 */
+        ToggleRow({ label: '共享目录', isOn: this.sharedFolder,
+          desc: this.sharedFolder ? '开启后虚拟机可读写设备的下载目录；需在虚拟机内挂载后使用：mkdir -p /shared && mount -t 9p -o trans=virtio shared /shared' : '',
+          onChange: (v: boolean) => { this.sharedFolder = v; } })
         this.stepErrorMsg()
       }
     }
@@ -935,12 +875,8 @@ export struct VmWizard {
   @Builder
   stepPreview() {
     Column({ space: sp3 }) {
-      Text('名称').fontSize(tLabel).width(72)
-      TextInput({ text: this.name, placeholder: '必填' })
-        .fontSize(tItem)
-        .maxLength(60)
-        .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
-        .onChange((v: string) => this.name = v)
+      FieldRow({ label: '名称', text: this.name, placeholder: '必填', maxLength: 60,
+        onChange: (v: string) => { this.name = v; } })
       this.stepErrorMsg()
       Row() {
         Text() {

@@ -15,7 +15,7 @@ import { VmProfile, VmStore, VmArch, VgaType, VmDisk, DiskIface, NetModel, SCHEM
 import { ensureBuiltinIso } from '../lib/isoDl';
 import { isoReadable } from '../lib/fsutil';
 import { pickIsoPath } from '../lib/isoPick';
-import { Chip } from '../lib/uiWidgets';
+import { Chip, FieldRow, ValueRow, ToggleRow, ChipRow, SliderRow, InfoRow } from '../lib/uiWidgets';
 import { PortForwardEditor } from '../lib/PortForwardEditor';
 import { cPrimary, cDanger, cSub, cWeak, cBg, cCard, cBorder, cText, tCard, tLabel, tBody, tItem, tSub, tMono, rBtn, bw, btnSh, btnRow, inpH, inpBg, inpRadius, inpPadX, sp1, sp2, sp3, sp4, sp5, sp6 } from '../lib/uiTokens';
 
@@ -438,278 +438,170 @@ export struct VmEdit {
           Column({ space: sp3 }) {
             if (this.tabIdx === 0) {
               /* —— 基础 —— */
-              Row() {
-                Text('名称').fontSize(tLabel).width(72)
-                TextInput({ text: this.name })
-                  .layoutWeight(1)
-                  .fontSize(tItem)
-                  .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
-                  .onChange((v: string) => this.name = v)
-              }.width('100%')
-              Row() {
-                Text('架构').fontSize(tLabel).width(72)
-                Text(this.arch)
-                  .fontSize(tItem)
-                  .fontColor(cSub)
-                  .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).layoutWeight(1)
-                  .padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
-                  .textAlign(TextAlign.Start)
-              }.width('100%')
-              Text(`CPU 核数: ${Math.round(this.cpus)}`).fontSize(tLabel)
-              Slider({ value: this.cpus, min: 1, max: 8, step: 1 })
-                .onChange((v: number) => this.cpus = v)
-                .width('100%')
-                .height(btnRow)                
-              Text(`内存: ${Math.round(this.memoryMB)} MB`).fontSize(tLabel)
-              Slider({ value: this.memoryMB, min: 256, max: 8192, step: 256 })
-                .onChange((v: number) => this.memoryMB = v)
-                .width('100%')
-                .height(btnRow)                
-              /* v4 显卡：x86 板卡可换；virt/raspi 固定（说明行） */
-              Row({ space: sp3 }) {
-                Text('显卡').fontSize(tLabel).width(72)
-                if (this.isX86Board()) {
-                  /* ui-layout-ok: 外层「显卡」行已 width('100%')，本行是其行内 chips 段 */
-                  Row({ space: sp3 }) {
-                    ForEach(['std', 'cirrus', 'vmware', 'virtio'], (g: string) => {
-                      Chip({ label: g, active: this.vga === g, onTap: () => { this.vga = g as VgaType; } })
-                    }, (g: string) => g)
-                  }
-                } else {
-                  Text(this.isRaspiBoard() ? '板载（固定）' : 'virtio-gpu（固定）')
-                    .fontSize(tSub).fontColor(cSub).layoutWeight(1)
-                }
-              }.width('100%')            } else if (this.tabIdx === 1) {
-              /* —— 存储：容量/重建/数据盘增删在「存储管理」弹窗，此处只做开关与光盘 —— */
-              Column({ space: sp1 }) {
-                Row() {
-                  Text('系统盘').fontSize(tLabel).width(72)
-                  Column({ space: sp1 }) {
-                    Text(this.baseName(this.diskPath))
-                      .fontSize(tItem)
-                      .fontColor(cText)
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(`${this.diskFmt} · 容量 ${this.diskVirtualGB.toFixed(1)}G · 已占 ${this.diskActualGB.toFixed(1)}G`)
-                      .fontSize(tMono)
-                      .fontColor(cWeak)
-                  }
-                  .alignItems(HorizontalAlign.Start)
-                  .layoutWeight(1)
-                  Button('存储管理').focusable(false).fontSize(tItem)
-                    .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
-                    .backgroundColor(Color.Transparent).fontColor(cPrimary)
-                    .onClick(() => {
-                      const p = this.profile;
-                      if (p) {
-                        this.storageParam = p;
-                        this.showStorage = true;
-                      }
-                    })
-                }.width('100%').alignItems(VerticalAlign.Top)
-              }.alignItems(HorizontalAlign.Start)
-              /* v5：系统盘只读 + 数据盘列表（创建/导入/移除/扩容在存储弹窗） */
-              /* space 0：行尾 Toggle 组件盒自带 ~14px 下沿留白，视觉「行→说明」已等同
-               * sp2——再加 space 会变 28 反而过大（实测 layout；勿"统一"改它） */
-              Column() {
-                Row() {
-                  Text('系统盘只读').fontSize(tLabel).layoutWeight(1)
-                  Toggle({ type: ToggleType.Switch, isOn: this.diskReadonly })
-                    .onChange((v: boolean) => this.diskReadonly = v)
-                }.width('100%')
-                Text('开启后防系统盘误写；扩容、快照等管理操作不受影响').fontSize(tSub).fontColor(cWeak).width('100%')
+              FieldRow({ label: '名称', text: this.name, onChange: (v: string) => { this.name = v; } })
+              ValueRow({ label: '架构', value: this.arch })
+              SliderRow({ label: 'CPU 核数', value: this.cpus, min: 1, max: 8, step: 1,
+                onChange: (v: number) => { this.cpus = v; } })
+              SliderRow({ label: '内存', value: this.memoryMB, min: 256, max: 8192, step: 256,
+                format: (v: number): string => `${Math.round(v)} MB`,
+                onChange: (v: number) => { this.memoryMB = v; } })
+              /* v4 显卡：x86 板卡可换（ChipRow）；virt/raspi 固定 → 只读值展示 */
+              if (this.isX86Board()) {
+                ChipRow({ label: '显卡', options: ['std', 'cirrus', 'vmware', 'virtio'], value: this.vga,
+                  desc: 'cirrus/vmware 对老系统（Win9x/旧 DOS）兼容性更好；virtio 性能最好',
+                  onChange: (v: string) => { this.vga = v as VgaType; } })
+              } else {
+                ValueRow({ label: '显卡', value: this.isRaspiBoard() ? '板载（固定）' : 'virtio-gpu（固定）' })
               }
+            } else if (this.tabIdx === 1) {
+              /* —— 存储：容量/重建/数据盘增删在「存储管理」弹窗，此处只做开关与光盘 —— */
+              InfoRow({ label: '系统盘', main: this.baseName(this.diskPath),
+                sub: `${this.diskFmt} · 容量 ${this.diskVirtualGB.toFixed(1)}G · 已占 ${this.diskActualGB.toFixed(1)}G`,
+                actionLabel: '存储管理',
+                onAction: () => {
+                  const p = this.profile;
+                  if (p) {
+                    this.storageParam = p;
+                    this.showStorage = true;
+                  }
+                } })
+              /* v5：系统盘只读 + 数据盘列表（创建/导入/移除/扩容在存储弹窗） */
+              ToggleRow({ label: '系统盘只读', isOn: this.diskReadonly,
+                desc: '开启后防系统盘误写；扩容、快照等管理操作不受影响',
+                onChange: (v: boolean) => { this.diskReadonly = v; } })
 
               /* 磁盘接口（仅 x86 板卡有 IDE 南桥）：切换只影响 -drive if= 的挂载方式，
                * 盘内容不动——Windows VM 若误建为 virtio，切到 ide 即可被安装程序识别。 */
               if (this.isX86Board()) {
-                Column({ space: sp1 }) {
-                  Row({ space: sp3 }) {
-                    Text('磁盘接口').fontSize(tLabel).layoutWeight(1)
-                    Chip({ label: 'virtio', active: this.diskIface === 'virtio', onTap: () => { this.diskIface = 'virtio'; } })
-                    Chip({ label: 'IDE', active: this.diskIface === 'ide', onTap: () => { this.diskIface = 'ide'; } })
-                  }.width('100%')
-                  Text(this.diskIface === 'ide'
-                    ? 'Windows 免装驱动即可识别'
-                    : '性能更好，Linux 首选；Windows 需另装驱动')
-                    .fontSize(tSub).fontColor(cWeak).width('100%')
-                }
+                ChipRow({ label: '磁盘接口', options: ['virtio', 'IDE'], value: this.diskIface,
+                  desc: this.diskIface === 'ide' ? 'Windows 免装驱动即可识别' : '性能更好，Linux 首选；Windows 需另装驱动',
+                  onChange: (v: string) => { this.diskIface = v as DiskIface; } })
               }
 
-              Column() {
-                Row() {
-                  Text('数据盘').fontSize(tLabel).width(72)
-                  Text(this.extraDisks.length === 0 ? '未配置' : `${this.extraDisks.length} 张`)
-                    .fontSize(tSub).fontColor(cSub).layoutWeight(1)
-                  Button('存储管理').focusable(false).fontSize(tItem)
+              InfoRow({ label: '数据盘',
+                main: this.extraDisks.length === 0 ? '未配置' : `${this.extraDisks.length} 张`,
+                mainDim: this.extraDisks.length === 0,
+                actionLabel: '存储管理',
+                onAction: () => {
+                  const p = this.profile;
+                  if (p) {
+                    this.storageParam = p;
+                    this.showStorage = true;
+                  }
+                } })
+              /* 盘列表只在有盘时出现（未配置时挂一条「快照不含数据盘」注释无从谈起）；
+               * 缩进 72 对齐 InfoRow 值列。行内 Toggle 同 ToggleRow 做盒留白补偿 */
+              if (this.extraDisks.length > 0) {
+                Column({ space: sp1 }) {
+                  ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
+                    Row({ space: sp3 }) {
+                      Text(`数据盘${idx + 1}`)
+                        .fontSize(tSub).fontColor(cSub).layoutWeight(1).maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      Text(d.iface === 'ide' ? 'IDE' : 'virtio').fontSize(tSub).fontColor(cWeak)
+                      Text('只读').fontSize(tSub).fontColor(cSub)
+                      Toggle({ type: ToggleType.Switch, isOn: d.readonly })
+                        .translate({ y: 2.4 }) /* 同 ToggleRow：盒下沿留白，可见开关偏上 */
+                        .onChange((v: boolean) => {
+                          const next = this.extraDisks.slice();
+                          next[idx] = { path: d.path, readonly: v, iface: d.iface };
+                          this.extraDisks = next;
+                        })
+                    }.width('100%')
+                  }, (d: VmDisk) => d.path)
+                  Text('快照仅含系统盘，数据盘不参与').fontSize(tSub).fontColor(cWeak).width('100%')
+                }
+                .alignItems(HorizontalAlign.Start)
+                .width('100%')
+                .padding({ left: 72 })
+              }
+              /* 光盘 ISO 行：整块上下堆叠——标签 / 文件名（通栏，移除落行尾最右，
+               * 与上方「存储管理」同一右缘）/ 动作钮一行两个。不放左右两列：挂载态
+               * 下移除吊在文件名与右列之间三块脱节（2026-10-17 真机打回）；空态
+               * 不渲染「无」占位——两枚动作钮已说明状态（用户定）。 */
+              Column({ space: sp1 }) {
+                Text('光盘 ISO').fontSize(tLabel)
+                if (this.cdromPaths.length > 0) {
+                  ForEach(this.cdromPaths, (p: string, idx: number) => {
+                    Row({ space: sp3 }) {
+                      Text(this.baseName(p))
+                        .fontSize(tItem)
+                        .fontColor(idx === 0 ? cPrimary : cSub)
+                        .layoutWeight(1)
+                        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      Button('移除').focusable(false).fontSize(tItem)
+                        .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+                        .backgroundColor(Color.Transparent).fontColor(cDanger)
+                        .onClick(() => this.removeIso(idx))
+                    }
+                    .width('100%')
+                  }, (p: string, idx: number) => `${idx}:${p}`)
+                }
+                /* ui-layout-ok: 动作钮一行两个（用户定稿：水平放置即可） */
+                Row({ space: sp3 }) {
+                  Button('选择文件').focusable(false).fontSize(tItem)
                     .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
                     .backgroundColor(Color.Transparent).fontColor(cPrimary)
-                    .onClick(() => {
-                      const p = this.profile;
-                      if (p) {
-                        this.storageParam = p;
-                        this.showStorage = true;
-                      }
-                    })
-                }.width('100%').alignItems(VerticalAlign.Top)
-                ForEach(this.extraDisks, (d: VmDisk, idx: number) => {
-                  Row({ space: sp3 }) {
-                    Text(`数据盘${idx + 1}`)
-                      .fontSize(tSub).fontColor(cSub).layoutWeight(1).maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(d.iface === 'ide' ? 'IDE' : 'virtio').fontSize(tSub).fontColor(cWeak)
-                    Text('只读').fontSize(tSub).fontColor(cSub)
-                    Toggle({ type: ToggleType.Switch, isOn: d.readonly })
-                      .onChange((v: boolean) => {
-                        const next = this.extraDisks.slice();
-                        next[idx] = { path: d.path, readonly: v, iface: d.iface };
-                        this.extraDisks = next;
-                      })
-                  }.width('100%')                }, (d: VmDisk) => d.path)
-                Text('快照仅含系统盘，数据盘不参与').fontSize(tSub).fontColor(cWeak).width('100%')
-              }.alignItems(HorizontalAlign.Start).width('100%')
-              /* 光盘 ISO 行：与系统盘/数据盘同构（label 72 在左、内容列在右），
-               * 曾用「标题一行 + 内容一行」的上下排列，同区块两种范式不齐被打回 */
-              Row() {
-                Text('光盘 ISO').fontSize(tLabel).width(72)
-                Column({ space: sp1 }) {
-                  if (this.cdromPaths.length > 0) {
-                    ForEach(this.cdromPaths, (p: string, idx: number) => {
-                      Row({ space: sp3 }) {
-                        Text(idx === 0 ? `${this.baseName(p)}（启动盘）` : this.baseName(p))
-                          .fontSize(tItem)
-                          .fontColor(idx === 0 ? cPrimary : cSub)
-                          .layoutWeight(1)
-                          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                        Button('移除').focusable(false).fontSize(tItem)
-                          .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
-                          .backgroundColor(Color.Transparent).fontColor(cDanger)
-                          .onClick(() => this.removeIso(idx))
-                      }
-                      .width('100%')
-                    }, (p: string, idx: number) => `${idx}:${p}`)
-                  } else {
-                    Text('无').fontSize(tSub).fontColor(cSub)
-                  }
-                  Row({ space: sp3 }) {
-                    Button('选择文件').focusable(false).fontSize(tItem)
-                      .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
-                      .backgroundColor(Color.Transparent).fontColor(cPrimary)
-                      .onClick(() => this.pickLocalIso())
-                    Button(this.ensureIsoLoading ? `下载中 ${this.isoPct}%` : `内置 Alpine (${this.arch})`)
-                      .focusable(false).fontSize(tItem)
-                      .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
-                      .backgroundColor(Color.Transparent).fontColor(cPrimary)
-                      .enabled(!this.ensureIsoLoading)
-                      .onClick(() => this.pickBuiltinIso())
-                  }.width('100%')
+                    .onClick(() => this.pickLocalIso())
+                  Button(this.ensureIsoLoading ? `下载中 ${this.isoPct}%` : '内置 Alpine')
+                    .focusable(false).fontSize(tItem)
+                    .height(btnRow).borderRadius(rBtn).padding({ left: sp3, right: sp3 })
+                    .backgroundColor(Color.Transparent).fontColor(cPrimary)
+                    .enabled(!this.ensureIsoLoading)
+                    .onClick(() => this.pickBuiltinIso())
                 }
-                .alignItems(HorizontalAlign.Start).layoutWeight(1)
-              }.width('100%').alignItems(VerticalAlign.Top)
-              /* 行必须撑满：Text.layoutWeight 只有行有确定宽度时才把 Toggle 推到右缘 */
-              Row() {
-                Text(this.hasKernel() ? '从光盘启动（内核引导时无效）' : '从光盘启动')
-                  .fontSize(tLabel).layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.bootFromCdrom })
-                  .enabled(!this.hasKernel())
-                  .onChange((v: boolean) => this.bootFromCdrom = v)
-              }.width('100%')            } else if (this.tabIdx === 2) {
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
+              ToggleRow({ label: this.hasKernel() ? '从光盘启动（内核引导时无效）' : '从光盘启动',
+                isOn: this.bootFromCdrom, enable: !this.hasKernel(),
+                onChange: (v: boolean) => { this.bootFromCdrom = v; } })
+            } else if (this.tabIdx === 2) {
               /* —— 网络 —— */
-              Row() {
-                Text('启用网络').fontSize(tLabel).layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.netEnabled })
-                  .onChange((v: boolean) => this.netEnabled = v)
-              }.width('100%')
+              ToggleRow({ label: '启用网络', isOn: this.netEnabled,
+                onChange: (v: boolean) => { this.netEnabled = v; } })
               if (this.netEnabled) {
                 Column({ space: sp1 }) {
                   PortForwardEditor({ text: this.$portForwards, incomplete: this.$pfIncomplete })
                 }.alignItems(HorizontalAlign.Start)
-                Column() {
-                  Row() {
-                    Text('共享目录').fontSize(tLabel).layoutWeight(1)
-                    Toggle({ type: ToggleType.Switch, isOn: this.sharedFolder })
-                      .onChange((v: boolean) => this.sharedFolder = v)
-                  }.width('100%').padding({ left: 0, right: 0 })
-                  Text('开启后虚拟机可读写设备的下载目录；需在虚拟机内挂载后使用：mkdir -p /shared && mount -t 9p -o trans=virtio shared /shared').fontSize(tSub).fontColor(cWeak)
-                }.alignItems(HorizontalAlign.Start)                /* 网卡型号（仅 x86 板卡可切）：rtl8139 是 XP/Win7 唯一双 in-box 驱动的
+                /* 共享目录：desc 是超一行的挂载指引，B 形左列换行（开关随整块居中） */
+                ToggleRow({ label: '共享目录', isOn: this.sharedFolder,
+                  desc: '开启后虚拟机可读写设备的下载目录；需在虚拟机内挂载后使用：mkdir -p /shared && mount -t 9p -o trans=virtio shared /shared',
+                  onChange: (v: boolean) => { this.sharedFolder = v; } })
+                /* 网卡型号（仅 x86 板卡可切）：rtl8139 是 XP/Win7 唯一双 in-box 驱动的
                  * 网卡，性能弱于 virtio；Linux 用 virtio。 */
                 if (this.isX86Board()) {
-                  Column({ space: sp1 }) {
-                    Row({ space: sp3 }) {
-                      Text('网卡型号').fontSize(tLabel).layoutWeight(1)
-                      Chip({ label: 'virtio', active: this.netModel === 'virtio', onTap: () => { this.netModel = 'virtio'; } })
-                      Chip({ label: 'rtl8139', active: this.netModel === 'rtl8139', onTap: () => { this.netModel = 'rtl8139'; } })
-                    }.width('100%')
-                    Text(this.netModel === 'rtl8139'
-                      ? 'Windows 默认'
-                      : 'Linux 默认；Windows 需装 virtio-win 驱动')
-                      .fontSize(tSub).fontColor(cWeak).width('100%')
-                  }.alignItems(HorizontalAlign.Start)                }
+                  ChipRow({ label: '网卡型号', options: ['virtio', 'rtl8139'], value: this.netModel,
+                    desc: this.netModel === 'rtl8139' ? 'Windows 默认' : 'Linux 默认；Windows 需装 virtio-win 驱动',
+                    onChange: (v: string) => { this.netModel = v as NetModel; } })
+                }
               }
             } else {
               /* —— 高级 —— */
-              /* 声音（raspi 无模拟声卡禁用） */
-              Column() {
-                Row() {
-                  Text('声音').fontSize(tLabel).layoutWeight(1)
-                  Toggle({ type: ToggleType.Switch, isOn: this.audio })
-                    .enabled(!this.isRaspiBoard())
-                    .onChange((v: boolean) => this.audio = v)
-                }.width('100%')
-                Text('开启后虚拟机里的声音通过设备的扬声器/耳机播放').fontSize(tSub).fontColor(cWeak)
-                  .width('100%')
-              }
+              /* 声音（raspi 无模拟声卡禁用）。自解释项，按注释判据不配 desc（旧说明
+               * 是 label 复述，已删——判据制示例） */
+              ToggleRow({ label: '声音', isOn: this.audio, enable: !this.isRaspiBoard(),
+                onChange: (v: boolean) => { this.audio = v; } })
 
-              /* v4 系统增强：RNG/balloon（raspi 无 PCI 禁用） */
-              Column() {
-                Row() {
-                  Text('随机数发生器 (RNG)').fontSize(tLabel).layoutWeight(1)
-                  Toggle({ type: ToggleType.Switch, isOn: this.rng })
-                    .enabled(!this.isRaspiBoard())
-                    .onChange((v: boolean) => this.rng = v)
-                }.width('100%')
-                Text('为虚拟机提供随机数来源，加密等功能就绪更快；一般无需开启').fontSize(tSub).fontColor(cWeak)
-                  .width('100%')
+              /* v4 系统增强：RNG/balloon（raspi 无 PCI 禁用）。术语项，判据1 配 desc */
+              ToggleRow({ label: '随机数发生器 (RNG)', isOn: this.rng, enable: !this.isRaspiBoard(),
+                desc: '为虚拟机提供随机数来源，加密等功能就绪更快；一般无需开启',
+                onChange: (v: boolean) => { this.rng = v; } })
+              ToggleRow({ label: '内存回收 (Balloon)', isOn: this.balloon, enable: !this.isRaspiBoard(),
+                desc: '虚拟机空闲时归还部分内存给设备；一般无需开启',
+                onChange: (v: boolean) => { this.balloon = v; } })
+              /* v6：GDB 调试后端。连接指引挂在开关行左堆叠（desc 一律在标签侧）；
+               * 监听端口是纯输入行（FieldRow 不设 desc） */
+              ToggleRow({ label: 'GDB 调试', isOn: this.gdbOn,
+                desc: '在电脑上连接需先做端口转发：hdc fport tcp:' + this.gdbPortText + ' tcp:' + this.gdbPortText + '；然后在 GDB 里执行 target remote :' + this.gdbPortText,
+                onChange: (v: boolean) => { this.gdbOn = v; } })
+              if (this.gdbOn) {
+                FieldRow({ label: '监听端口', text: this.gdbPortText,
+                  onChange: (v: string) => { this.gdbPortText = v; } })
               }
-              Column() {
-                Row() {
-                  Text('内存回收 (Balloon)').fontSize(tLabel).layoutWeight(1)
-                  Toggle({ type: ToggleType.Switch, isOn: this.balloon })
-                    .enabled(!this.isRaspiBoard())
-                    .onChange((v: boolean) => this.balloon = v)
-                }.width('100%')
-                Text('虚拟机空闲时归还部分内存给设备；一般无需开启').fontSize(tSub).fontColor(cWeak)
-                  .width('100%')
-              }
-              /* v6：GDB 调试后端（开机后可连 `gdb target remote :端口`） */
-              Column() {
-                Row() {
-                  Text('GDB 调试').fontSize(tLabel).layoutWeight(1)
-                  Toggle({ type: ToggleType.Switch, isOn: this.gdbOn })
-                    .onChange((v: boolean) => this.gdbOn = v)
-                }.width('100%')
-                if (this.gdbOn) {
-                  Row() {
-                    Text('监听端口').fontSize(tLabel).width(96)
-                    TextInput({ text: this.gdbPortText })
-                      .layoutWeight(1)
-                      .fontSize(tItem)
-                      .height(inpH).borderRadius(inpRadius).backgroundColor(inpBg).padding({ left: inpPadX, right: inpPadX, top: sp1, bottom: sp1 })
-                      .onChange((v: string) => this.gdbPortText = v)
-                  }.width('100%')
-                  Text('在电脑上连接需先做端口转发：hdc fport tcp:' + this.gdbPortText + ' tcp:' + this.gdbPortText + '；然后在 GDB 里执行 target remote :' + this.gdbPortText).fontSize(tSub).fontColor(cWeak)
-                    .width('100%')
-                }
-              }
-              Column() {
-                Row() {
-                  Text('RTC 本地时区').fontSize(tLabel).layoutWeight(1)
-                  Toggle({ type: ToggleType.Switch, isOn: this.rtcLocal })
-                    .onChange((v: boolean) => this.rtcLocal = v)
-                }.width('100%')
-                Text('虚拟机内的时钟跟随设备时区显示，Windows 虚拟机建议开启').fontSize(tSub).fontColor(cWeak)
-                  .width('100%')
-              }
+              ToggleRow({ label: 'RTC 本地时区', isOn: this.rtcLocal,
+                desc: '虚拟机内的时钟跟随设备时区显示，Windows 虚拟机建议开启',
+                onChange: (v: boolean) => { this.rtcLocal = v; } })
 
               /* 内核引导：已配 kernel 时展示文件名 + 可编辑的内核参数（-append）。
                * kernel/initrd 文件本身创建后不可更换（重建 VM 走向导） */
